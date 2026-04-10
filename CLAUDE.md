@@ -147,11 +147,12 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Cumple:** CR5 — trazabilidad completa, evals, $0/mes (Postgres compartido con Supabase).
 - **Revisar cuando:** Volumen de traces sature el Postgres compartido. Alternativa: LangFuse Cloud (free tier 50K traces/mes).
 
-### D6. Canal: WhatsApp Business API via 360Dialog o Wati
+### D6. Canal: WhatsApp Business API — Meta Cloud API directo
 
 - **Fecha:** Abril 2026
-- **Cumple:** CR6 completo — API oficial, multimodal, templates, webhooks, ~$0.005/msg utility Ecuador.
-- **Revisar cuando:** Meta cambie pricing >50% o condiciones de uso. BSP alternativo: Twilio.
+- **Cumple:** CR6 completo — API oficial, multimodal, templates, webhooks.
+- **H0:** Meta Cloud API directo — sin intermediario (ni Wati ni 360Dialog). n8n conecta al webhook nativo de Meta. Mensajes user-initiated dentro de ventana 24h = $0. phone_number_id y WABA_ID portables a H1.
+- **Revisar cuando:** Volumen supere tier no verificado de Meta, o se requiera verificación formal de empresa en H1. BSP alternativo: 360Dialog o Wati.
 
 ---
 
@@ -217,3 +218,12 @@ wasagro-architecture/
 2. `mem_search` en engram para decisiones recientes
 3. Si necesitas contexto de Notion, leer via MCP (no copiar)
 4. Preguntar: "¿Qué vamos a construir hoy?" — no asumir
+
+## Sincronización automática
+
+Al completar cada fase SDD (explore → propose → approve → build → done):
+
+1. `git add . && git commit && git push origin main`
+2. Actualizar páginas de Notion afectadas vía Notion MCP
+3. Al final de cada página de Notion actualizada, agregar: `🤖 Actualizado automáticamente por Claude Code — [fecha] — [fase SDD]`
+4. Registrar en engram qué páginas de Notion se actualizaron y qué cambió
