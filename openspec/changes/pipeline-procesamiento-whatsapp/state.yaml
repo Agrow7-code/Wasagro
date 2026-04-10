@@ -1,5 +1,5 @@
 change: pipeline-procesamiento-whatsapp
-status: proposing
+status: tasking
 artifact_store: hybrid
 execution_mode: interactive
 started: "2026-04-09"
@@ -7,9 +7,9 @@ started: "2026-04-09"
 phases:
   explore: complete
   propose: complete
-  spec: pending
-  design: pending
-  tasks: pending
+  spec: complete
+  design: complete
+  tasks: complete
   apply: pending
   verify: pending
   archive: pending
