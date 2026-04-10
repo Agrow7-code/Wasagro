@@ -1,0 +1,67 @@
+version: "3.8"
+
+# =============================================================================
+# Wasagro H0 — LangFuse Self-Hosted
+# Usa el Postgres de Supabase como backend de DB.
+# Ejecutar: docker-compose up -d
+# =============================================================================
+
+services:
+  langfuse-server:
+    image: langfuse/langfuse:2
+    container_name: wasagro-langfuse
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # ── Base ──────────────────────────────────────────────────────────────
+      NODE_ENV: production
+      NEXTAUTH_URL: ${LANGFUSE_HOST}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+
+      # ── Database (Supabase Postgres compartido) ────────────────────────
+      DATABASE_URL: ${DATABASE_URL}
+
+      # ── Auth (LangFuse keys generados en UI tras primer login) ──────────
+      # Estos se configuran en la UI tras crear el proyecto.
+      # Las variables de entorno aquí son para el SDK cliente (n8n).
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+
+      # ── Salt para hashing ────────────────────────────────────────────────
+      SALT: ${SALT}
+
+      # ── Feature flags ────────────────────────────────────────────────────
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+
+      # ── Telemetría (desactivar para producción propia) ───────────────────
+      TELEMETRY_ENABLED: "false"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Worker para procesamiento asíncrono de eventos ──────────────────────
+  langfuse-worker:
+    image: langfuse/langfuse-worker:2
+    container_name: wasagro-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      langfuse-server:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      SALT: ${SALT}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+
+# =============================================================================
+# Nota sobre Redis:
+# LangFuse 2.x puede usar Redis para queue de eventos en producción.
+# En H0 con volumen bajo (<5 fincas), la queue en memoria es suficiente.
+# Agregar Redis cuando supere 50K trazas/mes o se detecte pérdida de eventos.
+# =============================================================================
