@@ -20,9 +20,11 @@ CREATE INDEX idx_nsm_eventos ON eventos_campo(finca_id, created_at)
 -- Lookup de lotes activos por finca (inyección en system prompt de extracción)
 CREATE INDEX idx_lotes_finca_activos ON lotes(finca_id) WHERE activo = true;
 
--- Eventos por finca en última semana (flujo-04, reporte semanal)
-CREATE INDEX idx_eventos_finca_semana ON eventos_campo(finca_id, created_at DESC)
-    WHERE created_at > NOW() - INTERVAL '7 days';
+-- Eventos por finca ordenados por fecha (flujo-04, reporte semanal)
+-- Nota: PostgreSQL no permite NOW() en predicados de índices parciales (función volátil).
+-- El filtro temporal se aplica en la query, no en el índice.
+-- idx_eventos_finca_fecha en 01-schema-core.sql ya cubre (finca_id, fecha_evento).
+CREATE INDEX idx_eventos_finca_created ON eventos_campo(finca_id, created_at DESC);
 
 -- Sesiones expiradas para cleanup (GC periódico)
 CREATE INDEX idx_sesiones_expired ON sesiones_activas(expires_at)
