@@ -10,6 +10,6 @@ phases:
   spec: complete
   design: complete
   tasks: complete
-  apply: pending
+  apply: in-progress
   verify: pending
   archive: pending
