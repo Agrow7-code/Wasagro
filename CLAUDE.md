@@ -12,15 +12,23 @@ Wasagro es un sistema operativo de campo agrícola AI-first. Captura datos en fi
 
 ## SSOT — Dónde vive cada cosa
 
-| Capa | Herramienta | Qué vive ahí | Cómo acceder |
+| Capa | Herramienta | Qué vive ahí | Audiencia |
 |---|---|---|---|
-| Producto (qué, por qué, para quién) | **Notion** | Manual Maestro, hipótesis, riesgos, pipeline, decisiones | MCP Notion — nunca copiar, siempre referenciar |
-| Técnica (cómo, qué se construyó) | **GitHub** (este repo) | Schema SQL, docs técnicos, flujos, código | Leer directamente |
-| Steering de desarrollo | **CLAUDE.md** (este archivo) | Principios, criterios, decisiones actuales | Se lee automáticamente al inicio |
-| Code review | **AGENTS.md** | Guardrails que GGA verifica en cada commit | GGA lo lee en pre-commit |
-| Memoria persistente | **Engram** | Decisiones técnicas, errores, aprendizajes entre sesiones | MCP engram: mem_search, mem_save |
+| Producto (qué, por qué, para quién) | **Notion** | Manual Maestro, hipótesis H0, pipeline ventas, notas de campo, user research | Stakeholders, exportadoras, equipo no-técnico |
+| Técnica (cómo, qué se construyó) | **GitHub: Agrow7-code/Wasagro** | Schema SQL, código TypeScript, prompts, docs de arquitectura, ADRs | Ingenieros, Claude Code |
+| Steering de desarrollo | **CLAUDE.md** (este archivo) | Principios, criterios de evaluación, decisiones actuales | Claude Code al inicio de sesión |
+| Code review | **AGENTS.md** | Guardrails que GGA verifica en cada commit | GGA pre-commit |
+| Memoria persistente | **Engram** | Decisiones, bugs, aprendizajes entre sesiones de Claude | Claude Code entre sesiones |
 
-**Regla anti-duplicación:** Si un dato ya vive en Notion o en otro archivo del repo, NO lo copies aquí. Referencia la ubicación.
+**Regla anti-silo (CRÍTICA):**
+- ¿Lo lee un agricultor, exportadora, o stakeholder no-técnico? → **Notion únicamente**
+- ¿Lo lee un ingeniero o Claude Code? → **GitHub únicamente**
+- ¿Es continuidad de contexto para Claude entre sesiones? → **Engram únicamente**
+- **NUNCA duplicar el mismo dato en dos sistemas.** Si está en GitHub, Notion referencia el link, no copia el contenido.
+
+**Repos activos:**
+- `Agrow7-code/Wasagro` — repo principal y único activo. Todo vive aquí.
+- `Agrow7-code/wasagro-architecture` — **ARCHIVADO**. Sirvió para la fase de planificación inicial. No recibe más commits.
 
 ---
 
@@ -71,14 +79,15 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - Costo < $80/mes a 100 fincas activas
 - Hosted/managed (equipo de 1-2 personas)
 
-### CR2. Orquestador de flujos
+### CR2. Servicio backend (orquestador)
 
-- Webhooks HTTP para recibir mensajes de WhatsApp Business API
-- Llamadas a APIs externas (LLM, STT, WhatsApp)
-- Manejo de errores con retry y logging
-- Flujos editables sin redespliegue completo
-- Visual o declarativo preferible (reduce bus factor)
-- Costo < $50/mes en H0
+- Recibir webhooks HTTP de WhatsApp Business API con respuesta <1s
+- Llamadas a APIs externas (LLM, STT, WhatsApp Meta Cloud API)
+- Manejo de errores con retry, dead-letter y logging estructurado
+- Lógica de negocio testeable (unit + integration tests)
+- Estado conversacional manejable (lectura de Supabase en <100ms)
+- Deploy desde GitHub sin downtime
+- Costo < $10/mes en H0
 
 ### CR3. Modelo LLM de texto
 
@@ -123,11 +132,14 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Cumple:** CR1 completo — PostGIS, JSONB, Auth, RLS, $25/mes, managed.
 - **Revisar cuando:** Volumen >8GB DB o >250GB storage, o necesidad de graph queries. Estimado: >100 fincas.
 
-### D2. Orquestador: n8n
+### D2. Servicio backend: Hono (TypeScript) en Railway
 
 - **Fecha:** Abril 2026
-- **Cumple:** CR2 completo — webhooks, APIs, retry, visual, $20/mes.
-- **Revisar cuando:** Cada flujo requiera custom code nodes, o latencia de n8n añada >5s al pipeline. Alternativas: Inngest, Temporal, TypeScript custom.
+- **Reemplaza:** n8n — descartado porque la lógica de negocio de Wasagro (estado conversacional, scoring de confianza, routing por tipo de evento, integración LangFuse) no es orquestable limpiamente en nodos visuales. Cualquier lógica no trivial terminaba como código TypeScript dentro de n8n sin poder testearse.
+- **Cumple:** CR2 completo — webhook directo, TypeScript nativo, retry manejable en código, deploy desde GitHub, ~$5/mes en Railway Starter.
+- **Stack:** Hono + TypeScript + Zod (validación de payloads) + Railway (hosting).
+- **Ventajas concretas:** lógica testeable con Vitest, diff legible en git, LangFuse SDK directo, estado conversacional como query a Supabase.
+- **Revisar cuando:** Volumen requiera workers distribuidos o colas de mensajes (>500 eventos/día). Alternativa: Inngest (añade queue + retry declarativo sin reemplazar el código).
 
 ### D3. LLM de texto: GPT-4o Mini
 
@@ -151,28 +163,34 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 
 - **Fecha:** Abril 2026
 - **Cumple:** CR6 completo — API oficial, multimodal, templates, webhooks.
-- **H0:** Meta Cloud API directo — sin intermediario (ni Wati ni 360Dialog). n8n conecta al webhook nativo de Meta. Mensajes user-initiated dentro de ventana 24h = $0. phone_number_id y WABA_ID portables a H1.
+- **H0:** Meta Cloud API directo — sin intermediario (ni Wati ni 360Dialog). El servicio Hono recibe el webhook nativo de Meta en `POST /webhook/whatsapp`. Mensajes user-initiated dentro de ventana 24h = $0. phone_number_id y WABA_ID portables a H1.
 - **Revisar cuando:** Volumen supere tier no verificado de Meta, o se requiera verificación formal de empresa en H1. BSP alternativo: 360Dialog o Wati.
 
 ---
 
 ## Estructura del repo
 
+Repo único: `Agrow7-code/Wasagro`
+
 ```
-wasagro-architecture/
-├── CLAUDE.md              ← Este archivo
-├── AGENTS.md              ← Reglas para GGA
-├── .gga                   ← Config de GGA
-├── backend/
-│   └── sql/
-│       └── 01-schema-core.sql
+Wasagro/
+├── CLAUDE.md                        ← Steering para Claude Code
+├── AGENTS.md                        ← Guardrails GGA
+├── src/
+│   ├── webhook/                     ← Handler WhatsApp (recibe, valida, despacha)
+│   ├── pipeline/                    ← STT → LLM → extracción → Supabase
+│   ├── agents/                      ← Lógica conversacional, estado, scoring
+│   ├── integrations/                ← OpenAI, Supabase, Meta API, LangFuse
+│   └── types/                       ← Zod schemas + TypeScript types
+├── supabase/
+│   └── migrations/                  ← SQL numeradas (01-schema-core.sql, etc.)
+├── prompts/                         ← System prompts del agente Wasagro
 ├── docs/
 │   ├── 01-problema-y-contexto.md
-│   ├── 02-arquitectura-ai-first.md
-│   ├── 07-costos-y-modelo-economico.md  ← ⚠️ WhatsApp pricing desactualizado, ver Notion
-│   └── 08-roadmap-mvp-v1-v2.md
-├── flows/                 ← Flujos del orquestador
-└── prompts/               ← System prompts del agente Wasagro
+│   ├── 02-arquitectura.md
+│   └── decisions/                   ← ADRs (Architecture Decision Records)
+│       └── 001-hono-over-n8n.md     ← Por qué eliminamos n8n
+└── tests/
 ```
 
 ## Convenciones de código
@@ -191,10 +209,12 @@ wasagro-architecture/
 - Vocabulario prohibido: "base de datos", "JSON", "tipo de evento", "sistema", "plataforma", "registrado exitosamente", "reformular"
 - Tuteo Ecuador/Guatemala. Máx 3 líneas. Emojis solo ✅ ⚠️.
 
-### Flujos del orquestador
+### Servicio backend (Hono/TypeScript)
 
-- Un flujo por caso de uso
-- Nodos con nombre descriptivo en español
+- Un handler por caso de uso en `src/pipeline/`
+- Nombres de funciones en español descriptivo: `procesarReporteVoz`, `onboardarFinca`
+- Toda lógica de negocio tiene test unitario en `tests/`
+- Nunca lógica en el handler del webhook — solo recibir, validar con Zod, despachar
 
 ## Glosario de campo
 
@@ -219,11 +239,46 @@ wasagro-architecture/
 3. Si necesitas contexto de Notion, leer via MCP (no copiar)
 4. Preguntar: "¿Qué vamos a construir hoy?" — no asumir
 
-## Sincronización automática
+## Gobernanza — Reglas de sincronización
 
-Al completar cada fase SDD (explore → propose → approve → build → done):
+### Qué va a cada sistema
 
-1. `git add . && git commit && git push origin main`
-2. Actualizar páginas de Notion afectadas vía Notion MCP
-3. Al final de cada página de Notion actualizada, agregar: `🤖 Actualizado automáticamente por Claude Code — [fecha] — [fase SDD]`
-4. Registrar en engram qué páginas de Notion se actualizaron y qué cambió
+| Tipo de cambio | GitHub | Notion | Engram |
+|---|---|---|---|
+| Código nuevo / modificado | commit | — | si decisión no-obvia |
+| Schema SQL | migration numerada | — | — |
+| Decisión de arquitectura | `docs/decisions/NNN-titulo.md` | referencia al ADR | mem_save |
+| Cambio en system prompt | `prompts/` | — | — |
+| Hipótesis de producto nueva | — | crear página | — |
+| Resultado de validación H0 | — | actualizar hipótesis | mem_save si aprendizaje técnico |
+| Bug fix no-obvio | fix + commit | — | mem_save con root cause |
+
+### Sincronización al completar cada tarea
+
+1. `git add [archivos específicos] && git commit && git push origin main`
+2. Si afecta arquitectura: crear o actualizar ADR en `docs/decisions/`
+3. Si afecta documentación de producto para stakeholders: actualizar Notion vía MCP
+4. Al final de cada página de Notion actualizada: `🤖 Actualizado por Claude Code — [fecha]`
+5. Si se tomó una decisión técnica importante: `mem_save` en Engram
+
+### ADR — Architecture Decision Records
+
+Cada decisión técnica importante que reemplaza algo anterior requiere un ADR en `docs/decisions/`:
+
+```markdown
+# NNN — Título de la decisión
+
+**Fecha:** YYYY-MM-DD
+**Estado:** Aceptada | Reemplazada por NNN+1
+
+## Contexto
+Por qué surgió esta decisión.
+
+## Decisión
+Qué se decidió hacer.
+
+## Consecuencias
+Qué cambia, qué se gana, qué se pierde.
+```
+
+El primer ADR pendiente: `001-hono-over-n8n.md`.
