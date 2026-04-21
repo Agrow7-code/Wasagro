@@ -6,11 +6,11 @@
 
 | Trigger | Skill | Path |
 |---------|-------|------|
-| When creating a PR, opening a PR, or preparing changes for review | branch-pr | C:/Users/greta/.claude/skills/branch-pr/SKILL.md |
-| When writing Go tests, using teatest, or adding test coverage | go-testing | C:/Users/greta/.claude/skills/go-testing/SKILL.md |
-| When creating a GitHub issue, reporting a bug, or requesting a feature | issue-creation | C:/Users/greta/.claude/skills/issue-creation/SKILL.md |
-| When user says "judgment day", "dual review", "doble review", "juzgar" | judgment-day | C:/Users/greta/.claude/skills/judgment-day/SKILL.md |
-| When user asks to create a new skill, add agent instructions, or document patterns for AI | skill-creator | C:/Users/greta/.claude/skills/skill-creator/SKILL.md |
+| When creating a PR, opening a PR, or preparing changes for review | branch-pr | C:/Users/henry/.claude/skills/branch-pr/SKILL.md |
+| When writing Go tests, using teatest, or adding test coverage | go-testing | C:/Users/henry/.claude/skills/go-testing/SKILL.md |
+| When creating a GitHub issue, reporting a bug, or requesting a feature | issue-creation | C:/Users/henry/.claude/skills/issue-creation/SKILL.md |
+| When user says "judgment day", "dual review", "doble review", "juzgar" | judgment-day | C:/Users/henry/.claude/skills/judgment-day/SKILL.md |
+| When user asks to create a new skill, add agent instructions, or document patterns for AI | skill-creator | C:/Users/henry/.claude/skills/skill-creator/SKILL.md |
 
 ## Compact Rules
 
@@ -21,6 +21,7 @@ Pre-digested rules per skill. Delegators copy matching blocks into sub-agent pro
 - Every PR MUST have exactly one `type:*` label
 - Automated checks must pass before merge
 - Blank PRs without issue linkage will be blocked by GitHub Actions
+- Branch naming: `type/description` lowercase, only `a-z0-9._-`
 
 ### go-testing
 - Use table-driven tests (`[]struct{ name, input, want }`) as the standard pattern
@@ -54,7 +55,7 @@ Pre-digested rules per skill. Delegators copy matching blocks into sub-agent pro
 
 | File | Path | Notes |
 |------|------|-------|
-| AGENTS.md | AGENTS.md | GGA guardrails — 5 rules verified on every commit |
+| AGENTS.md | AGENTS.md | GGA guardrails — 3 rules verified on every commit |
 | CLAUDE.md | CLAUDE.md | Project steering — 3 layers: principles, criteria, decisions |
 
 Read the convention files listed above for project-specific patterns and rules.

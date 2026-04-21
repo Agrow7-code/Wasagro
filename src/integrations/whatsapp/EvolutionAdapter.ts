@@ -1,0 +1,84 @@
+import { createHmac, timingSafeEqual } from 'node:crypto'
+import { z } from 'zod'
+import type { Context } from 'hono'
+import type { IWhatsAppAdapter } from './IWhatsAppAdapter.js'
+import type { NormalizedMessage } from './NormalizedMessage.js'
+
+const EvolutionPayloadSchema = z.object({
+  event: z.string(),
+  instance: z.string(),
+  data: z.object({
+    key: z.object({
+      remoteJid: z.string(),
+      fromMe: z.boolean(),
+      id: z.string(),
+    }),
+    message: z.object({
+      conversation: z.string().optional(),
+      audioMessage: z.object({
+        url: z.string(),
+        mimetype: z.string(),
+        seconds: z.number().optional(),
+      }).optional(),
+      imageMessage: z.object({
+        url: z.string(),
+        mimetype: z.string(),
+        caption: z.string().optional(),
+      }).optional(),
+    }),
+    messageTimestamp: z.number(),
+    pushName: z.string().optional(),
+  }),
+})
+
+interface EvolutionAdapterConfig {
+  secret: string
+}
+
+export class EvolutionAdapter implements IWhatsAppAdapter {
+  readonly #secret: string
+
+  constructor(config: EvolutionAdapterConfig) {
+    this.#secret = config.secret
+  }
+
+  async verificarWebhook(c: Context): Promise<boolean> {
+    try {
+      const body = await c.req.raw.clone().text()
+      const signature = c.req.header('x-evolution-signature') ?? ''
+      const expected = createHmac('sha256', this.#secret).update(body).digest('hex')
+      const sigBuffer = Buffer.from(signature)
+      const expBuffer = Buffer.from(expected)
+      if (sigBuffer.length !== expBuffer.length) return false
+      return timingSafeEqual(sigBuffer, expBuffer)
+    } catch (err) {
+      console.error('[EvolutionAdapter] Error en verificarWebhook:', err)
+      return false
+    }
+  }
+
+  parsearMensaje(payload: unknown): NormalizedMessage | null {
+    const parsed = EvolutionPayloadSchema.safeParse(payload)
+    if (!parsed.success) return null
+
+    const { data } = parsed.data
+    const from = data.key.remoteJid.replace(/@.*$/, '')
+    const base = {
+      wamid: data.key.id,
+      from,
+      timestamp: new Date(data.messageTimestamp * 1000),
+      rawPayload: payload,
+    }
+
+    if (data.message.conversation) {
+      return { ...base, tipo: 'texto', texto: data.message.conversation }
+    }
+    if (data.message.audioMessage) {
+      return { ...base, tipo: 'audio', audioUrl: data.message.audioMessage.url }
+    }
+    if (data.message.imageMessage) {
+      return { ...base, tipo: 'imagen', imagenUrl: data.message.imageMessage.url }
+    }
+    return { ...base, tipo: 'otro' }
+  }
+}

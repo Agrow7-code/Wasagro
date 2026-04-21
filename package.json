@@ -12,9 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.49.4",
     "hono": "^4.7.7",
     "langfuse": "^3.37.3",
+    "ollama": "^0.5.0",
     "openai": "^4.98.0",
     "zod": "^3.24.3"
   },

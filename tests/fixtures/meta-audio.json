@@ -1,0 +1,38 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WABA_ID_123",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550001234",
+              "phone_number_id": "PHONE_NUMBER_ID"
+            },
+            "contacts": [
+              {
+                "profile": { "name": "Juan Campo" },
+                "wa_id": "593987654321"
+              }
+            ],
+            "messages": [
+              {
+                "from": "593987654321",
+                "id": "wamid.meta_audio_001",
+                "timestamp": "1714000000",
+                "type": "audio",
+                "audio": {
+                  "id": "MEDIA_ID_456",
+                  "mime_type": "audio/ogg; codecs=opus"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

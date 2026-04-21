@@ -1,0 +1,166 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import type { Langfuse } from 'langfuse'
+import { langfuse as langfuseDefault } from '../langfuse.js'
+import type { IWasagroLLM } from './IWasagroLLM.js'
+import { LLMError } from './LLMError.js'
+import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
+import type { ContextoConversacion, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
+import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
+
+interface GeminiLLMConfig {
+  apiKey: string
+  model?: string
+  sdkClient?: InstanceType<typeof GoogleGenerativeAI>
+  langfuseClient?: Langfuse
+}
+
+export class GeminiLLM implements IWasagroLLM {
+  readonly #model: string
+  readonly #sdk: InstanceType<typeof GoogleGenerativeAI>
+  readonly #lf: Langfuse
+
+  constructor(config: GeminiLLMConfig) {
+    this.#model = config.model ?? process.env['GEMINI_MODEL'] ?? 'gemini-2.0-flash'
+    this.#sdk = config.sdkClient ?? new GoogleGenerativeAI(config.apiKey)
+    this.#lf = config.langfuseClient ?? langfuseDefault
+  }
+
+  async extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido> {
+    const prompt = cargarPrompt('sp-01-extraccion-evento.md')
+    const mensajeCompleto = `${prompt}\n\nTranscripción: ${input.transcripcion}\nFinca: ${input.finca_id}`
+
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.startGeneration({
+      name: 'extraer_evento',
+      model: this.#model,
+      input: { transcripcion: input.transcripcion, finca_id: input.finca_id },
+    })
+
+    const inicio = Date.now()
+    try {
+      const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
+      const result = await gemini.generateContent(mensajeCompleto)
+      const texto = result.response.text()
+      const latencia = Date.now() - inicio
+
+      let json: unknown
+      try {
+        json = JSON.parse(texto)
+      } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Gemini devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
+      }
+
+      const parsed = EventoCampoExtraidoSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: parsed.data, usage: { totalTokens: 0 }, metadata: { latencia_ms: latencia } })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GEMINI_ERROR', `Error de Gemini SDK: ${String(err)}`, err)
+    }
+  }
+
+  async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.startGeneration({ name: 'corregir_transcripcion', model: this.#model, input: { raw } })
+    try {
+      const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
+      const prompt = cargarPrompt('sp-02-post-correccion-stt.md')
+      const result = await gemini.generateContent(`${prompt}\n\nTranscripción: ${raw}`)
+      const corrected = result.response.text().trim()
+      generation.end({ output: corrected })
+      return corrected
+    } catch (err) {
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GEMINI_ERROR', `Error corrigiendo transcripción: ${String(err)}`, err)
+    }
+  }
+
+  async analizarImagen(imageUrl: string, traceId: string): Promise<string> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.startGeneration({ name: 'analizar_imagen', model: this.#model, input: { imageUrl } })
+    try {
+      const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
+      const prompt = cargarPrompt('sp-03-analisis-imagen.md')
+      const result = await gemini.generateContent([prompt, { inlineData: { mimeType: 'image/jpeg', data: imageUrl } }])
+      const analisis = result.response.text()
+      generation.end({ output: analisis })
+      return analisis
+    } catch (err) {
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GEMINI_ERROR', `Error analizando imagen: ${String(err)}`, err)
+    }
+  }
+
+  async onboardar(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
+    // Regla 2: máximo 2 preguntas de clarificación sin completar → fallback
+    if (contexto.preguntas_realizadas >= 2) {
+      const fallback: RespuestaOnboarding = {
+        mensaje: 'Listo, completaremos tu registro más adelante. Un asesor te contactará pronto. ✅',
+        onboarding_completo: false,
+        siguiente_pregunta: null,
+      }
+      this.#lf.trace({ id: traceId }).event({
+        name: 'onboarding_max_questions_reached',
+        level: 'WARNING',
+        input: { preguntas_realizadas: contexto.preguntas_realizadas },
+      })
+      return fallback
+    }
+
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.startGeneration({ name: 'onboardar', model: this.#model, input: { mensaje } })
+    try {
+      const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
+      const prompt = cargarPrompt('sp-04-onboarding.md')
+      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
+      const result = await gemini.generateContent(`${prompt}\n\nHistorial:\n${historial}\nUsuario: ${mensaje}`)
+      const texto = result.response.text()
+      let json: unknown
+      try { json = JSON.parse(texto) } catch { json = { mensaje: texto, onboarding_completo: false, siguiente_pregunta: null } }
+      generation.end({ output: json })
+      return json as RespuestaOnboarding
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GEMINI_ERROR', `Error en onboarding: ${String(err)}`, err)
+    }
+  }
+
+  async resumirSemana(eventos: EventoCampoExtraido[], traceId: string): Promise<ResumenSemanal> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.startGeneration({ name: 'resumir_semana', model: this.#model, input: { total_eventos: eventos.length } })
+    try {
+      const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
+      const prompt = cargarPrompt('sp-05-resumen-semanal.md')
+      const result = await gemini.generateContent(`${prompt}\n\nEventos:\n${JSON.stringify(eventos, null, 2)}`)
+      const texto = result.response.text()
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        throw new LLMError('PARSE_ERROR', 'Gemini no devolvió JSON para resumen semanal')
+      }
+      generation.end({ output: json })
+      return json as ResumenSemanal
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GEMINI_ERROR', `Error en resumen semanal: ${String(err)}`, err)
+    }
+  }
+}
+
+function cargarPrompt(nombre: string): string {
+  try {
+    return readFileSync(join(process.cwd(), 'prompts', nombre), 'utf-8')
+  } catch (err) {
+    throw new LLMError('PARSE_ERROR', `Prompt requerido no encontrado: prompts/${nombre}`, err)
+  }
+}

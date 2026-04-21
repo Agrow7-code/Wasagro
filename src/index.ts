@@ -1,10 +1,22 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
-import { webhookRouter } from './webhook/router.js'
+import { webhookRouter, inicializarRouter } from './webhook/router.js'
+import { crearAdapterWhatsApp } from './integrations/whatsapp/index.js'
+import { crearLLM } from './integrations/llm/index.js'
+
+const adapter = crearAdapterWhatsApp()
+const llm = crearLLM()
+inicializarRouter(adapter)
 
 const app = new Hono()
 
-app.get('/health', (c) => c.json({ status: 'ok' }))
+app.get('/health', (c) => c.json({
+  status: 'ok',
+  provider: process.env['WHATSAPP_PROVIDER'],
+  llm: process.env['WASAGRO_LLM'],
+}))
 app.route('/webhook', webhookRouter)
+
+export { llm }
 
 serve({ fetch: app.fetch, port: Number(process.env['PORT'] ?? 3000) })

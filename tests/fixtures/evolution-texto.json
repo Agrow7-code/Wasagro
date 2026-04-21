@@ -1,0 +1,16 @@
+{
+  "event": "messages.upsert",
+  "instance": "wasagro-h0",
+  "data": {
+    "key": {
+      "remoteJid": "593987654321@s.whatsapp.net",
+      "fromMe": false,
+      "id": "wamid.evo_texto_001"
+    },
+    "message": {
+      "conversation": "Apliqué 2 bombadas de mancozeb en lote 3"
+    },
+    "messageTimestamp": 1714000000,
+    "pushName": "Juan Campo"
+  }
+}
