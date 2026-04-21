@@ -1,0 +1,15 @@
+change: pipeline-procesamiento-whatsapp
+status: tasking
+artifact_store: hybrid
+execution_mode: interactive
+started: "2026-04-09"
+
+phases:
+  explore: complete
+  propose: complete
+  spec: complete
+  design: complete
+  tasks: complete
+  apply: in-progress
+  verify: pending
+  archive: pending

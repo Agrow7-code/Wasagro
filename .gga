@@ -1,7 +1,7 @@
 # Wasagro — GGA Configuration
 PROVIDER=claude
 FILE_PATTERNS=*.sql,*.ts,*.js,*.json,*.py
-EXCLUDE_PATTERNS=*.test.ts,*.spec.ts,*.mock.*,node_modules/*,testdata/*,.atl/*
+EXCLUDE_PATTERNS=*.test.ts,*.spec.ts,*.mock.*,node_modules/*,testdata/*,.atl/*,docs/archive/*
 RULES_FILE=AGENTS.md
 STRICT_MODE=true
 TIMEOUT=600

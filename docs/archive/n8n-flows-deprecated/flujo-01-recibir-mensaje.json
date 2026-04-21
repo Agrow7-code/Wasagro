@@ -1,0 +1,344 @@
+{
+  "name": "flujo-01-recibir-mensaje",
+  "nodes": [
+    {
+      "id": "node-webhook",
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "parameters": {
+        "path": "whatsapp",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Recibe POST de Meta Cloud API. Responde HTTP 200 ANTES de procesar (anti-retry)."
+    },
+    {
+      "id": "node-respond-200",
+      "name": "Responder HTTP 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {"responseCode": 200}
+      },
+      "notes": "DEBE ejecutarse inmediatamente — Meta reintenta si no recibe 200 en <20s."
+    },
+    {
+      "id": "node-validar-firma",
+      "name": "Validar firma",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "parameters": {
+        "jsCode": "// Valida x-hub-signature-256 contra WHATSAPP_APP_SECRET\n// Devuelve { error, error_type } en vez de throw — el logging a LangFuse ocurre en el nodo siguiente.\nconst crypto = require('crypto');\nconst signature = $input.first().json.headers?.['x-hub-signature-256'];\nconst appSecret = $env.WHATSAPP_APP_SECRET;\nconst body = JSON.stringify($input.first().json.body);\nconst expectedSignature = 'sha256=' + crypto.createHmac('sha256', appSecret).update(body).digest('hex');\n\nif (signature !== expectedSignature) {\n  return [{ json: { error: true, error_type: 'INVALID_SIGNATURE', ts: new Date().toISOString() } }];\n}\n\nconst entry = $input.first().json.body.entry?.[0];\nconst change = entry?.changes?.[0];\nconst message = change?.value?.messages?.[0];\nconst contact = change?.value?.contacts?.[0];\nconst metadata = change?.value?.metadata;\n\nif (!message) {\n  return [{ json: { error: true, error_type: 'NO_MESSAGE', ts: new Date().toISOString() } }];\n}\n\nreturn [{\n  json: {\n    error: false,\n    wa_message_id: message.id,\n    phone: message.from,\n    timestamp: message.timestamp,\n    type: message.type,\n    content: {\n      body: message.text?.body ?? null,\n      media_id: message.audio?.id ?? message.image?.id ?? null,\n      mime_type: message.audio?.mime_type ?? message.image?.mime_type ?? null,\n      caption: message.image?.caption ?? null\n    },\n    contact_name: contact?.profile?.name ?? null,\n    phone_number_id: metadata?.phone_number_id\n  }\n}];"
+      },
+      "notes": "Retorna { error, error_type } en lugar de throw. El nodo siguiente decide si loggear y detener o continuar."
+    },
+    {
+      "id": "node-switch-error-recepcion",
+      "name": "Switch: ¿Error de recepción?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 400],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "notes": "true → loggear error en LangFuse y detener | false → pipeline normal."
+    },
+    {
+      "id": "node-log-error-langfuse",
+      "name": "Log error recepción en LangFuse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 260],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LANGFUSE_HOST }}/api/public/ingestion",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Basic {{ Buffer.from($env.LANGFUSE_PUBLIC_KEY + ':' + $env.LANGFUSE_SECRET_KEY).toString('base64') }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "batch": [
+            {
+              "id": "={{ 'recv-error-' + $json.error_type + '-' + $json.ts }}",
+              "type": "trace-create",
+              "body": {
+                "id": "={{ 'recv_error_' + $json.error_type + '_' + $json.ts }}",
+                "name": "webhook_reception_error",
+                "level": "ERROR",
+                "metadata": {
+                  "error_type": "={{ $json.error_type }}",
+                  "ts": "={{ $json.ts }}"
+                },
+                "tags": ["h0", "error", "reception"]
+              },
+              "timestamp": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "notes": "R4: loggea INVALID_SIGNATURE y NO_MESSAGE en LangFuse antes de detener el pipeline. PLACEHOLDER: LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY."
+    },
+    {
+      "id": "node-stop-en-error",
+      "name": "Detener en error",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1120, 260],
+      "parameters": {},
+      "notes": "Pipeline termina aquí para mensajes con error de recepción. LangFuse ya tiene el trace."
+    },
+    {
+      "id": "node-verificar-idempotencia",
+      "name": "Verificar idempotencia",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 460],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mensajes_entrada (wa_message_id, phone, tipo_mensaje, contenido_raw, media_ref, status)\nVALUES ($1, $2, $3, $4, $5, 'received')\nON CONFLICT (wa_message_id) DO UPDATE SET status = 'duplicate'\nRETURNING id, wa_message_id, (xmax = 0) AS is_new;",
+        "additionalFields": {
+          "queryParams": "={{ [$json.wa_message_id, $json.phone, $json.type, $json.content.body, $json.content.media_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {"name": "PLACEHOLDER: Supabase Postgres (service_role)"}
+      },
+      "notes": "ON CONFLICT = idempotencia contra reintentos de Meta."
+    },
+    {
+      "id": "node-filtrar-duplicados",
+      "name": "Filtrar duplicados",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 460],
+      "parameters": {
+        "conditions": {
+          "boolean": [{"value1": "={{ $json.is_new }}", "value2": true}]
+        }
+      },
+      "notes": "Si is_new=false: mensaje duplicado, detener pipeline."
+    },
+    {
+      "id": "node-buscar-usuario",
+      "name": "Buscar usuario",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 460],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  u.id AS user_id,\n  u.finca_id,\n  u.onboarding_completo,\n  u.consentimiento_datos,\n  u.nombre,\n  f.nombre AS finca_nombre,\n  f.cultivo_principal,\n  COALESCE(\n    json_agg(json_build_object('lote_id', l.lote_id, 'nombre_coloquial', l.nombre_coloquial, 'hectareas', l.hectareas))\n    FILTER (WHERE l.lote_id IS NOT NULL), '[]'\n  ) AS lotes\nFROM usuarios u\nLEFT JOIN fincas f ON f.finca_id = u.finca_id\nLEFT JOIN lotes l ON l.finca_id = u.finca_id AND l.activo = true\nWHERE u.phone = $1\nGROUP BY u.id, u.finca_id, u.onboarding_completo, u.consentimiento_datos, u.nombre, f.nombre, f.cultivo_principal;",
+        "additionalFields": {
+          "queryParams": "={{ [$json.phone] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {"name": "PLACEHOLDER: Supabase Postgres (service_role)"}
+      },
+      "notes": "Trae usuario + finca + lotes activos en una sola query (inyección en prompt SP-01)."
+    },
+    {
+      "id": "node-switch-estado-usuario",
+      "name": "Switch: Estado usuario",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1560, 460],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [{"leftValue": "={{ $json.user_id }}", "operator": {"type": "null"}}]
+              },
+              "renameOutput": true,
+              "outputKey": "nuevo_usuario"
+            },
+            {
+              "conditions": {
+                "conditions": [{"leftValue": "={{ $json.onboarding_completo }}", "operator": {"type": "boolean", "operation": "false"}}]
+              },
+              "renameOutput": true,
+              "outputKey": "onboarding_incompleto"
+            },
+            {
+              "conditions": {
+                "conditions": [{"leftValue": "={{ $json.consentimiento_datos }}", "operator": {"type": "boolean", "operation": "false"}}]
+              },
+              "renameOutput": true,
+              "outputKey": "sin_consentimiento"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      },
+      "notes": "Rutas: nuevo_usuario/onboarding_incompleto → flujo-03 | sin_consentimiento → solicitar | fallback → pipeline normal."
+    },
+    {
+      "id": "node-switch-tipo-mensaje",
+      "name": "Switch: Tipo mensaje",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1780, 560],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [{"leftValue": "={{ $json.content.body?.toLowerCase().match(/^(hola|buenos|gracias|ok|dale|listo|sí|si|no)/) }}", "operator": {"type": "notNull"}}]
+              },
+              "renameOutput": true,
+              "outputKey": "saludo_simple"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      },
+      "notes": "Heurística simple para saludos. Fallback → reporte (va a flujo-02)."
+    },
+    {
+      "id": "node-enviar-acuse",
+      "name": "Enviar acuse de recibo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 640],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "messaging_product": "whatsapp",
+          "to": "={{ $json.phone }}",
+          "type": "text",
+          "text": {"body": "Estoy procesando tu reporte..."}
+        }
+      },
+      "notes": "PLACEHOLDER: WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN. Debe ejecutarse en <5s (P3)."
+    },
+    {
+      "id": "node-disparar-flujo02",
+      "name": "Disparar flujo-02",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [2220, 640],
+      "parameters": {
+        "source": "database",
+        "workflowId": "PLACEHOLDER_FLUJO02_ID",
+        "mode": "each",
+        "options": {}
+      },
+      "notes": "PLACEHOLDER: reemplazar PLACEHOLDER_FLUJO02_ID con el ID real de flujo-02 en n8n."
+    },
+    {
+      "id": "node-disparar-flujo03",
+      "name": "Disparar flujo-03 onboarding",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1780, 340],
+      "parameters": {
+        "source": "database",
+        "workflowId": "PLACEHOLDER_FLUJO03_ID",
+        "mode": "each",
+        "options": {}
+      },
+      "notes": "PLACEHOLDER: reemplazar PLACEHOLDER_FLUJO03_ID con el ID real de flujo-03."
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": {
+      "main": [
+        [
+          {"node": "Responder HTTP 200", "type": "main", "index": 0},
+          {"node": "Validar firma", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Validar firma": {
+      "main": [[{"node": "Switch: ¿Error de recepción?", "type": "main", "index": 0}]]
+    },
+    "Switch: ¿Error de recepción?": {
+      "main": [
+        [{"node": "Log error recepción en LangFuse", "type": "main", "index": 0}],
+        [{"node": "Verificar idempotencia", "type": "main", "index": 0}]
+      ]
+    },
+    "Log error recepción en LangFuse": {
+      "main": [[{"node": "Detener en error", "type": "main", "index": 0}]]
+    },
+    "Verificar idempotencia": {
+      "main": [[{"node": "Filtrar duplicados", "type": "main", "index": 0}]]
+    },
+    "Filtrar duplicados": {
+      "main": [
+        [{"node": "Buscar usuario", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Buscar usuario": {
+      "main": [[{"node": "Switch: Estado usuario", "type": "main", "index": 0}]]
+    },
+    "Switch: Estado usuario": {
+      "main": [
+        [{"node": "Disparar flujo-03 onboarding", "type": "main", "index": 0}],
+        [{"node": "Disparar flujo-03 onboarding", "type": "main", "index": 0}],
+        [],
+        [{"node": "Switch: Tipo mensaje", "type": "main", "index": 0}]
+      ]
+    },
+    "Switch: Tipo mensaje": {
+      "main": [
+        [],
+        [{"node": "Enviar acuse de recibo", "type": "main", "index": 0}]
+      ]
+    },
+    "Enviar acuse de recibo": {
+      "main": [[{"node": "Disparar flujo-02", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "PLACEHOLDER_ERROR_WORKFLOW_ID"
+  },
+  "meta": {
+    "wasagro": true,
+    "horizon": "H0",
+    "version": "1.1.0",
+    "spec_ref": "REQ-webhook-001 through REQ-webhook-006, R4",
+    "design_ref": "flujo-01 node contracts"
+  }
+}
