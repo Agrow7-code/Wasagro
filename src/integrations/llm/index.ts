@@ -1,8 +1,9 @@
 import type { IWasagroLLM } from './IWasagroLLM.js'
 import { GeminiLLM } from './GeminiLLM.js'
 import { OllamaLLM } from './OllamaLLM.js'
+import { GroqLLM } from './GroqLLM.js'
 
-export type LLMProvider = 'gemini' | 'ollama'
+export type LLMProvider = 'gemini' | 'ollama' | 'groq'
 
 export function crearLLM(): IWasagroLLM {
   const provider = process.env['WASAGRO_LLM'] as LLMProvider | undefined
@@ -17,12 +18,18 @@ export function crearLLM(): IWasagroLLM {
     return new OllamaLLM()
   }
 
+  if (provider === 'groq') {
+    const apiKey = process.env['GROQ_API_KEY']
+    if (!apiKey) throw new Error('WASAGRO_LLM=groq requiere GROQ_API_KEY')
+    return new GroqLLM({ apiKey })
+  }
+
   throw new Error(
-    `WASAGRO_LLM="${provider ?? ''}" no es válido. Valores aceptados: gemini | ollama`
+    `WASAGRO_LLM="${provider ?? ''}" no es válido. Valores aceptados: gemini | ollama | groq`
   )
 }
 
-export { GeminiLLM, OllamaLLM }
+export { GeminiLLM, OllamaLLM, GroqLLM }
 export type { IWasagroLLM }
 export { LLMError } from './LLMError.js'
 export type { LLMErrorCode } from './LLMError.js'
