@@ -79,8 +79,10 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
   } catch (err) {
     console.error('[pipeline] Error procesando mensaje:', err)
     trace.event({ name: 'pipeline_error', level: 'ERROR', input: { error: String(err) } })
-    await actualizarMensaje(mensajeId, { status: 'error', error_detail: String(err) }).catch(() => undefined)
-    await _sender.enviarTexto(msg.from, 'Tuve un problema con tu mensaje. Intenta de nuevo en un momento. ⚠️').catch(() => undefined)
+    await actualizarMensaje(mensajeId, { status: 'error', error_detail: String(err) })
+      .catch(e => console.error('[pipeline] Error actualizando estado de error:', e))
+    await _sender.enviarTexto(msg.from, 'Tuve un problema con tu mensaje. Intenta de nuevo en un momento. ⚠️')
+      .catch(e => console.error('[pipeline] Error enviando mensaje de error al usuario:', e))
   }
 }
 
@@ -153,9 +155,10 @@ async function handleOnboardingAdmin(
 
   // Cuando completa: actualizar usuario en DB
   if (resultado.onboarding_completo) {
-    await updateUsuario(usuario.id, { onboarding_completo: true }).catch(err =>
+    await updateUsuario(usuario.id, { onboarding_completo: true }).catch(err => {
       console.error('[pipeline] Error actualizando usuario onboarding:', err)
-    )
+      langfuse.trace({ id: traceId }).event({ name: 'update_usuario_error', level: 'ERROR', input: { error: String(err) } })
+    })
   }
 
   await updateSession(session.session_id, {
@@ -221,9 +224,10 @@ async function handleOnboardingAgricultor(
   }
 
   if (resultado.onboarding_completo) {
-    await updateUsuario(usuario.id, { onboarding_completo: true }).catch(err =>
+    await updateUsuario(usuario.id, { onboarding_completo: true }).catch(err => {
       console.error('[pipeline] Error actualizando agricultor onboarding:', err)
-    )
+      langfuse.trace({ id: traceId }).event({ name: 'update_usuario_error', level: 'ERROR', input: { error: String(err) } })
+    })
   }
 
   await updateSession(session.session_id, {
@@ -260,6 +264,11 @@ async function handleEvento(
       transcripcion = await transcribirAudio(audioRef, traceId)
     } catch (err) {
       if (err instanceof Error && err.message === 'STT_NO_DISPONIBLE') {
+        langfuse.trace({ id: traceId }).event({
+          name: 'stt_no_disponible',
+          level: 'WARNING',
+          input: { audio_ref: audioRef, wamid: msg.wamid },
+        })
         await _sender!.enviarTexto(msg.from, 'Por ahora no proceso audios. Escríbeme el mensaje en texto. ✅')
         await actualizarMensaje(mensajeId, { status: 'processed' })
         return

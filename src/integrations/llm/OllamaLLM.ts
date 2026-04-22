@@ -163,7 +163,7 @@ export class OllamaLLM implements IWasagroLLM {
     if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
       return new LLMError('OLLAMA_UNAVAILABLE', `Ollama no disponible en ${this.#baseUrl} — ¿está corriendo?`, err)
     }
-    return new LLMError('GEMINI_ERROR', `Error inesperado en OllamaLLM: ${msg}`, err)
+    return new LLMError('OLLAMA_UNAVAILABLE', `Error inesperado en OllamaLLM: ${msg}`, err)
   }
 }
 
