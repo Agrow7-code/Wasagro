@@ -6,13 +6,16 @@ export interface UsuarioRow {
   phone: string
   nombre: string | null
   rol: string
+  org_id: string
   finca_id: string | null
+  email: string | null
   onboarding_completo: boolean
   consentimiento_datos: boolean
 }
 
 export interface FincaRow {
   finca_id: string
+  org_id: string
   nombre: string
   pais: string
   cultivo_principal: string | null
@@ -102,7 +105,7 @@ export async function actualizarMensaje(
 export async function getUserByPhone(phone: string, client: SupabaseClient = defaultClient): Promise<UsuarioRow | null> {
   const { data, error } = await client
     .from('usuarios')
-    .select('id, phone, nombre, rol, finca_id, onboarding_completo, consentimiento_datos')
+    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos')
     .eq('phone', phone)
     .maybeSingle()
   if (error) throw error
@@ -112,7 +115,7 @@ export async function getUserByPhone(phone: string, client: SupabaseClient = def
 export async function getFincaById(fincaId: string, client: SupabaseClient = defaultClient): Promise<FincaRow | null> {
   const { data, error } = await client
     .from('fincas')
-    .select('finca_id, nombre, pais, cultivo_principal')
+    .select('finca_id, org_id, nombre, pais, cultivo_principal')
     .eq('finca_id', fincaId)
     .maybeSingle()
   if (error) throw error
