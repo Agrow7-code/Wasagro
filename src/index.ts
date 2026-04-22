@@ -1,12 +1,16 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { webhookRouter, inicializarRouter } from './webhook/router.js'
-import { crearAdapterWhatsApp } from './integrations/whatsapp/index.js'
+import { crearAdapterWhatsApp, crearSenderWhatsApp } from './integrations/whatsapp/index.js'
 import { crearLLM } from './integrations/llm/index.js'
+import { inicializarPipeline } from './pipeline/procesarMensajeEntrante.js'
 
 const adapter = crearAdapterWhatsApp()
+const sender = crearSenderWhatsApp()
 const llm = crearLLM()
+
 inicializarRouter(adapter)
+inicializarPipeline(sender, llm)
 
 const app = new Hono()
 

@@ -7,6 +7,7 @@ import { LLMError } from './LLMError.js'
 import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
 import type { ContextoConversacion, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
+import { injectarVariables } from '../../pipeline/promptInjector.js'
 
 interface OllamaLLMConfig {
   baseUrl?: string
@@ -33,8 +34,13 @@ export class OllamaLLM implements IWasagroLLM {
   }
 
   async extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido> {
-    const prompt = cargarPrompt('sp-01-extraccion-evento.md')
-    const contenido = `${prompt}\n\nTranscripción: ${input.transcripcion}\nFinca: ${input.finca_id}`
+    const prompt = injectarVariables(cargarPrompt('sp-01-extraccion-evento.md'), {
+      LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
+      FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
+      CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
+      PAIS: input.pais ?? 'EC',
+    })
+    const contenido = `${prompt}\n\nTranscripción: ${input.transcripcion}`
 
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.startGeneration({
@@ -117,7 +123,10 @@ export class OllamaLLM implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.startGeneration({ name: 'onboardar', model: this.#model, input: { mensaje } })
     try {
-      const prompt = cargarPrompt('sp-04-onboarding.md')
+      const prompt = injectarVariables(cargarPrompt('sp-04-onboarding.md'), {
+        PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
+        DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
+      })
       const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
       const texto = await this.#llamar(`${prompt}\n\nHistorial:\n${historial}\nUsuario: ${mensaje}`)
       let json: unknown

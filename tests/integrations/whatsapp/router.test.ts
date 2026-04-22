@@ -1,4 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+
+vi.mock('../../../src/pipeline/procesarMensajeEntrante.js', () => ({
+  procesarMensajeEntrante: vi.fn().mockResolvedValue(undefined),
+  inicializarPipeline: vi.fn(),
+}))
+
 import { Hono } from 'hono'
 import { webhookRouter, inicializarRouter } from '../../../src/webhook/router.js'
 import type { IWhatsAppAdapter } from '../../../src/integrations/whatsapp/IWhatsAppAdapter.js'

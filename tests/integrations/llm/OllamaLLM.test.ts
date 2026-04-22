@@ -10,15 +10,19 @@ const entradaMock: EntradaEvento = {
 }
 
 const respuestaEventoMock = {
-  tipo_evento: { valor: 'aplicacion_producto', confidence_score: 0.85 },
-  lote_id: { valor: 'F001-L03', confidence_score: 0.75 },
-  fecha: { valor: null, confidence_score: 0.10 },
-  producto: { valor: 'mancozeb', confidence_score: 0.90 },
-  dosis: { valor: 2, confidence_score: 0.85 },
-  unidad_dosis: { valor: 'bombadas', confidence_score: 0.85 },
-  area_hectareas: { valor: null, confidence_score: 0.10 },
-  observaciones: { valor: null, confidence_score: 0.10 },
-  requiere_validacion: false,
+  tipo_evento: 'insumo',
+  lote_id: 'F001-L03',
+  fecha_evento: null,
+  confidence_score: 0.85,
+  campos_extraidos: {
+    producto: 'mancozeb',
+    dosis_cantidad: 2,
+    dosis_unidad: 'bombadas',
+  },
+  confidence_por_campo: { tipo_evento: 0.85, lote_id: 0.75 },
+  campos_faltantes: [],
+  requiere_clarificacion: false,
+  pregunta_sugerida: null,
 }
 
 function crearHttpMock(respuesta: object) {
@@ -42,8 +46,9 @@ describe('OllamaLLM', () => {
       const llm = new OllamaLLM({ fetchClient: fetch as any, langfuseClient: lf as any })
 
       const resultado = await llm.extraerEvento(entradaMock, 'trace-002')
-      expect(resultado.producto.valor).toBe('mancozeb')
-      expect(resultado.dosis.valor).toBe(2)
+      expect(resultado.tipo_evento).toBe('insumo')
+      expect(resultado.campos_extraidos['producto']).toBe('mancozeb')
+      expect(resultado.campos_extraidos['dosis_cantidad']).toBe(2)
     })
 
     it('llama a LangFuse con traceId (P4)', async () => {
