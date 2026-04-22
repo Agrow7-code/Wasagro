@@ -410,6 +410,6 @@ function buildConfirmacion(extracted: EventoCampoExtraido, status: string): stri
   }
   const label = labels[extracted.tipo_evento] ?? 'reporte'
   const lote = extracted.lote_id ? ` en ${extracted.lote_id}` : ''
-  const alerta = extracted.alerta_urgente ? ' ⚠️ Tu asesor fue notificado.' : ''
+  const alerta = extracted.alerta_urgente ? ' ⚠️ Tu asesor revisará este caso pronto.' : ''
   return `✅ Registré tu ${label}${lote}.${alerta}`
 }
