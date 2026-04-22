@@ -22,6 +22,8 @@ import {
 import { transcribirAudio } from './sttService.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
+const MAX_ONBOARDING_STEPS = 10
+const MAX_PROSPECTO_STEPS = 6
 
 let _sender: IWhatsAppSender | null = null
 let _llm: IWasagroLLM | null = null
@@ -119,7 +121,7 @@ async function handleProspecto(
   }
 
   await updateSession(session.session_id, {
-    clarification_count: resultado.siguiente_paso,
+    clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS),
     contexto_parcial: {
       historial: [
         ...contexto.historial,
@@ -161,8 +163,13 @@ async function handleOnboardingAdmin(
     })
   }
 
+  const nextStep = session.clarification_count + 1
+  if (!resultado.onboarding_completo && nextStep >= MAX_ONBOARDING_STEPS) {
+    langfuse.trace({ id: traceId }).event({ name: 'onboarding_admin_max_steps', level: 'WARNING', input: { steps: nextStep } })
+  }
+
   await updateSession(session.session_id, {
-    clarification_count: resultado.onboarding_completo ? 0 : session.clarification_count + 1,
+    clarification_count: resultado.onboarding_completo ? 0 : Math.min(nextStep, MAX_ONBOARDING_STEPS),
     contexto_parcial: {
       historial: [
         ...contexto.historial,
@@ -174,7 +181,7 @@ async function handleOnboardingAdmin(
         ...(resultado.datos_extraidos ?? {}),
       },
     },
-    status: resultado.onboarding_completo ? 'completed' : 'active',
+    status: resultado.onboarding_completo || nextStep >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
@@ -230,8 +237,13 @@ async function handleOnboardingAgricultor(
     })
   }
 
+  const nextStepAgr = session.clarification_count + 1
+  if (!resultado.onboarding_completo && nextStepAgr >= MAX_ONBOARDING_STEPS) {
+    langfuse.trace({ id: traceId }).event({ name: 'onboarding_agricultor_max_steps', level: 'WARNING', input: { steps: nextStepAgr } })
+  }
+
   await updateSession(session.session_id, {
-    clarification_count: resultado.onboarding_completo ? 0 : session.clarification_count + 1,
+    clarification_count: resultado.onboarding_completo ? 0 : Math.min(nextStepAgr, MAX_ONBOARDING_STEPS),
     contexto_parcial: {
       historial: [
         ...historialPrevio,
@@ -240,7 +252,7 @@ async function handleOnboardingAgricultor(
       ],
       datos: { ...datosPrevios, ...(resultado.datos_extraidos ?? {}) },
     },
-    status: resultado.onboarding_completo ? 'completed' : 'active',
+    status: resultado.onboarding_completo || nextStepAgr >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
