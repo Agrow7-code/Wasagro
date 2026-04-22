@@ -43,7 +43,7 @@ export class OllamaLLM implements IWasagroLLM {
     const contenido = `${prompt}\n\nTranscripción: ${input.transcripcion}`
 
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.startGeneration({
+    const generation = trace.generation({
       name: 'extraer_evento',
       model: this.#model,
       input: { transcripcion: input.transcripcion },
@@ -80,7 +80,7 @@ export class OllamaLLM implements IWasagroLLM {
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
     const prompt = cargarPrompt('sp-02-post-correccion-stt.md')
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.startGeneration({ name: 'corregir_transcripcion', model: this.#model, input: { raw } })
+    const generation = trace.generation({ name: 'corregir_transcripcion', model: this.#model, input: { raw } })
     try {
       const corrected = await this.#llamar(`${prompt}\n\nTranscripción: ${raw}`)
       generation.end({ output: corrected })
@@ -93,7 +93,7 @@ export class OllamaLLM implements IWasagroLLM {
 
   async analizarImagen(imageUrl: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.startGeneration({ name: 'analizar_imagen', model: this.#model, input: { imageUrl } })
+    const generation = trace.generation({ name: 'analizar_imagen', model: this.#model, input: { imageUrl } })
     try {
       const prompt = cargarPrompt('sp-03-analisis-imagen.md')
       const analisis = await this.#llamar(`${prompt}\n\nURL imagen: ${imageUrl}`)
@@ -121,7 +121,7 @@ export class OllamaLLM implements IWasagroLLM {
     }
 
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.startGeneration({ name: 'onboardar', model: this.#model, input: { mensaje } })
+    const generation = trace.generation({ name: 'onboardar', model: this.#model, input: { mensaje } })
     try {
       const prompt = injectarVariables(cargarPrompt('sp-04-onboarding.md'), {
         PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
@@ -142,7 +142,7 @@ export class OllamaLLM implements IWasagroLLM {
 
   async resumirSemana(eventos: EventoCampoExtraido[], traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.startGeneration({ name: 'resumir_semana', model: this.#model, input: { total_eventos: eventos.length } })
+    const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { total_eventos: eventos.length } })
     try {
       const prompt = cargarPrompt('sp-05-resumen-semanal.md')
       const texto = await this.#llamar(`${prompt}\n\nEventos:\n${JSON.stringify(eventos, null, 2)}`)

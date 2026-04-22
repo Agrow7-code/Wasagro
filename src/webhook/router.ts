@@ -2,7 +2,6 @@ import { Hono } from 'hono'
 import { langfuse } from '../integrations/langfuse.js'
 import { procesarMensajeEntrante } from '../pipeline/procesarMensajeEntrante.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
-import type { MetaAdapter } from '../integrations/whatsapp/MetaAdapter.js'
 
 let adapter: IWhatsAppAdapter
 
@@ -14,9 +13,9 @@ export const webhookRouter = new Hono()
 
 // GET /webhook/whatsapp — verificación del webhook (Meta solamente)
 webhookRouter.get('/whatsapp', (c) => {
-  const metaAdapter = adapter as MetaAdapter | undefined
-  if (metaAdapter?.verificarGetWebhook) {
-    const challenge = metaAdapter.verificarGetWebhook(c)
+  const anyAdapter = adapter as unknown as { verificarGetWebhook?: (c: typeof c) => string | false }
+  if (anyAdapter?.verificarGetWebhook) {
+    const challenge = anyAdapter.verificarGetWebhook(c)
     if (challenge !== false) return c.text(challenge, 200)
   }
   return c.text('Forbidden', 403)

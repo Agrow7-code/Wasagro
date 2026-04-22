@@ -12,7 +12,7 @@ export async function transcribirAudio(
   if (!openaiClient) throw new Error('STT_NO_DISPONIBLE')
 
   const trace = langfuse.trace({ id: traceId })
-  const generation = trace.startGeneration({
+  const generation = trace.generation({
     name: 'transcribir_audio',
     model: STT_MODEL,
     input: { audio_url: audioUrl },
@@ -26,7 +26,7 @@ export async function transcribirAudio(
     }
 
     const buffer = await audioRes.arrayBuffer()
-    const file = new File([buffer], 'audio.ogg', { type: 'audio/ogg; codecs=opus' })
+    const file = new File([new Uint8Array(buffer)], 'audio.ogg', { type: 'audio/ogg; codecs=opus' })
 
     const transcription = await openaiClient.audio.transcriptions.create({
       model: STT_MODEL,
