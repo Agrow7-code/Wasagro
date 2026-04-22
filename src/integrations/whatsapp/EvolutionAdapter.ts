@@ -71,14 +71,14 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
     }
 
     if (data.message.conversation) {
-      return { ...base, tipo: 'texto', texto: data.message.conversation }
+      return { ...base, tipo: 'texto' as const, texto: data.message.conversation }
     }
     if (data.message.audioMessage) {
-      return { ...base, tipo: 'audio', audioUrl: data.message.audioMessage.url }
+      return { ...base, tipo: 'audio' as const, audioUrl: data.message.audioMessage.url }
     }
     if (data.message.imageMessage) {
-      return { ...base, tipo: 'imagen', imagenUrl: data.message.imageMessage.url }
+      return { ...base, tipo: 'imagen' as const, imagenUrl: data.message.imageMessage.url }
     }
-    return { ...base, tipo: 'otro' }
+    return { ...base, tipo: 'otro' as const }
   }
 }

@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { langfuse } from '../integrations/langfuse.js'
 import { procesarMensajeEntrante } from '../pipeline/procesarMensajeEntrante.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
@@ -13,7 +14,7 @@ export const webhookRouter = new Hono()
 
 // GET /webhook/whatsapp — verificación del webhook (Meta solamente)
 webhookRouter.get('/whatsapp', (c) => {
-  const anyAdapter = adapter as unknown as { verificarGetWebhook?: (c: typeof c) => string | false }
+  const anyAdapter = adapter as unknown as { verificarGetWebhook?: (c: Context) => string | false }
   if (anyAdapter?.verificarGetWebhook) {
     const challenge = anyAdapter.verificarGetWebhook(c)
     if (challenge !== false) return c.text(challenge, 200)

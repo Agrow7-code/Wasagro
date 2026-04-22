@@ -159,12 +159,12 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Cumple:** CR5 — trazabilidad completa, evals, $0/mes (Postgres compartido con Supabase).
 - **Revisar cuando:** Volumen de traces sature el Postgres compartido. Alternativa: LangFuse Cloud (free tier 50K traces/mes).
 
-### D6. Canal: WhatsApp Business API — Meta Cloud API directo
+### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 
-- **Fecha:** Abril 2026
-- **Cumple:** CR6 completo — API oficial, multimodal, templates, webhooks.
-- **H0:** Meta Cloud API directo — sin intermediario (ni Wati ni 360Dialog). El servicio Hono recibe el webhook nativo de Meta en `POST /webhook/whatsapp`. Mensajes user-initiated dentro de ventana 24h = $0. phone_number_id y WABA_ID portables a H1.
-- **Revisar cuando:** Volumen supere tier no verificado de Meta, o se requiera verificación formal de empresa en H1. BSP alternativo: 360Dialog o Wati.
+- **Fecha:** Abril 2026 (actualizado desde Meta Cloud API directo — ver ADR 002)
+- **Cumple:** CR6 completo — API oficial via Baileys, multimodal, webhooks configurables.
+- **H0:** Evolution API self-hosted en Railway — reemplaza Meta Cloud API porque el acceso a Meta Developer no estaba disponible para el equipo en H0. El servicio Hono recibe el webhook de Evolution en `POST /webhook/whatsapp` vía `EvolutionAdapter`. Instancia: `wasagro-prod` en `evolution-api-production-8ba4.up.railway.app`.
+- **Revisar cuando:** Meta Developer esté accesible para migrar a API oficial en H1 (phone_number_id y WABA_ID portables). BSP alternativo: 360Dialog o Wati.
 
 ---
 
