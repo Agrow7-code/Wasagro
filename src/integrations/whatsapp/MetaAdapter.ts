@@ -60,14 +60,14 @@ export class MetaAdapter implements IWhatsAppAdapter {
     }
 
     if (message.type === 'text' && message.text) {
-      return { ...base, tipo: 'texto' as const, texto: message.text.body }
+      return { ...base, tipo: 'texto', texto: message.text.body } as NormalizedMessage
     }
     if (message.type === 'audio' && message.audio) {
-      return { ...base, tipo: 'audio' as const, mediaId: message.audio.id }
+      return { ...base, tipo: 'audio', mediaId: message.audio.id } as NormalizedMessage
     }
     if (message.type === 'image' && message.image) {
-      return { ...base, tipo: 'imagen' as const, mediaId: message.image.id }
+      return { ...base, tipo: 'imagen', mediaId: message.image.id } as NormalizedMessage
     }
-    return { ...base, tipo: 'otro' as const }
+    return { ...base, tipo: 'otro' } as NormalizedMessage
   }
 }
