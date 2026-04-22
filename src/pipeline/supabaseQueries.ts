@@ -190,3 +190,44 @@ export async function saveEvento(insert: EventoCampoInsert, client: SupabaseClie
   if (error) throw error
   return (data as { id: string }).id
 }
+
+export interface ProspectoInsert {
+  phone: string
+  tipo_contacto: 'trabajador' | 'decision_maker' | 'otro'
+  nombre?: string | null
+  finca_nombre?: string | null
+  cultivo_principal?: string | null
+  pais?: string | null
+  tamanio_aproximado?: string | null
+  interes_demo?: boolean
+}
+
+export async function saveProspecto(insert: ProspectoInsert, client: SupabaseClient = defaultClient): Promise<string> {
+  const { data, error } = await client
+    .from('prospectos')
+    .insert({ ...insert, interes_demo: insert.interes_demo ?? false })
+    .select('id')
+    .single()
+  if (error) throw error
+  return (data as { id: string }).id
+}
+
+export async function getFincasDisponibles(client: SupabaseClient = defaultClient): Promise<FincaRow[]> {
+  const { data, error } = await client
+    .from('fincas')
+    .select('finca_id, org_id, nombre, pais, cultivo_principal')
+  if (error) throw error
+  return (data ?? []) as FincaRow[]
+}
+
+export async function updateUsuario(
+  id: string,
+  updates: Partial<{ nombre: string; onboarding_completo: boolean; finca_id: string; status: string }>,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('usuarios')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}

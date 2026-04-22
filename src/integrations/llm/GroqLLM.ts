@@ -1,17 +1,48 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import OpenAI from 'openai'
+import { z } from 'zod'
 import type { Langfuse } from 'langfuse'
 import { langfuse as langfuseDefault } from '../langfuse.js'
 import type { IWasagroLLM } from './IWasagroLLM.js'
 import { LLMError } from './LLMError.js'
-import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
-import type { ContextoConversacion, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
+import {
+  EventoCampoExtraidoSchema,
+  sinEvento,
+  type EntradaEvento,
+  type EventoCampoExtraido,
+} from '../../types/dominio/EventoCampo.js'
+import {
+  RespuestaOnboardingSchema,
+  type ContextoConversacion,
+  type ContextoOnboardingAgricultor,
+  type RespuestaOnboarding,
+} from '../../types/dominio/Onboarding.js'
+import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
+
+const EXTRACTOR_POR_TIPO: Record<string, string> = {
+  insumo: 'sp-01a-extractor-insumo.md',
+  labor: 'sp-01b-extractor-labor.md',
+  cosecha: 'sp-01c-extractor-cosecha.md',
+  plaga: 'sp-01d-extractor-plaga.md',
+  infraestructura: 'sp-01e-extractor-infraestructura.md',
+  clima: 'sp-01f-extractor-clima.md',
+}
+
+const ResultadoClasificacionSchema = z.object({
+  tipo_evento: z.enum(['insumo', 'labor', 'cosecha', 'plaga', 'clima', 'infraestructura', 'consulta', 'saludo', 'ambiguo']),
+  confidence: z.number().min(0).max(1),
+  requiere_imagen_para_confirmar: z.boolean().default(false),
+  motivo_ambiguo: z.string().nullable().default(null),
+  mensaje_clarificacion: z.string().nullable().default(null),
+})
+
+type ResultadoClasificacion = z.infer<typeof ResultadoClasificacionSchema>
 
 interface GroqLLMConfig {
   apiKey: string
@@ -35,46 +66,42 @@ export class GroqLLM implements IWasagroLLM {
   }
 
   async extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido> {
-    const prompt = injectarVariables(cargarPrompt('sp-01-extraccion-evento.md'), {
-      LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
-      FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
-      CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
-      PAIS: input.pais ?? 'EC',
-    })
-
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({
-      name: 'extraer_evento',
-      model: this.#model,
-      input: { transcripcion: input.transcripcion, finca_id: input.finca_id },
-    })
 
-    const inicio = Date.now()
-    try {
-      const texto = await this.#llamar(prompt, `Transcripción: ${input.transcripcion}`)
-      const latencia = Date.now() - inicio
+    // Paso 1 — clasificar
+    const clasificacion = await this.#clasificar(input, traceId)
 
-      let json: unknown
-      try {
-        json = JSON.parse(texto)
-      } catch {
-        generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Groq devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
-      }
-
-      const parsed = EventoCampoExtraidoSchema.safeParse(json)
-      if (!parsed.success) {
-        generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Schema inválido: ${parsed.error.message}`)
-      }
-
-      generation.end({ output: parsed.data, metadata: { latencia_ms: latencia } })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error de Groq: ${String(err)}`, err)
+    // Paso 2 — manejar no-eventos
+    if (clasificacion.tipo_evento === 'saludo') {
+      trace.event({ name: 'mensaje_saludo', input: { transcripcion: input.transcripcion } })
+      return sinEvento('¡Hola! ¿Qué pasó hoy en la finca?')
     }
+
+    if (clasificacion.tipo_evento === 'consulta') {
+      trace.event({ name: 'mensaje_consulta', input: { transcripcion: input.transcripcion } })
+      return sinEvento('Claro, ¿qué necesitas? Si tienes algo que reportar de la finca, mándame el mensaje.')
+    }
+
+    if (clasificacion.tipo_evento === 'ambiguo') {
+      const pregunta = clasificacion.mensaje_clarificacion ?? '¿Puedes contarme más sobre lo que pasó en la finca?'
+      return {
+        tipo_evento: 'observacion',
+        lote_id: null,
+        lote_detectado_raw: null,
+        fecha_evento: null,
+        confidence_score: clasificacion.confidence,
+        requiere_validacion: false,
+        alerta_urgente: false,
+        campos_extraidos: {},
+        confidence_por_campo: {},
+        campos_faltantes: [],
+        requiere_clarificacion: true,
+        pregunta_sugerida: pregunta,
+      }
+    }
+
+    // Paso 3 — extraer con prompt especializado
+    return await this.#extraerEspecializado(clasificacion, input, traceId)
   }
 
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
@@ -105,37 +132,99 @@ export class GroqLLM implements IWasagroLLM {
     }
   }
 
-  async onboardar(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
-    if (contexto.preguntas_realizadas >= 2) {
-      this.#lf.trace({ id: traceId }).event({
-        name: 'onboarding_max_questions_reached',
-        level: 'WARNING',
-        input: { preguntas_realizadas: contexto.preguntas_realizadas },
-      })
-      return {
-        mensaje: 'Listo, completaremos tu registro más adelante. Un asesor te contactará pronto. ✅',
-        onboarding_completo: false,
-        siguiente_pregunta: null,
-      }
-    }
-
+  async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'onboardar', model: this.#model, input: { mensaje } })
+    const generation = trace.generation({ name: 'onboardar_admin', model: this.#model, input: { mensaje } })
     try {
-      const prompt = injectarVariables(cargarPrompt('sp-04-onboarding.md'), {
+      const prompt = injectarVariables(cargarPrompt('sp-04a-onboarding-admin.md'), {
         PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
+        NOMBRE_USUARIO: (contexto.datos_recolectados['nombre'] as string | undefined) ?? '',
       })
       const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
       const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)
+
       let json: unknown
-      try { json = JSON.parse(texto) } catch { json = { mensaje: texto, onboarding_completo: false, siguiente_pregunta: null } }
-      generation.end({ output: json })
-      return json as RespuestaOnboarding
+      try { json = JSON.parse(texto) } catch {
+        json = { paso_completado: 0, siguiente_paso: 1, mensaje_para_usuario: texto, onboarding_completo: false }
+      }
+
+      const parsed = RespuestaOnboardingSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema onboarding admin inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: parsed.data })
+      return parsed.data
     } catch (err) {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error en onboarding: ${String(err)}`, err)
+      throw new LLMError('GROQ_ERROR', `Error en onboarding admin: ${String(err)}`, err)
+    }
+  }
+
+  async onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({ name: 'onboardar_agricultor', model: this.#model, input: { mensaje } })
+    try {
+      const prompt = injectarVariables(cargarPrompt('sp-04b-onboarding-agricultor.md'), {
+        PASO_ACTUAL: String(contexto.paso_actual),
+        DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
+        FINCAS_DISPONIBLES: contexto.fincas_disponibles,
+        NOMBRE_USUARIO: (contexto.datos_recolectados['nombre'] as string | undefined) ?? '',
+      })
+      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
+      const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)
+
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        json = { paso_completado: 0, siguiente_paso: 1, mensaje_para_usuario: texto, onboarding_completo: false }
+      }
+
+      const parsed = RespuestaOnboardingSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema onboarding agricultor inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: parsed.data })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error en onboarding agricultor: ${String(err)}`, err)
+    }
+  }
+
+  async atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({ name: 'atender_prospecto', model: this.#model, input: { mensaje } })
+    try {
+      const prompt = injectarVariables(cargarPrompt('sp-00-prospecto.md'), {
+        PASO_ACTUAL: String(contexto.paso_actual),
+        DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recopilados),
+      })
+      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
+      const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)
+
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        json = {
+          paso_completado: 0, siguiente_paso: 1,
+          tipo_contacto: 'sin_clasificar',
+          datos_extraidos: { nombre: null, finca_nombre: null, cultivo_principal: null, pais: null, tamanio_aproximado: null, interes_demo: false },
+          guardar_en_prospectos: false,
+          mensaje_para_usuario: texto,
+        }
+      }
+
+      generation.end({ output: json })
+      return json as RespuestaProspecto
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error atendiendo prospecto: ${String(err)}`, err)
     }
   }
 
@@ -147,6 +236,7 @@ export class GroqLLM implements IWasagroLLM {
       const texto = await this.#llamar(prompt, `Eventos:\n${JSON.stringify(eventos, null, 2)}`)
       let json: unknown
       try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', 'Groq no devolvió JSON para resumen semanal')
       }
       generation.end({ output: json })
@@ -158,21 +248,111 @@ export class GroqLLM implements IWasagroLLM {
     }
   }
 
-  // JSON mode — para extracción estructurada
+  // ─── private ─────────────────────────────────────────────────────────────
+
+  async #clasificar(input: EntradaEvento, traceId: string): Promise<ResultadoClasificacion> {
+    const prompt = injectarVariables(cargarPrompt('sp-00-clasificador.md'), {
+      FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
+      CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
+      NOMBRE_USUARIO: input.nombre_usuario ?? '',
+      MENSAJE: input.transcripcion,
+    })
+
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: 'clasificar_mensaje',
+      model: this.#model,
+      input: { transcripcion: input.transcripcion },
+    })
+
+    try {
+      const texto = await this.#llamar(prompt, input.transcripcion)
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Clasificador devolvió no-JSON: ${texto.slice(0, 100)}`)
+      }
+
+      const parsed = ResultadoClasificacionSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema clasificación inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: parsed.data })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error en clasificador: ${String(err)}`, err)
+    }
+  }
+
+  async #extraerEspecializado(
+    clasificacion: ResultadoClasificacion,
+    input: EntradaEvento,
+    traceId: string,
+  ): Promise<EventoCampoExtraido> {
+    const promptFile = EXTRACTOR_POR_TIPO[clasificacion.tipo_evento] ?? 'sp-01-extraccion-evento.md'
+
+    const prompt = injectarVariables(cargarPrompt(promptFile), {
+      LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
+      FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
+      CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
+      PAIS: input.pais ?? 'EC',
+      NOMBRE_USUARIO: input.nombre_usuario ?? '',
+      MENSAJE: input.transcripcion,
+    })
+
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: `extraer_${clasificacion.tipo_evento}`,
+      model: this.#model,
+      input: { transcripcion: input.transcripcion, tipo: clasificacion.tipo_evento },
+    })
+
+    const inicio = Date.now()
+    try {
+      const texto = await this.#llamar(prompt, `Transcripción: ${input.transcripcion}`)
+      const latencia = Date.now() - inicio
+
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Extractor devolvió no-JSON: ${texto.slice(0, 100)}`)
+      }
+
+      const parsed = EventoCampoExtraidoSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema extractor inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: parsed.data, metadata: { latencia_ms: latencia } })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error extrayendo ${clasificacion.tipo_evento}: ${String(err)}`, err)
+    }
+  }
+
   async #llamar(systemPrompt: string, userContent: string): Promise<string> {
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+    ]
+    if (userContent) {
+      messages.push({ role: 'user', content: userContent })
+    }
     const res = await this.#client.chat.completions.create({
       model: this.#model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
+      messages,
       response_format: { type: 'json_object' },
       temperature: 0.1,
     })
     return res.choices[0]?.message.content ?? ''
   }
 
-  // Texto libre — para transcripción y análisis de imagen
   async #llamarLibre(systemPrompt: string, userContent: string): Promise<string> {
     const res = await this.#client.chat.completions.create({
       model: this.#model,

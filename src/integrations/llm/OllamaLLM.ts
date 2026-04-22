@@ -5,7 +5,8 @@ import { langfuse as langfuseDefault } from '../langfuse.js'
 import type { IWasagroLLM } from './IWasagroLLM.js'
 import { LLMError } from './LLMError.js'
 import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
-import type { ContextoConversacion, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
+import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
+import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 
@@ -105,39 +106,16 @@ export class OllamaLLM implements IWasagroLLM {
     }
   }
 
-  async onboardar(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
-    // Regla 2: máximo 2 preguntas de clarificación sin completar → fallback
-    if (contexto.preguntas_realizadas >= 2) {
-      this.#lf.trace({ id: traceId }).event({
-        name: 'onboarding_max_questions_reached',
-        level: 'WARNING',
-        input: { preguntas_realizadas: contexto.preguntas_realizadas },
-      })
-      return {
-        mensaje: 'Listo, completaremos tu registro más adelante. Un asesor te contactará pronto. ✅',
-        onboarding_completo: false,
-        siguiente_pregunta: null,
-      }
-    }
+  async onboardarAdmin(_mensaje: string, _contexto: ContextoConversacion, _traceId: string): Promise<RespuestaOnboarding> {
+    throw new LLMError('OLLAMA_UNAVAILABLE', 'OllamaLLM: onboardarAdmin no implementado — usa GroqLLM')
+  }
 
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'onboardar', model: this.#model, input: { mensaje } })
-    try {
-      const prompt = injectarVariables(cargarPrompt('sp-04-onboarding.md'), {
-        PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
-        DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
-      })
-      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#llamar(`${prompt}\n\nHistorial:\n${historial}\nUsuario: ${mensaje}`)
-      let json: unknown
-      try { json = JSON.parse(texto) } catch { json = { mensaje: texto, onboarding_completo: false, siguiente_pregunta: null } }
-      generation.end({ output: json })
-      return json as RespuestaOnboarding
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw this.#envolverError(err)
-    }
+  async onboardarAgricultor(_mensaje: string, _contexto: ContextoOnboardingAgricultor, _traceId: string): Promise<RespuestaOnboarding> {
+    throw new LLMError('OLLAMA_UNAVAILABLE', 'OllamaLLM: onboardarAgricultor no implementado — usa GroqLLM')
+  }
+
+  async atenderProspecto(_mensaje: string, _contexto: ContextoProspecto, _traceId: string): Promise<RespuestaProspecto> {
+    throw new LLMError('OLLAMA_UNAVAILABLE', 'OllamaLLM: atenderProspecto no implementado — usa GroqLLM')
   }
 
   async resumirSemana(eventos: EventoCampoExtraido[], traceId: string): Promise<ResumenSemanal> {
@@ -148,6 +126,7 @@ export class OllamaLLM implements IWasagroLLM {
       const texto = await this.#llamar(`${prompt}\n\nEventos:\n${JSON.stringify(eventos, null, 2)}`)
       let json: unknown
       try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', 'Ollama no devolvió JSON para resumen semanal')
       }
       generation.end({ output: json })
