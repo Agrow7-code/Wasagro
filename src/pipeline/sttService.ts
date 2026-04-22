@@ -9,6 +9,7 @@ export async function transcribirAudio(
 ): Promise<string> {
   const fetchClient = deps.fetchClient ?? globalThis.fetch
   const openaiClient = deps.openaiClient ?? defaultOpenai
+  if (!openaiClient) throw new Error('STT_NO_DISPONIBLE')
 
   const trace = langfuse.trace({ id: traceId })
   const generation = trace.startGeneration({

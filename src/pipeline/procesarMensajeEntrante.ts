@@ -118,7 +118,16 @@ async function handleEvento(
 
   if (msg.tipo === 'audio') {
     const audioRef = msg.audioUrl ?? msg.mediaId ?? ''
-    transcripcion = await transcribirAudio(audioRef, traceId)
+    try {
+      transcripcion = await transcribirAudio(audioRef, traceId)
+    } catch (err) {
+      if (err instanceof Error && err.message === 'STT_NO_DISPONIBLE') {
+        await _sender!.enviarTexto(msg.from, 'Por ahora no proceso audios. Escríbeme el mensaje en texto. ✅')
+        await actualizarMensaje(mensajeId, { status: 'processed' })
+        return
+      }
+      throw err
+    }
     await actualizarMensaje(mensajeId, { contenido_raw: transcripcion })
   } else if (msg.tipo === 'texto') {
     transcripcion = msg.texto!
