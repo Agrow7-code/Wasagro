@@ -357,19 +357,51 @@ async function handleEvento(
 
       await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
       await updateSession(session.session_id, { clarification_count: 0, status: 'completed' })
-      await _sender!.enviarTexto(msg.from, buildConfirmacion(ext, evStatus))
+      const loteName = ext.lote_id
+        ? (lotes.find(l => l.lote_id === ext.lote_id)?.nombre_coloquial ?? undefined)
+        : undefined
+      await _sender!.enviarTexto(msg.from, buildConfirmacion(ext, evStatus, loteName))
       return
     }
 
-    // El usuario quiere corregir → resetear sesión y re-extraer con el texto actual
-    await updateSession(session.session_id, {
-      status: 'active',
-      clarification_count: 0,
-      contexto_parcial: {},
-    })
-    session.status = 'active'
-    session.clarification_count = 0
-    session.contexto_parcial = {}
+    // El usuario quiere corregir → mergear corrección con lo ya extraído y re-extraer
+    const stored = session.contexto_parcial as { extracted_data?: EventoCampoExtraido; transcripcion_original?: string }
+    const transcripcionMerged = stored.transcripcion_original
+      ? `${stored.transcripcion_original}. Corrección: ${transcripcion}`
+      : transcripcion
+
+    const entradaCorreccion: EntradaEvento = {
+      transcripcion: transcripcionMerged,
+      finca_id: usuario.finca_id ?? '',
+      usuario_id: usuario.id,
+      nombre_usuario: usuario.nombre ?? undefined,
+      finca_nombre: finca?.nombre,
+      cultivo_principal: finca?.cultivo_principal ?? undefined,
+      pais: finca?.pais,
+      lista_lotes,
+    }
+
+    const extractedCorreccion = await _llm!.extraerEvento(entradaCorreccion, traceId)
+
+    if (extractedCorreccion.tipo_evento !== 'sin_evento') {
+      await updateSession(session.session_id, {
+        status: 'pending_confirmation',
+        clarification_count: 0,
+        contexto_parcial: {
+          extracted_data: extractedCorreccion as unknown as Record<string, unknown>,
+          transcripcion_original: transcripcionMerged,
+        },
+      })
+      await _sender!.enviarTexto(msg.from, buildResumenParaConfirmar(extractedCorreccion, lotes))
+      await actualizarMensaje(mensajeId, { status: 'processing' })
+      return
+    }
+
+    // Corrección resultó en sin_evento → reset limpio
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    await _sender!.enviarTexto(msg.from, '¿Qué quieres registrar?')
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
   }
 
   // ── Extracción ────────────────────────────────────────────────────────────
@@ -456,7 +488,7 @@ function buildResumenParaConfirmar(
 
   const tipo = etiquetas[extracted.tipo_evento] ?? '📋 Reporte'
   const loteNombre = extracted.lote_id
-    ? (lotes.find(l => l.lote_id === extracted.lote_id)?.nombre_coloquial ?? extracted.lote_id)
+    ? (lotes.find(l => l.lote_id === extracted.lote_id)?.nombre_coloquial ?? null)
     : null
   const loteLinea = loteNombre ? `• Lote: ${loteNombre}\n` : ''
   const fechaLinea = extracted.fecha_evento ? `• Fecha: ${extracted.fecha_evento}\n` : ''
@@ -477,7 +509,7 @@ function buildResumenParaConfirmar(
   return `Esto es lo que entendí:\n\n${tipo}\n${loteLinea}${fechaLinea}${lineas.join('\n')}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
 }
 
-function buildConfirmacion(extracted: EventoCampoExtraido, status: string): string {
+function buildConfirmacion(extracted: EventoCampoExtraido, status: string, loteName?: string): string {
   if (status === 'requires_review') {
     return 'Registré tu reporte. Lo revisa tu asesor pronto. ✅'
   }
@@ -493,7 +525,7 @@ function buildConfirmacion(extracted: EventoCampoExtraido, status: string): stri
     nota_libre: 'nota',
   }
   const label = labels[extracted.tipo_evento] ?? 'reporte'
-  const lote = extracted.lote_id ? ` en ${extracted.lote_id}` : ''
+  const lote = loteName ? ` en ${loteName}` : ''
   const alerta = extracted.alerta_urgente ? ' ⚠️ Tu asesor revisará este caso pronto.' : ''
   return `✅ Registré tu ${label}${lote}.${alerta}`
 }
