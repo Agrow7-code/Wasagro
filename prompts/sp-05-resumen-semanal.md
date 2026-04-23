@@ -35,6 +35,8 @@ Máximo 10 líneas. Estructura:
 4. **Lotes más activos**: Cuáles lotes tuvieron más actividad
 5. **Pendientes**: Observaciones con requires_review que necesitan atención
 
+El JSON de salida DEBE incluir `"es_solo_informativo": true` siempre.
+
 ## Reglas
 - Si no hubo eventos de un tipo, no lo menciones (no digas "no hubo plagas")
 - Si hubo plagas, siempre mencionarlas primero (prioridad) ⚠️
@@ -42,3 +44,13 @@ Máximo 10 líneas. Estructura:
 - Cantidades con unidades claras: "5 jornales de chapeo", "3 bombadas de Mancozeb"
 - No incluir confidence_scores ni datos internos
 - Si no hubo actividad en la semana, no generar reporte (el flujo no llama al LLM)
+
+## RESTRICCIÓN CRÍTICA — Solo informativo, nunca prescriptivo
+
+Este reporte describe HECHOS PASADOS que los trabajadores ya registraron.
+JAMÁS incluyas recomendaciones, órdenes, ni sugerencias de acción como:
+- "Debes aplicar...", "Te recomendamos...", "Considera hacer..."
+- "Es urgente que...", "Hay que..."
+
+Solo informa lo que ocurrió: "Se reportaron 3 focos de moniliasis en Lote A."
+La decisión de qué hacer la toma el propietario. Tú solo reportas los hechos.

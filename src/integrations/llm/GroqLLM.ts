@@ -19,7 +19,7 @@ import {
   type RespuestaOnboarding,
 } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
-import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
+import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
@@ -230,19 +230,30 @@ export class GroqLLM implements IWasagroLLM {
     }
   }
 
-  async resumirSemana(eventos: EventoCampoExtraido[], traceId: string): Promise<ResumenSemanal> {
+  async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { total_eventos: eventos.length } })
+    const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
     try {
-      const prompt = cargarPrompt('sp-05-resumen-semanal.md')
-      const texto = await this.#llamar(prompt, `Eventos:\n${JSON.stringify(eventos, null, 2)}`)
+      const prompt = injectarVariables(cargarPrompt('sp-05-resumen-semanal.md'), {
+        FINCA_NOMBRE: entrada.finca_nombre,
+        CULTIVO_PRINCIPAL: entrada.cultivo_principal,
+        FECHA_INICIO: entrada.fecha_inicio,
+        FECHA_FIN: entrada.fecha_fin,
+        EVENTOS_AGREGADOS: JSON.stringify(entrada.eventos, null, 2),
+      })
+      const texto = await this.#llamar(prompt, `Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`)
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', 'Groq no devolvió JSON para resumen semanal')
       }
-      generation.end({ output: json })
-      return json as ResumenSemanal
+      const parsed = ResumenSemanalSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema resumen semanal inválido: ${parsed.error.message}`)
+      }
+      generation.end({ output: parsed.data })
+      return parsed.data
     } catch (err) {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })

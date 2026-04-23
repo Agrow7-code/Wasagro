@@ -220,6 +220,64 @@ export async function getFincasDisponibles(client: SupabaseClient = defaultClien
   return (data ?? []) as FincaRow[]
 }
 
+export async function getFincasActivas(client: SupabaseClient = defaultClient): Promise<FincaRow[]> {
+  const { data, error } = await client
+    .from('fincas')
+    .select('finca_id, org_id, nombre, pais, cultivo_principal')
+    .eq('activa', true)
+  if (error) throw error
+  return (data ?? []) as FincaRow[]
+}
+
+export interface EventoResumenRow {
+  tipo_evento: string
+  fecha_evento: string | null
+  lote_id: string | null
+  datos_evento: Record<string, unknown>
+  descripcion_raw: string
+  confidence_score: number
+  status: string
+}
+
+export async function getEventosByFincaRango(
+  fincaId: string,
+  desde: Date,
+  hasta: Date,
+  client: SupabaseClient = defaultClient,
+): Promise<EventoResumenRow[]> {
+  const { data, error } = await client
+    .from('eventos_campo')
+    .select('tipo_evento, fecha_evento, lote_id, datos_evento, descripcion_raw, confidence_score, status')
+    .eq('finca_id', fincaId)
+    .gte('created_at', desde.toISOString())
+    .lt('created_at', hasta.toISOString())
+    .neq('status', 'draft')
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as EventoResumenRow[]
+}
+
+export interface AdminRow {
+  id: string
+  phone: string
+  nombre: string | null
+  rol: string
+}
+
+export async function getAdminsByFinca(
+  fincaId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<AdminRow[]> {
+  const { data, error } = await client
+    .from('usuarios')
+    .select('id, phone, nombre, rol')
+    .eq('finca_id', fincaId)
+    .eq('onboarding_completo', true)
+    .in('rol', ['propietario', 'administrador', 'gerente'])
+  if (error) throw error
+  return (data ?? []) as AdminRow[]
+}
+
 export async function updateUsuario(
   id: string,
   updates: Partial<{ nombre: string; onboarding_completo: boolean; finca_id: string; status: string }>,

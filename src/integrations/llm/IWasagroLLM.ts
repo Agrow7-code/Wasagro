@@ -1,7 +1,7 @@
 import type { EntradaEvento, EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
-import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
+import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 
 export interface IWasagroLLM {
   extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido>
@@ -10,5 +10,5 @@ export interface IWasagroLLM {
   onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding>
   onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding>
   atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto>
-  resumirSemana(eventos: EventoCampoExtraido[], traceId: string): Promise<ResumenSemanal>
+  resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal>
 }

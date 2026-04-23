@@ -18,12 +18,14 @@
     "googleapis": "^171.4.0",
     "hono": "^4.7.7",
     "langfuse": "^3.37.3",
+    "node-cron": "^4.2.1",
     "ollama": "^0.5.0",
     "openai": "^4.98.0",
     "zod": "^3.24.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "@types/node-cron": "^3.0.11",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"

@@ -7,7 +7,7 @@ import { LLMError } from './LLMError.js'
 import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
-import type { ResumenSemanal } from '../../types/dominio/Resumen.js'
+import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 
 interface OllamaLLMConfig {
@@ -118,12 +118,12 @@ export class OllamaLLM implements IWasagroLLM {
     throw new LLMError('OLLAMA_UNAVAILABLE', 'OllamaLLM: atenderProspecto no implementado — usa GroqLLM')
   }
 
-  async resumirSemana(eventos: EventoCampoExtraido[], traceId: string): Promise<ResumenSemanal> {
+  async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { total_eventos: eventos.length } })
+    const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
     try {
       const prompt = cargarPrompt('sp-05-resumen-semanal.md')
-      const texto = await this.#llamar(`${prompt}\n\nEventos:\n${JSON.stringify(eventos, null, 2)}`)
+      const texto = await this.#llamar(`${prompt}\n\nFinca: ${entrada.finca_nombre}\nCultivo: ${entrada.cultivo_principal}\nSemana: ${entrada.fecha_inicio} al ${entrada.fecha_fin}\n\nEventos:\n${JSON.stringify(entrada.eventos, null, 2)}`)
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
