@@ -116,7 +116,7 @@ async function handleProspecto(
       cultivo_principal: resultado.datos_extraidos.cultivo_principal,
       pais: resultado.datos_extraidos.pais,
       tamanio_aproximado: resultado.datos_extraidos.tamanio_aproximado,
-      interes_demo: resultado.datos_extraidos.interes_demo,
+      interes_demo: resultado.datos_extraidos.interes_demo || resultado.enviar_link_demo,
     }).catch(err => console.error('[pipeline] Error guardando prospecto:', err))
   }
 
@@ -133,6 +133,16 @@ async function handleProspecto(
   })
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
+
+  // Enviar link de reserva si el agente lo señaló
+  if (resultado.enviar_link_demo) {
+    const demoUrl = process.env['DEMO_BOOKING_URL'] ?? 'wasagro.app/demo'
+    await _sender!.enviarTexto(
+      msg.from,
+      `Aquí tienes el link para reservar tu espacio:\n${demoUrl}\n\nElige el horario que mejor te quede. ✅`
+    )
+  }
+
   await actualizarMensaje(mensajeId, { status: 'processed' })
 }
 

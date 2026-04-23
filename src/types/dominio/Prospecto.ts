@@ -16,6 +16,7 @@ export interface RespuestaProspecto {
     tamanio_aproximado: string | null
     interes_demo: boolean
   }
+  enviar_link_demo: boolean
   guardar_en_prospectos: boolean
   mensaje_para_usuario: string
 }
