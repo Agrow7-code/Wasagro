@@ -384,6 +384,22 @@ async function handleEvento(
     const extractedCorreccion = await _llm!.extraerEvento(entradaCorreccion, traceId)
 
     if (extractedCorreccion.tipo_evento !== 'sin_evento') {
+      // Validar lote también en el path de corrección
+      if (extractedCorreccion.lote_detectado_raw && !extractedCorreccion.lote_id && lotes.length > 0) {
+        const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
+        await updateSession(session.session_id, {
+          status: 'active',
+          clarification_count: 1,
+          contexto_parcial: { original_transcripcion: transcripcionMerged },
+        })
+        await _sender!.enviarTexto(
+          msg.from,
+          `El lote "${extractedCorreccion.lote_detectado_raw}" no está registrado en tu finca. Los lotes disponibles son:\n${listaLotes}\n\n¿En cuál fue?`
+        )
+        await actualizarMensaje(mensajeId, { status: 'processing' })
+        return
+      }
+
       await updateSession(session.session_id, {
         status: 'pending_confirmation',
         clarification_count: 0,
@@ -433,7 +449,7 @@ async function handleEvento(
 
   // Lote mencionado pero no existe en la finca → pedir corrección con lista
   if (extracted.lote_detectado_raw && !extracted.lote_id && lotes.length > 0 && session.clarification_count < 2) {
-    const listaLotes = lotes.map(l => `• ${l.nombre_coloquial} (${l.lote_id})`).join('\n')
+    const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
     await updateSession(session.session_id, {
       clarification_count: session.clarification_count + 1,
       contexto_parcial: { original_transcripcion: transcripcionCombinada },
