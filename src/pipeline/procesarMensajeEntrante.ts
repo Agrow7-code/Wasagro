@@ -18,12 +18,23 @@ import {
   saveProspecto,
   getFincasDisponibles,
   updateUsuario,
+  saveUserConsent,
+  getNextFincaId,
+  createFinca,
+  createLote,
+  getJefeByFinca,
+  getPendingAgricultoresByFinca,
+  approveAgricultor,
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
 import { gcalConfigurado, verificarDisponibilidad, crearReunionConMeet } from '../integrations/gcal.js'
 import { checkCalendarAvailability, buildCalendlyUrl } from '../integrations/calendar.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
+
+// Verbatim consent texts as shown to users (P6 — must match prompts exactly)
+const CONSENT_TEXT_ADMIN = 'Para guardar los reportes de tu finca necesito tu autorización. Tus datos son tuyos — solo se usan para generar tus reportes. Nadie más los ve sin tu permiso. ¿Aceptas?'
+const CONSENT_TEXT_AGRICULTOR = 'Para guardar tus reportes de campo necesito tu permiso. Tus datos solo se usan para los reportes de tu finca. ¿Está bien?'
 const MAX_ONBOARDING_STEPS = 10
 const MAX_PROSPECTO_STEPS = 6
 
@@ -150,7 +161,10 @@ async function handleProspecto(
       pais: resultado.datos_extraidos.pais,
       tamanio_aproximado: resultado.datos_extraidos.tamanio_aproximado,
       interes_demo: resultado.datos_extraidos.interes_demo || resultado.enviar_link_demo,
-    }).catch(err => console.error('[pipeline] Error guardando prospecto:', err))
+    }).catch(err => {
+      console.error('[pipeline] Error guardando prospecto:', err)
+      langfuse.trace({ id: traceId }).event({ name: 'save_prospecto_error', level: 'ERROR', input: { error: String(err) } })
+    })
   }
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
@@ -278,13 +292,50 @@ async function handleOnboardingAdmin(
   }
 
   const resultado = await _llm!.onboardarAdmin(texto, contexto, traceId)
+  const datos = resultado.datos_extraidos ?? {}
 
-  // Cuando completa: actualizar usuario en DB
+  // P6: persist consent exactly once when the user accepts
+  const consentAlreadySaved = Boolean(session.contexto_parcial['consent_saved'])
+  if (datos.consentimiento === true && !consentAlreadySaved) {
+    await saveUserConsent({ user_id: usuario.id, phone: msg.from, tipo: 'datos', texto_mostrado: CONSENT_TEXT_ADMIN, aceptado: true })
+      .catch(err => {
+        console.error('[pipeline] Error guardando consentimiento admin:', err)
+        langfuse.trace({ id: traceId }).event({ name: 'save_consent_error', level: 'ERROR', input: { error: String(err) } })
+      })
+    await updateUsuario(usuario.id, { consentimiento_datos: true })
+      .catch(err => console.error('[pipeline] Error actualizando consentimiento_datos admin:', err))
+  }
+
+  // When onboarding completes: create finca and lotes under the admin's org
   if (resultado.onboarding_completo) {
-    await updateUsuario(usuario.id, { onboarding_completo: true }).catch(err => {
-      console.error('[pipeline] Error actualizando usuario onboarding:', err)
-      langfuse.trace({ id: traceId }).event({ name: 'update_usuario_error', level: 'ERROR', input: { error: String(err) } })
-    })
+    if (datos.finca_nombre) {
+      try {
+        const fincaId = await getNextFincaId()
+        await createFinca({
+          finca_id: fincaId,
+          org_id: usuario.org_id,
+          nombre: datos.finca_nombre,
+          pais: datos.pais ?? null,
+          cultivo_principal: datos.cultivo_principal ?? null,
+          ubicacion: datos.finca_ubicacion_texto ?? null,
+        })
+        const lotes = datos.lotes ?? []
+        for (let i = 0; i < lotes.length; i++) {
+          const loteNum = String(i + 1).padStart(2, '0')
+          await createLote({ lote_id: `${fincaId}-L${loteNum}`, finca_id: fincaId, nombre_coloquial: lotes[i].nombre_coloquial, hectareas: lotes[i].hectareas ?? null })
+        }
+        await updateUsuario(usuario.id, { finca_id: fincaId, onboarding_completo: true })
+        langfuse.trace({ id: traceId }).event({ name: 'finca_creada', level: 'DEFAULT', output: { finca_id: fincaId, lotes: lotes.length } })
+      } catch (err) {
+        console.error('[pipeline] Error creando finca/lotes en onboarding admin:', err)
+        langfuse.trace({ id: traceId }).event({ name: 'create_finca_error', level: 'ERROR', input: { error: String(err) } })
+      }
+    } else {
+      await updateUsuario(usuario.id, { onboarding_completo: true }).catch(err => {
+        console.error('[pipeline] Error actualizando usuario onboarding admin:', err)
+        langfuse.trace({ id: traceId }).event({ name: 'update_usuario_error', level: 'ERROR', input: { error: String(err) } })
+      })
+    }
   }
 
   const nextStep = session.clarification_count + 1
@@ -300,10 +351,8 @@ async function handleOnboardingAdmin(
         { rol: 'usuario' as const, contenido: texto },
         { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario },
       ],
-      datos: {
-        ...contexto.datos_recolectados,
-        ...(resultado.datos_extraidos ?? {}),
-      },
+      datos: { ...contexto.datos_recolectados, ...(resultado.datos_extraidos ?? {}) },
+      consent_saved: datos.consentimiento === true ? true : consentAlreadySaved,
     },
     status: resultado.onboarding_completo || nextStep >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
@@ -340,18 +389,50 @@ async function handleOnboardingAgricultor(
   }
 
   const resultado = await _llm!.onboardarAgricultor(texto, contexto, traceId)
+  const datosAgr = resultado.datos_extraidos ?? {}
 
-  // Si el agricultor quedó pendiente de aprobación → loggear para notificación al jefe
+  // P6: persist consent exactly once when the agricultor accepts
+  const consentAlreadySavedAgr = Boolean(session.contexto_parcial['consent_saved'])
+  if (datosAgr.consentimiento === true && !consentAlreadySavedAgr) {
+    await saveUserConsent({ user_id: usuario.id, phone: msg.from, tipo: 'datos', texto_mostrado: CONSENT_TEXT_AGRICULTOR, aceptado: true })
+      .catch(err => {
+        console.error('[pipeline] Error guardando consentimiento agricultor:', err)
+        langfuse.trace({ id: traceId }).event({ name: 'save_consent_error', level: 'ERROR', input: { error: String(err) } })
+      })
+    await updateUsuario(usuario.id, { consentimiento_datos: true })
+      .catch(err => console.error('[pipeline] Error actualizando consentimiento_datos agricultor:', err))
+  }
+
+  // Assign finca_id when the agricultor selects their finca
+  if (datosAgr.finca_id && usuario.finca_id !== datosAgr.finca_id) {
+    await updateUsuario(usuario.id, { finca_id: datosAgr.finca_id }).catch(err => {
+      console.error('[pipeline] Error asignando finca_id a agricultor:', err)
+      langfuse.trace({ id: traceId }).event({ name: 'assign_finca_error', level: 'ERROR', input: { error: String(err) } })
+    })
+  }
+
+  // Mark as pending and notify jefe
   if (resultado.status_usuario === 'pendiente_aprobacion') {
+    await updateUsuario(usuario.id, { status: 'pendiente_aprobacion' })
+      .catch(err => console.error('[pipeline] Error actualizando status agricultor:', err))
     langfuse.trace({ id: traceId }).event({
       name: 'agricultor_pendiente_aprobacion',
-      input: {
-        usuario_id: usuario.id,
-        phone: msg.from,
-        finca_id: resultado.datos_extraidos?.finca_id,
-      },
+      input: { usuario_id: usuario.id, phone: msg.from, finca_id: datosAgr.finca_id },
     })
-    // TODO: enviar WhatsApp al jefe de la finca cuando haya query getJefeByFinca
+    const fincaIdParaJefe = datosAgr.finca_id ?? usuario.finca_id
+    if (fincaIdParaJefe) {
+      const jefe = await getJefeByFinca(fincaIdParaJefe).catch(err => {
+        console.error('[pipeline] Error buscando jefe para notificación:', err)
+        return null
+      })
+      if (jefe) {
+        const nombreAgr = datosAgr.nombre ?? msg.from
+        await _sender!.enviarTexto(
+          jefe.phone,
+          `⚠️ ${nombreAgr} quiere unirse a tu finca. Responde *aprobar ${nombreAgr}* para activarlo.`,
+        ).catch(err => console.error('[pipeline] Error notificando al jefe:', err))
+      }
+    }
   }
 
   if (resultado.onboarding_completo) {
@@ -375,6 +456,7 @@ async function handleOnboardingAgricultor(
         { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario },
       ],
       datos: { ...datosPrevios, ...(resultado.datos_extraidos ?? {}) },
+      consent_saved: datosAgr.consentimiento === true ? true : consentAlreadySavedAgr,
     },
     status: resultado.onboarding_completo || nextStepAgr >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
@@ -391,6 +473,15 @@ async function handleEvento(
   mensajeId: string,
   traceId: string,
 ): Promise<void> {
+  // Approval command: "aprobar [nombre]" from jefe/propietario (text only, before audio processing)
+  if (msg.tipo === 'texto' && ROLES_ADMIN.has(usuario.rol) && usuario.finca_id) {
+    const approvalMatch = (msg.texto ?? '').toLowerCase().match(/^aprobar\s+(.+)/)
+    if (approvalMatch) {
+      await handleAprobacion(msg, usuario, mensajeId, traceId, approvalMatch[1].trim())
+      return
+    }
+  }
+
   // Determinar transcripción
   let transcripcion: string
 
@@ -608,6 +699,35 @@ async function handleEvento(
   })
   await _sender!.enviarTexto(msg.from, buildResumenParaConfirmar(extracted, lotes))
   await actualizarMensaje(mensajeId, { status: 'processing' })
+}
+
+async function handleAprobacion(
+  msg: NormalizedMessage,
+  usuario: NonNullable<Awaited<ReturnType<typeof getUserByPhone>>>,
+  mensajeId: string,
+  traceId: string,
+  nombreBuscado: string,
+): Promise<void> {
+  const pendientes = await getPendingAgricultoresByFinca(usuario.finca_id!)
+  const target = pendientes.find(p => (p.nombre ?? '').toLowerCase().includes(nombreBuscado.toLowerCase()))
+
+  if (!target) {
+    await _sender!.enviarTexto(msg.from, `No encontré a nadie pendiente con ese nombre ⚠️`)
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  await approveAgricultor(target.id)
+
+  langfuse.trace({ id: traceId }).event({
+    name: 'agricultor_aprobado',
+    level: 'DEFAULT',
+    input: { aprobado_id: target.id, aprobado_phone: target.phone, jefe_id: usuario.id },
+  })
+
+  await _sender!.enviarTexto(msg.from, `✅ ${target.nombre ?? target.phone} ya está activo en la finca.`)
+  await _sender!.enviarTexto(target.phone, `✅ Ya te activaron. Puedes mandar tus reportes de campo.`)
+  await actualizarMensaje(mensajeId, { status: 'processed' })
 }
 
 function buildResumenParaConfirmar(

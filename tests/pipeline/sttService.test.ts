@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('../../src/integrations/langfuse.js', () => ({
   langfuse: {
     trace: vi.fn().mockReturnValue({
-      startGeneration: vi.fn().mockReturnValue({ end: vi.fn() }),
+      generation: vi.fn().mockReturnValue({ end: vi.fn() }),
       event: vi.fn(),
     }),
   },

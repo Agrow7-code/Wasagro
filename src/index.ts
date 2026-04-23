@@ -8,6 +8,50 @@ import { inicializarPipeline } from './pipeline/procesarMensajeEntrante.js'
 import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { langfuse } from './integrations/langfuse.js'
 
+// ── Startup env var validation ────────────────────────────────────────────────
+function validarEnvVars(): void {
+  const provider = process.env['WHATSAPP_PROVIDER']
+  const llmProvider = process.env['WASAGRO_LLM']
+
+  const criticas: string[] = []
+
+  if (!process.env['SUPABASE_URL']) criticas.push('SUPABASE_URL')
+  if (!process.env['SUPABASE_SERVICE_ROLE_KEY']) criticas.push('SUPABASE_SERVICE_ROLE_KEY')
+  if (!llmProvider) criticas.push('WASAGRO_LLM')
+  if (!provider) criticas.push('WHATSAPP_PROVIDER')
+
+  if (llmProvider === 'gemini' && !process.env['GEMINI_API_KEY']) criticas.push('GEMINI_API_KEY')
+
+  if (provider === 'meta') {
+    if (!process.env['WHATSAPP_PHONE_NUMBER_ID']) criticas.push('WHATSAPP_PHONE_NUMBER_ID')
+    if (!process.env['WHATSAPP_ACCESS_TOKEN']) criticas.push('WHATSAPP_ACCESS_TOKEN')
+    if (!process.env['WHATSAPP_APP_SECRET']) criticas.push('WHATSAPP_APP_SECRET')
+  } else if (provider === 'evolution') {
+    if (!process.env['EVOLUTION_API_URL']) criticas.push('EVOLUTION_API_URL')
+    if (!process.env['EVOLUTION_API_KEY']) criticas.push('EVOLUTION_API_KEY')
+    if (!process.env['EVOLUTION_INSTANCE']) criticas.push('EVOLUTION_INSTANCE')
+    if (!process.env['WHATSAPP_APP_SECRET']) criticas.push('WHATSAPP_APP_SECRET')
+  }
+
+  if (criticas.length > 0) {
+    console.error('[startup] Variables de entorno críticas faltantes:', criticas.join(', '))
+    process.exit(1)
+  }
+
+  const opcionales = [
+    ['DEMO_BOOKING_URL', 'sin esta variable no se podrán enviar links de demo'],
+    ['REPORTE_SECRET', 'el endpoint /reportes/semanal no estará protegido'],
+    ['LANGFUSE_SECRET_KEY', 'sin observabilidad LangFuse'],
+    ['LANGFUSE_PUBLIC_KEY', 'sin observabilidad LangFuse'],
+  ]
+
+  for (const [k, hint] of opcionales) {
+    if (!process.env[k]) console.warn(`[startup] ${k} no configurado — ${hint}`)
+  }
+}
+
+validarEnvVars()
+
 const adapter = crearAdapterWhatsApp()
 const sender = crearSenderWhatsApp()
 const llm = crearLLM()

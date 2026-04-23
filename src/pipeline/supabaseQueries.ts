@@ -11,6 +11,7 @@ export interface UsuarioRow {
   email: string | null
   onboarding_completo: boolean
   consentimiento_datos: boolean
+  status: string
 }
 
 export interface FincaRow {
@@ -105,7 +106,7 @@ export async function actualizarMensaje(
 export async function getUserByPhone(phone: string, client: SupabaseClient = defaultClient): Promise<UsuarioRow | null> {
   const { data, error } = await client
     .from('usuarios')
-    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos')
+    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos, status')
     .eq('phone', phone)
     .maybeSingle()
   if (error) throw error
@@ -280,12 +281,109 @@ export async function getAdminsByFinca(
 
 export async function updateUsuario(
   id: string,
-  updates: Partial<{ nombre: string; onboarding_completo: boolean; finca_id: string; status: string }>,
+  updates: Partial<{ nombre: string; onboarding_completo: boolean; finca_id: string; org_id: string; status: string; consentimiento_datos: boolean }>,
   client: SupabaseClient = defaultClient,
 ): Promise<void> {
   const { error } = await client
     .from('usuarios')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
+  if (error) throw error
+}
+
+export interface UserConsentInsert {
+  user_id: string
+  phone: string
+  tipo: 'datos' | 'comunicaciones' | 'ubicacion'
+  texto_mostrado: string
+  aceptado: boolean
+}
+
+export async function saveUserConsent(data: UserConsentInsert, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client.from('user_consents').insert(data)
+  if (error) throw error
+}
+
+export async function getNextFincaId(client: SupabaseClient = defaultClient): Promise<string> {
+  const { data, error } = await client
+    .from('fincas')
+    .select('finca_id')
+    .order('finca_id', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  const match = (data as { finca_id: string } | null)?.finca_id?.match(/^F(\d+)$/)
+  const next = match ? parseInt(match[1], 10) + 1 : 1
+  return `F${String(next).padStart(3, '0')}`
+}
+
+export interface FincaInsert {
+  finca_id: string
+  org_id: string
+  nombre: string
+  pais: string | null
+  cultivo_principal?: string | null
+  ubicacion?: string | null
+}
+
+export async function createFinca(data: FincaInsert, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client.from('fincas').insert({
+    finca_id: data.finca_id,
+    org_id: data.org_id,
+    nombre: data.nombre,
+    pais: data.pais,
+    cultivo_principal: data.cultivo_principal ?? null,
+    ubicacion: data.ubicacion ?? null,
+    activa: true,
+  })
+  if (error) throw error
+}
+
+export interface LoteInsert {
+  lote_id: string
+  finca_id: string
+  nombre_coloquial: string
+  hectareas?: number | null
+}
+
+export async function createLote(data: LoteInsert, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client.from('lotes').insert({
+    lote_id: data.lote_id,
+    finca_id: data.finca_id,
+    nombre_coloquial: data.nombre_coloquial,
+    hectareas: data.hectareas ?? null,
+    activo: true,
+  })
+  if (error) throw error
+}
+
+export async function getJefeByFinca(fincaId: string, client: SupabaseClient = defaultClient): Promise<AdminRow | null> {
+  const { data, error } = await client
+    .from('usuarios')
+    .select('id, phone, nombre, rol')
+    .eq('finca_id', fincaId)
+    .in('rol', ['propietario', 'jefe_finca', 'admin_org', 'director'])
+    .eq('onboarding_completo', true)
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data as AdminRow | null
+}
+
+export async function getPendingAgricultoresByFinca(fincaId: string, client: SupabaseClient = defaultClient): Promise<UsuarioRow[]> {
+  const { data, error } = await client
+    .from('usuarios')
+    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos, status')
+    .eq('finca_id', fincaId)
+    .eq('status', 'pendiente_aprobacion')
+  if (error) throw error
+  return (data ?? []) as UsuarioRow[]
+}
+
+export async function approveAgricultor(userId: string, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client
+    .from('usuarios')
+    .update({ status: 'activo', onboarding_completo: true, updated_at: new Date().toISOString() })
+    .eq('id', userId)
   if (error) throw error
 }

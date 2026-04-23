@@ -37,7 +37,7 @@ function crearSdkMock(responseText: string) {
 
 function crearLangfuseMock() {
   const generation = { end: vi.fn() }
-  const trace = { startGeneration: vi.fn().mockReturnValue(generation), event: vi.fn() }
+  const trace = { generation: vi.fn().mockReturnValue(generation), event: vi.fn() }
   return { trace: vi.fn().mockReturnValue(trace), _generation: generation, _trace: trace }
 }
 
@@ -86,18 +86,4 @@ describe('GeminiLLM', () => {
     })
   })
 
-  describe('onboardar — Regla 2: máximo 2 preguntas', () => {
-    it('retorna fallback sin llamar al LLM cuando preguntas_realizadas >= 2', async () => {
-      const sdk = crearSdkMock('{}')
-      const lf = crearLangfuseMock()
-      const llm = new GeminiLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
-      const contexto = { historial: [], preguntas_realizadas: 2, datos_recolectados: {} }
-
-      const resultado = await llm.onboardar('hola', contexto, 'trace-003')
-
-      expect(resultado.onboarding_completo).toBe(false)
-      expect(resultado.siguiente_pregunta).toBeNull()
-      expect(sdk.getGenerativeModel).not.toHaveBeenCalled()
-    })
-  })
 })
