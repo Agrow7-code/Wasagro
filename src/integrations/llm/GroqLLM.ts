@@ -201,9 +201,11 @@ export class GroqLLM implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'atender_prospecto', model: this.#model, input: { mensaje } })
     try {
+      const hoy = new Date().toISOString().slice(0, 10)
       const prompt = injectarVariables(cargarPrompt('sp-00-prospecto.md'), {
         PASO_ACTUAL: String(contexto.paso_actual),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recopilados),
+        FECHA_ACTUAL: hoy,
       })
       const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
       const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)

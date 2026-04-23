@@ -15,6 +15,7 @@ export interface RespuestaProspecto {
     pais: string | null
     tamanio_aproximado: string | null
     interes_demo: boolean
+    horario_preferido: string | null
   }
   enviar_link_demo: boolean
   guardar_en_prospectos: boolean

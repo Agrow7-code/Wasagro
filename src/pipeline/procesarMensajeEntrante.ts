@@ -20,6 +20,7 @@ import {
   updateUsuario,
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
+import { checkCalendarAvailability, buildCalendlyUrl } from '../integrations/calendar.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 const MAX_ONBOARDING_STEPS = 10
@@ -136,14 +137,45 @@ async function handleProspecto(
 
   // Enviar link de reserva si el agente lo señaló
   if (resultado.enviar_link_demo) {
-    const demoUrl = process.env['DEMO_BOOKING_URL'] ?? 'wasagro.app/demo'
-    await _sender!.enviarTexto(
-      msg.from,
-      `Aquí tienes el link para reservar tu espacio:\n${demoUrl}\n\nElige el horario que mejor te quede. ✅`
-    )
+    await enviarLinkDemo(msg.from, resultado.datos_extraidos.horario_preferido ?? null)
   }
 
   await actualizarMensaje(mensajeId, { status: 'processed' })
+}
+
+async function enviarLinkDemo(to: string, horarioIso: string | null): Promise<void> {
+  const baseUrl = process.env['DEMO_BOOKING_URL'] ?? 'https://calendly.com/henrymoba17/30min'
+  const preferredDate = horarioIso ? new Date(horarioIso) : undefined
+  const isValidDate = preferredDate && !isNaN(preferredDate.getTime())
+
+  if (isValidDate) {
+    const disponibilidad = await checkCalendarAvailability(preferredDate!)
+
+    if (disponibilidad === 'available') {
+      const url = buildCalendlyUrl(baseUrl, preferredDate)
+      await _sender!.enviarTexto(
+        to,
+        `Ese horario está libre ✅ Aquí tienes el link — ya está preseleccionada esa fecha:\n${url}\n\nConfirma y listo.`
+      )
+      return
+    }
+
+    if (disponibilidad === 'busy') {
+      const url = buildCalendlyUrl(baseUrl)
+      await _sender!.enviarTexto(
+        to,
+        `Ese horario ya lo tengo comprometido ⚠️ Elige el que mejor te quede en este link:\n${url}`
+      )
+      return
+    }
+  }
+
+  // Sin horario o no se pudo verificar
+  const url = buildCalendlyUrl(baseUrl, isValidDate ? preferredDate : undefined)
+  await _sender!.enviarTexto(
+    to,
+    `Aquí tienes el link para reservar tu espacio:\n${url}\n\nElige el horario que mejor te quede. ✅`
+  )
 }
 
 // ─── Onboarding admin / propietario ───────────────────────────────────────
