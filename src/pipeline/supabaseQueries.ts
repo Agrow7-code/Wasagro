@@ -142,7 +142,7 @@ export async function getOrCreateSession(
     .select('*')
     .eq('phone', phone)
     .eq('tipo_sesion', tipo)
-    .eq('status', 'active')
+    .in('status', ['active', 'pending_confirmation'])
     .gt('expires_at', new Date().toISOString())
     .maybeSingle()
 
