@@ -144,7 +144,11 @@ async function handleProspecto(
 }
 
 async function enviarLinkDemo(to: string, horarioIso: string | null): Promise<void> {
-  const baseUrl = process.env['DEMO_BOOKING_URL'] ?? 'https://calendly.com/henrymoba17/30min'
+  const baseUrl = process.env['DEMO_BOOKING_URL'] ?? ''
+  if (!baseUrl) {
+    console.error('[pipeline] DEMO_BOOKING_URL no configurado — no se puede enviar link de demo')
+    return
+  }
   const preferredDate = horarioIso ? new Date(horarioIso) : undefined
   const isValidDate = preferredDate && !isNaN(preferredDate.getTime())
 
