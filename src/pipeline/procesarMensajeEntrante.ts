@@ -20,6 +20,7 @@ import {
   updateUsuario,
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
+import { gcalConfigurado, verificarDisponibilidad, crearReunionConMeet } from '../integrations/gcal.js'
 import { checkCalendarAvailability, buildCalendlyUrl } from '../integrations/calendar.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
@@ -99,6 +100,37 @@ async function handleProspecto(
   const session = await getOrCreateSession(msg.from, 'reporte')
   const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : '[mensaje de voz o imagen]'
 
+  // ── Confirmación de reunión pendiente (prospecto responde al horario propuesto) ──
+  if (session.status === 'pending_confirmation' && session.contexto_parcial['horario_propuesto']) {
+    const respuesta = texto.toLowerCase().trim()
+    const confirma = /^(sí|si|s|yes|ok|correcto|exacto|dale|listo|confirmo|✅)/.test(respuesta)
+
+    if (confirma) {
+      const horarioIso = session.contexto_parcial['horario_propuesto'] as string
+      const nombreContacto = (session.contexto_parcial['nombre_contacto'] as string | null) ?? 'Cliente'
+      const dt = new Date(horarioIso)
+
+      const reunion = await crearReunionConMeet(dt, 30, nombreContacto)
+      if (reunion) {
+        await updateSession(session.session_id, { status: 'completed', contexto_parcial: {} })
+        await _sender!.enviarTexto(
+          msg.from,
+          `Reunión agendada ✅\n📅 ${formatearFecha(dt)}\n🔗 ${reunion.meetLink}\n\nTe espero ahí.`,
+        )
+        await actualizarMensaje(mensajeId, { status: 'processed' })
+        return
+      }
+      // GCal falló → caer a Calendly
+      await updateSession(session.session_id, { status: 'active', contexto_parcial: {} })
+      await enviarCalendly(msg.from, new Date(horarioIso))
+      await actualizarMensaje(mensajeId, { status: 'processed' })
+      return
+    }
+
+    // Prospecto no confirmó → reset y seguir flujo normal
+    await updateSession(session.session_id, { status: 'active', contexto_parcial: {} })
+  }
+
   const contexto: ContextoProspecto = {
     historial: (session.contexto_parcial['historial'] as Array<{ rol: 'usuario' | 'agente'; contenido: string }>) ?? [],
     paso_actual: session.clarification_count,
@@ -121,6 +153,53 @@ async function handleProspecto(
     }).catch(err => console.error('[pipeline] Error guardando prospecto:', err))
   }
 
+  await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
+
+  if (resultado.enviar_link_demo) {
+    const horarioIso = resultado.datos_extraidos.horario_preferido ?? null
+    const nombre = resultado.datos_extraidos.nombre ?? null
+    const preferredDate = horarioIso ? new Date(horarioIso) : null
+    const isValidDate = preferredDate instanceof Date && !isNaN(preferredDate.getTime())
+
+    if (isValidDate && gcalConfigurado()) {
+      // Verificar disponibilidad — si libre, proponer y esperar confirmación del prospecto
+      const disponibilidad = await verificarDisponibilidad(preferredDate!)
+
+      if (disponibilidad === 'available') {
+        // Guardar horario propuesto y pedir confirmación explícita antes de crear el evento
+        await updateSession(session.session_id, {
+          clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS),
+          status: 'pending_confirmation',
+          contexto_parcial: {
+            historial: [...contexto.historial, { rol: 'usuario' as const, contenido: texto }, { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario }],
+            datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos },
+            horario_propuesto: horarioIso,
+            nombre_contacto: nombre,
+          },
+        })
+        await _sender!.enviarTexto(
+          msg.from,
+          `📅 ${formatearFecha(preferredDate!)} — ese horario está libre.\n\n¿Confirmamos la demo a esa hora? Responde *sí* para agendar.`,
+        )
+        await actualizarMensaje(mensajeId, { status: 'processing' })
+        return
+      }
+
+      if (disponibilidad === 'busy') {
+        await updateSession(session.session_id, { clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS), contexto_parcial: { historial: [...contexto.historial, { rol: 'usuario' as const, contenido: texto }, { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario }], datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos } } })
+        await enviarCalendly(msg.from)
+        await actualizarMensaje(mensajeId, { status: 'processed' })
+        return
+      }
+    }
+
+    // Sin GCal o fecha inválida o unknown → Calendly con o sin fecha pre-cargada
+    await updateSession(session.session_id, { clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS), contexto_parcial: { historial: [...contexto.historial, { rol: 'usuario' as const, contenido: texto }, { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario }], datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos } } })
+    await enviarCalendly(msg.from, isValidDate ? preferredDate! : undefined)
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
   await updateSession(session.session_id, {
     clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS),
     contexto_parcial: {
@@ -133,53 +212,52 @@ async function handleProspecto(
     },
   })
 
-  await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
-
-  // Enviar link de reserva si el agente lo señaló
-  if (resultado.enviar_link_demo) {
-    await enviarLinkDemo(msg.from, resultado.datos_extraidos.horario_preferido ?? null)
-  }
-
   await actualizarMensaje(mensajeId, { status: 'processed' })
 }
 
-async function enviarLinkDemo(to: string, horarioIso: string | null): Promise<void> {
-  const baseUrl = process.env['DEMO_BOOKING_URL'] ?? ''
-  if (!baseUrl) {
+async function enviarCalendly(to: string, preferredDate?: Date): Promise<void> {
+  const base = process.env['DEMO_BOOKING_URL'] ?? ''
+  if (!base) {
     console.error('[pipeline] DEMO_BOOKING_URL no configurado — no se puede enviar link de demo')
     return
   }
-  const preferredDate = horarioIso ? new Date(horarioIso) : undefined
-  const isValidDate = preferredDate && !isNaN(preferredDate.getTime())
 
-  if (isValidDate) {
-    const disponibilidad = await checkCalendarAvailability(preferredDate!)
-
-    if (disponibilidad === 'available') {
-      const url = buildCalendlyUrl(baseUrl, preferredDate)
-      await _sender!.enviarTexto(
-        to,
-        `Ese horario está libre ✅ Aquí tienes el link — ya está preseleccionada esa fecha:\n${url}\n\nConfirma y listo.`
-      )
-      return
-    }
-
-    if (disponibilidad === 'busy') {
-      const url = buildCalendlyUrl(baseUrl)
-      await _sender!.enviarTexto(
-        to,
-        `Ese horario ya lo tengo comprometido ⚠️ Elige el que mejor te quede en este link:\n${url}`
-      )
-      return
-    }
+  if (!preferredDate) {
+    await _sender!.enviarTexto(
+      to,
+      `Aquí tienes el link para reservar:\n${buildCalendlyUrl(base)}\n\nElige el horario que mejor te quede. ✅`,
+    )
+    return
   }
 
-  // Sin horario o no se pudo verificar
-  const url = buildCalendlyUrl(baseUrl, isValidDate ? preferredDate : undefined)
+  // Con fecha concreta: verificar disponibilidad para dar mensaje correcto
+  const disponibilidad = gcalConfigurado()
+    ? await verificarDisponibilidad(preferredDate)
+    : await checkCalendarAvailability(preferredDate)
+
+  if (disponibilidad === 'busy') {
+    await _sender!.enviarTexto(
+      to,
+      `Ese horario ya lo tengo ocupado ⚠️ Elige el que mejor te quede:\n${buildCalendlyUrl(base)}`,
+    )
+    return
+  }
+
   await _sender!.enviarTexto(
     to,
-    `Aquí tienes el link para reservar tu espacio:\n${url}\n\nElige el horario que mejor te quede. ✅`
+    `Aquí tienes el link — ya va a esa fecha:\n${buildCalendlyUrl(base, preferredDate)}\n\nElige y confirma. ✅`,
   )
+}
+
+function formatearFecha(date: Date): string {
+  return date.toLocaleString('es-EC', {
+    timeZone: 'America/Guayaquil',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 // ─── Onboarding admin / propietario ───────────────────────────────────────
