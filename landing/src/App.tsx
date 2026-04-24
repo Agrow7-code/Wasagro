@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion, useInView } from 'motion/react'
+import { motion, useInView, AnimatePresence } from 'motion/react'
 import {
   ArrowRight, ChevronDown, Mic, CheckCircle, AlertTriangle,
   BarChart3, Leaf, Droplets, Cloud, DollarSign, Grid3x3,
-  Shield, Zap, Globe, Menu, X
+  Zap, Menu, X
 } from 'lucide-react'
+
+const WA_LINK = 'https://wa.me/593999999999?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
 
 // ─────────────────────────────────────────────────────────────
 // LOGO — isotipo v3: W condensada + señal GPS (dot centrado)
@@ -70,9 +72,89 @@ function FadeUp({
 }
 
 // ─────────────────────────────────────────────────────────────
+// WHATSAPP MODAL
+// ─────────────────────────────────────────────────────────────
+function WhatsAppModal({ onClose }: { onClose: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(13,15,12,0.60)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+        className="bg-pergamino border-2 border-tierra rounded-2xl p-8 max-w-sm w-full"
+        style={{ boxShadow: '8px 8px 0 0 #0D0F0C' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Logo */}
+        <div className="flex justify-center mb-5">
+          <Logo size={26} />
+        </div>
+
+        {/* Title */}
+        <h3
+          className="font-bold text-negro text-center mb-2 tracking-[-0.02em]"
+          style={{ fontSize: 22 }}
+        >
+          Vas a abrir WhatsApp
+        </h3>
+
+        {/* Subtitle */}
+        <p className="text-[14px] text-tierra text-center leading-[1.6] mb-6">
+          Escríbenos cualquier cosa para empezar. Te guiamos desde el primer mensaje.
+        </p>
+
+        {/* Preview bubble */}
+        <div className="flex justify-center mb-6">
+          <div
+            className="bg-[#DCF8C6] rounded-xl rounded-tr-[3px] px-4 py-3 max-w-[90%] text-[13px] text-negro leading-[1.5]"
+            style={{ boxShadow: '0 1px 2px rgba(0,0,0,.1)' }}
+          >
+            "Hola, quiero registrar eventos de mi finca"
+          </div>
+        </div>
+
+        {/* CTA */}
+        <a
+          href={WA_LINK}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 w-full py-3.5 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-xl mb-3 hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform duration-100"
+          style={{ boxShadow: '3px 3px 0 0 #1B3D24' }}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+          </svg>
+          Abrir WhatsApp →
+        </a>
+
+        {/* Cancel */}
+        <button
+          onClick={onClose}
+          className="w-full text-center text-[13px] cursor-pointer transition-colors duration-100"
+          style={{ color: 'rgba(212,88,40,0.55)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = '#D45828')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(212,88,40,0.55)')}
+        >
+          Cancelar
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────
-function Nav() {
+function Nav({ onOpenModal }: { onOpenModal: () => void }) {
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
@@ -85,7 +167,6 @@ function Nav() {
   const links = [
     { href: '#como-funciona', label: 'Cómo funciona' },
     { href: '#exportadoras', label: 'Exportadoras' },
-    { href: '#eudr', label: 'EUDR' },
   ]
 
   return (
@@ -118,15 +199,13 @@ function Nav() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <a
-            href="https://wa.me/593999999999?text=Hola%2C%20quiero%20conocer%20Wasagro"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={onOpenModal}
             className="hidden md:flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard-sm hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[4px_4px_0_0_#0D0F0C] transition-all duration-100"
           >
             Solicitar acceso
             <ArrowRight size={13} strokeWidth={2.5} />
-          </a>
+          </button>
 
           <button
             className="md:hidden p-2 border-2 border-negro rounded-md"
@@ -151,14 +230,12 @@ function Nav() {
               {l.label}
             </a>
           ))}
-          <a
-            href="https://wa.me/593999999999?text=Hola%2C%20quiero%20conocer%20Wasagro"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={() => { setOpen(false); onOpenModal() }}
             className="mt-2 flex items-center justify-center gap-2 px-4 py-3 font-bold bg-negro text-pergamino border-2 border-negro rounded-md"
           >
             Solicitar acceso <ArrowRight size={14} />
-          </a>
+          </button>
         </div>
       )}
     </header>
@@ -171,22 +248,24 @@ function Nav() {
 type WaMessage = {
   from: 'user' | 'bot'
   text?: string
+  voice?: boolean
+  duration?: string
   lines?: string[]
   time: string
   alert?: boolean
 }
 
 const WA_MESSAGES: WaMessage[] = [
-  { from: 'user', text: 'Apliqué oxicloruro en lote 7, 3 litros por hectárea', time: '08:43' },
+  { from: 'user', voice: true, duration: '0:18', time: '08:43' },
   {
     from: 'bot',
-    lines: ['✓ Aplicación registrada', 'Lote 7 · oxicloruro de cobre · 3 L/ha', 'Hoy 08:43 · J. Caicedo'],
+    lines: ['✓ Aplicación registrada', 'Lote 3 · Fungicida · 2.5 L/ha', 'Hoy 08:43 · J. Caicedo'],
     time: '08:43',
   },
-  { from: 'user', text: 'Cosecha lote 9, cuatro toneladas y media', time: '09:15' },
+  { from: 'user', text: 'Cosecha lote 7, cuatro cajas', time: '09:15' },
   {
     from: 'bot',
-    lines: ['✓ Cosecha registrada', 'Lote 9 · 4.5 t · +8% vs sem. ant.', 'Procesado en 2 seg ✓'],
+    lines: ['✓ Cosecha registrada', 'Cosecha · 420 kg · Lote 7', 'Procesado en 2 seg ✓'],
     time: '09:15',
   },
   { from: 'user', text: 'Hay sigatoka en lote 12', time: '10:30' },
@@ -197,6 +276,28 @@ const WA_MESSAGES: WaMessage[] = [
     alert: true,
   },
 ]
+
+const WAVEFORM_HEIGHTS = [3, 5, 8, 4, 7, 10, 5, 3, 6, 9, 4, 7, 5, 3, 8, 6, 4]
+
+function VoiceBubble({ duration }: { duration: string }) {
+  return (
+    <div className="flex items-center gap-2 px-1 py-0.5 min-w-[150px]">
+      <div className="w-8 h-8 rounded-full bg-[#128C7E] flex items-center justify-center flex-shrink-0">
+        <Mic size={14} color="#fff" strokeWidth={2} />
+      </div>
+      <div className="flex gap-[2px] items-center flex-1 h-5">
+        {WAVEFORM_HEIGHTS.map((h, i) => (
+          <div
+            key={i}
+            className="w-[2px] rounded-full bg-[#128C7E]"
+            style={{ height: h * 1.5 }}
+          />
+        ))}
+      </div>
+      <span className="font-mono text-[10px] text-[#667781] ml-1 flex-shrink-0">{duration}</span>
+    </div>
+  )
+}
 
 function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
   const [visible, setVisible] = useState(0)
@@ -218,41 +319,53 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
   }, [isInView, autoPlay]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div ref={ref} className="relative mx-auto" style={{ width: 270 }}>
-      {/* Phone frame */}
+    <div ref={ref} className="mx-auto" style={{ maxWidth: 280 }}>
+      {/* Phone body */}
       <div
-        className="relative bg-negro rounded-[38px] p-[6px] border-2 border-negro"
-        style={{ boxShadow: '8px 8px 0 0 #1B3D24' }}
+        className="relative bg-negro overflow-hidden"
+        style={{
+          borderRadius: 36,
+          border: '8px solid #0D0F0C',
+          boxShadow: '12px 12px 0 0 #0D0F0C',
+        }}
       >
+        {/* Notch */}
+        <div className="flex justify-center mt-3 mb-1">
+          <div
+            className="bg-negro"
+            style={{ width: 60, height: 6, borderRadius: 4 }}
+          />
+        </div>
+
         {/* Screen */}
-        <div className="rounded-[32px] overflow-hidden" style={{ background: '#ECE5DD' }}>
-          {/* Status bar */}
-          <div className="h-6 bg-[#1B3D24] flex items-center justify-between px-5">
-            <span className="text-[9px] font-mono text-[#F5F1E8]/50">9:41</span>
-            <div className="flex gap-1 items-center">
-              <div className="w-3 h-1.5 rounded-sm bg-[#F5F1E8]/40" />
-              <div className="w-1 h-1 rounded-full bg-[#F5F1E8]/40" />
-            </div>
-          </div>
+        <div style={{ background: '#ECE5DD' }}>
           {/* WA Header */}
-          <div className="bg-[#1B3D24] px-3 py-2.5 flex items-center gap-2.5 border-b border-[#C9F03B]/10">
+          <div
+            className="flex items-center gap-2.5"
+            style={{ background: '#1B3D24', padding: '12px 16px' }}
+          >
             <div
-              className="w-8 h-8 rounded-full bg-negro flex items-center justify-center border border-[#C9F03B]/30 flex-shrink-0"
+              className="w-8 h-8 rounded-full bg-negro flex items-center justify-center flex-shrink-0"
+              style={{ border: '1px solid rgba(201,240,59,0.30)' }}
             >
-              <svg viewBox="0 -22 60 96" width="15" height="30" fill="none" aria-hidden="true">
+              <svg viewBox="0 -22 60 96" width="14" height="29" fill="none" aria-hidden="true">
                 <path d="M8,8 L18,72 L30,36 L42,72 L52,8" stroke="#F5F1E8" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round" />
                 <circle cx="30" cy="-6" r="12" fill="#C9F03B" />
               </svg>
             </div>
             <div>
               <div className="text-[12px] font-bold text-[#F5F1E8] leading-none">
-                Wasagro<span className="text-[#C9F03B]">.</span>
+                Wasagro<span style={{ color: '#C9F03B' }}>.</span>
               </div>
-              <div className="text-[9px] text-[#F5F1E8]/40 font-mono mt-0.5">En línea</div>
+              <div className="text-[9px] text-[#F5F1E8]/50 font-mono mt-0.5">en línea</div>
             </div>
           </div>
+
           {/* Chat */}
-          <div className="px-2.5 py-2 min-h-[340px] flex flex-col gap-1.5 overflow-hidden">
+          <div
+            className="px-2.5 py-2 flex flex-col gap-1.5 overflow-hidden"
+            style={{ background: '#E5DDD5', minHeight: 320 }}
+          >
             {WA_MESSAGES.slice(0, visible).map((msg, i) => (
               <motion.div
                 key={i}
@@ -271,6 +384,7 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
                   }`}
                   style={{ boxShadow: '0 1px 2px rgba(0,0,0,.08)' }}
                 >
+                  {msg.voice && <VoiceBubble duration={msg.duration ?? '0:00'} />}
                   {msg.text && <p>{msg.text}</p>}
                   {msg.lines && msg.lines.map((l, li) => (
                     <p
@@ -304,6 +418,7 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
               </motion.div>
             )}
           </div>
+
           {/* Input bar */}
           <div className="bg-[#F0F0F0] px-2.5 py-1.5 flex items-center gap-2 border-t border-[#0D0F0C]/10">
             <div className="flex-1 bg-white rounded-full px-3 py-1 text-[10px] text-[#9C9080]">
@@ -314,9 +429,17 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
             </div>
           </div>
         </div>
-        {/* Home bar */}
-        <div className="flex justify-center pt-1.5 pb-0.5">
-          <div className="w-20 h-[3px] bg-[#F5F1E8]/15 rounded-full" />
+
+        {/* Home indicator */}
+        <div className="flex justify-center" style={{ margin: '8px auto' }}>
+          <div
+            style={{
+              width: 40,
+              height: 4,
+              borderRadius: 4,
+              background: 'rgba(245,241,232,0.25)',
+            }}
+          />
         </div>
       </div>
     </div>
@@ -326,7 +449,7 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
 // ─────────────────────────────────────────────────────────────
 // HERO
 // ─────────────────────────────────────────────────────────────
-function Hero() {
+function Hero({ onOpenModal }: { onOpenModal: () => void }) {
   return (
     <section
       className="relative overflow-hidden dot-grid"
@@ -344,7 +467,7 @@ function Hero() {
           >
             <span className="w-7 h-[2px] bg-senal inline-block" />
             <span className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400">
-              Agtech · Ecuador · Guatemala
+              Agtech · Latinoamérica
             </span>
           </motion.div>
 
@@ -361,22 +484,12 @@ function Hero() {
             <br />
             <span
               className="inline"
-              style={{
-                background: '#C9F03B',
-                padding: '0 8px',
-                display: 'inline',
-              }}
+              style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}
             >
               Solo faltaba
             </span>
             <br />
-            <span
-              style={{
-                background: '#C9F03B',
-                padding: '0 8px',
-                display: 'inline',
-              }}
-            >
+            <span style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}>
               Wasagro.
             </span>
           </motion.h1>
@@ -397,18 +510,16 @@ function Hero() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-wrap gap-3 mb-8"
+            className="flex flex-wrap gap-3"
           >
-            <a
-              href="https://wa.me/593999999999?text=Hola%2C%20quiero%20conocer%20Wasagro"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={onOpenModal}
               className="flex items-center gap-2 px-5 py-3 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
               style={{ boxShadow: '4px 4px 0 0 #1B3D24' }}
             >
               Empezar con WhatsApp
               <ArrowRight size={15} strokeWidth={2.5} />
-            </a>
+            </button>
             <a
               href="#como-funciona"
               className="flex items-center gap-2 px-5 py-3 font-semibold text-[15px] border-2 border-negro rounded-md text-negro hover:bg-n200 transition-colors duration-100"
@@ -416,22 +527,6 @@ function Hero() {
               Ver cómo funciona
               <ChevronDown size={14} strokeWidth={2.5} />
             </a>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.4, delay: 0.4 }}
-            className="flex flex-wrap gap-2"
-          >
-            {['Ecuador', 'Guatemala', 'Cacao', 'Banano', 'EUDR-ready'].map((tag) => (
-              <span
-                key={tag}
-                className="px-3 py-1 border-2 border-negro rounded-full font-mono text-[10px] font-bold tracking-[.06em] uppercase text-negro"
-              >
-                {tag}
-              </span>
-            ))}
           </motion.div>
         </div>
 
@@ -455,8 +550,8 @@ function Hero() {
 const STATS = [
   { value: '30', unit: ' seg', label: 'por evento de campo' },
   { value: '0', unit: ' apps', label: 'nuevas que instalar' },
-  { value: '94', unit: '%', label: 'adopción WhatsApp en LatAm' },
-  { value: '100', unit: '%', label: 'EUDR-ready desde día uno' },
+  { value: '90', unit: '%', label: 'de teléfonos con WhatsApp en LATAM' },
+  { value: '100', unit: '%', label: 'de datos listos sin trabajo adicional' },
 ]
 
 function Stats() {
@@ -507,7 +602,8 @@ const MANIFESTO = [
   },
   {
     quote: '"El agtech te pide un formulario.\nNosotros te pedimos que hables."',
-    sub: 'La diferencia es una tasa de adopción del 8% vs el 94% de WhatsApp.',
+    sub: 'Las apps agrícolas especializadas tienen tasas de adopción menores al 15% en LATAM. WhatsApp ya está en el 90% de los teléfonos de la región.',
+    source: 'GSMA Mobile Economy Latin America 2024 · estimaciones de mercado',
   },
 ]
 
@@ -525,9 +621,7 @@ function Manifesto() {
             <FadeUp key={i} delay={i * 0.1}>
               <div
                 className={`border rounded-xl p-7 h-full flex flex-col gap-4 ${
-                  m.highlight
-                    ? 'border-senal/60 bg-senal/5'
-                    : 'border-white/10'
+                  m.highlight ? 'border-senal/60 bg-senal/5' : 'border-white/10'
                 }`}
               >
                 <blockquote
@@ -539,6 +633,11 @@ function Manifesto() {
                 <p className="font-mono text-[13px] text-pergamino/50 leading-[1.65] mt-auto">
                   {m.sub}
                 </p>
+                {m.source && (
+                  <p className="font-mono text-[11px] text-pergamino/25 leading-[1.5]">
+                    {m.source}
+                  </p>
+                )}
               </div>
             </FadeUp>
           ))}
@@ -557,21 +656,21 @@ const STEPS = [
     icon: Mic,
     title: 'Habla (o escribe)',
     desc: 'El trabajador manda un audio, texto o foto por WhatsApp — exactamente como ya lo hace hoy. Sin instrucciones, sin apps, sin cambios.',
-    example: '"Apliqué oxicloruro en lote 7, tres litros"',
+    example: '"Fungicida · 2.5 L/ha · Lote 3"',
   },
   {
     num: '02',
     icon: Zap,
     title: 'Wasagro escucha',
     desc: 'IA extrae producto, lote, dosis, fecha, trabajador y georeferencia en menos de 3 segundos. Confirma con un mensaje limpio.',
-    example: '✓ Lote 7 · oxicloruro · 3 L/ha · 08:43',
+    example: '✓ Lote 3 · Fungicida · 2.5 L/ha · 08:43',
   },
   {
     num: '03',
     icon: BarChart3,
     title: 'Los datos trabajan',
-    desc: 'La exportadora recibe dashboard en tiempo real, reporte semanal PDF y trazabilidad EUDR georreferenciada. Automáticamente.',
-    example: 'PDF EUDR listo · Sin trabajo manual',
+    desc: 'El equipo de exportación recibe dashboard en tiempo real, reporte semanal PDF y trazabilidad georreferenciada. Automáticamente.',
+    example: 'Reporte semanal listo · Sin trabajo manual',
   },
 ]
 
@@ -602,22 +701,17 @@ function HowItWorks() {
         </FadeUp>
 
         <div className="grid md:grid-cols-3 gap-5 relative">
-          {/* Connector line */}
           <div className="hidden md:block absolute top-10 left-[calc(33%+10px)] right-[calc(33%+10px)] h-[2px] bg-negro/20" />
 
           {STEPS.map((step, i) => (
             <FadeUp key={step.num} delay={i * 0.12}>
-              <div
-                className="border-2 border-negro rounded-xl overflow-hidden bg-pergamino shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-150"
-              >
-                {/* Header */}
+              <div className="border-2 border-negro rounded-xl overflow-hidden bg-pergamino shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-150">
                 <div className="bg-negro px-5 py-3 flex items-center gap-3">
                   <span className="font-mono text-[11px] font-bold text-senal tracking-[.1em]">
                     {step.num}
                   </span>
                   <step.icon size={15} color="#C9F03B" strokeWidth={2} />
                 </div>
-                {/* Body */}
                 <div className="p-6">
                   <h3 className="font-bold text-[18px] text-negro mb-3">{step.title}</h3>
                   <p className="text-[14px] text-n700 leading-[1.65] mb-5">{step.desc}</p>
@@ -655,17 +749,17 @@ function WhatsAppSection() {
             className="font-bold leading-[1.0] tracking-[-0.02em] text-pergamino mb-5"
             style={{ fontSize: 'clamp(30px, 4vw, 52px)' }}
           >
-            Un audio de 15 segundos.
+            Demo en vivo — escribe como
             <br />
-            <span className="text-senal">Datos estructurados en 3.</span>
+            <span className="text-senal">si fuera tu equipo de campo.</span>
           </h2>
           <p className="text-[16px] text-pergamino/60 leading-[1.65] mb-8 max-w-md">
-            Wasagro escucha, interpreta y registra sin que el trabajador cambie nada. El mismo WhatsApp. El mismo audio. Ahora con datos que valen.
+            Estos son ejemplos reales de mensajes que Wasagro procesa. Texto, voz o foto — el resultado es el mismo.
           </p>
 
           <div className="flex flex-col gap-3 mb-8">
             {[
-              { icon: CheckCircle, text: 'Producto y concentración exacta', color: '#3EBB6A' },
+              { icon: CheckCircle, text: 'Tipo de insumo y dosis por hectárea', color: '#3EBB6A' },
               { icon: CheckCircle, text: 'Lote y hectáreas afectadas', color: '#3EBB6A' },
               { icon: CheckCircle, text: 'Fecha, hora y trabajador', color: '#3EBB6A' },
               { icon: AlertTriangle, text: 'Alertas de dosis o plagas — automáticas', color: '#C9F03B' },
@@ -676,13 +770,6 @@ function WhatsAppSection() {
               </div>
             ))}
           </div>
-
-          <a
-            href="#eudr"
-            className="inline-flex items-center gap-2 font-mono text-[12px] font-bold text-senal tracking-[.06em] uppercase hover:gap-3 transition-all duration-150"
-          >
-            Ver trazabilidad EUDR <ArrowRight size={12} strokeWidth={2.5} />
-          </a>
         </FadeUp>
 
         {/* Phone */}
@@ -701,8 +788,8 @@ const FEATURES = [
   {
     icon: Droplets,
     title: 'Aplicaciones de insumos',
-    desc: 'Herbicidas, fungicidas, fertilizantes. Extrae producto, dosis por hectárea, método y lote automáticamente.',
-    example: '"Apliqué mancozeb" → Producto · Dosis · Lote',
+    desc: 'Herbicidas, fungicidas, fertilizantes. Extrae tipo, dosis por hectárea, método y lote automáticamente.',
+    example: '"Apliqué fungicida" → Producto · Dosis · Lote',
     color: '#2A50D4',
   },
   {
@@ -715,14 +802,14 @@ const FEATURES = [
   {
     icon: Leaf,
     title: 'Eventos de cosecha',
-    desc: 'Toneladas por lote, calidad de fruta, rechazo. Comparativa automática vs semana anterior.',
-    example: '"Cosechamos 4.2 toneladas" → Cosecha · Lote · Delta',
+    desc: 'Kg o toneladas por lote, calidad de fruta, rechazo. Comparativa automática vs semana anterior.',
+    example: '"Cosechamos 420 kg" → Cosecha · Lote · Delta',
     color: '#3EBB6A',
   },
   {
     icon: Cloud,
     title: 'Eventos climáticos',
-    desc: 'Lluvias, heladas, granizo. Correlación automática con rendimiento de cosecha y aplicaciones.',
+    desc: 'Lluvias, vientos fuertes, granizo. Correlación automática con rendimiento de cosecha y aplicaciones.',
     example: '"Llovió fuerte" → Evento · Intensidad · Lote',
     color: '#2A50D4',
   },
@@ -730,14 +817,14 @@ const FEATURES = [
     icon: DollarSign,
     title: 'Gastos de campo',
     desc: 'Jornales, insumos, combustible. Control de costos por lote sin contabilidad manual.',
-    example: '"Pagué 5 jornales" → Gasto · Lote · Categoría',
+    example: '"Deshierbe · 3 jornales · Lote 2" → Gasto · Lote',
     color: '#C9F03B',
   },
   {
     icon: Grid3x3,
-    title: 'Trazabilidad EUDR',
-    desc: 'Todos los eventos quedan georreferenciados y auditables. PDF listo para certificadoras europeas.',
-    example: 'Todo lo anterior → Expediente EUDR ✓',
+    title: 'Trazabilidad completa',
+    desc: 'Todos los eventos quedan georreferenciados y auditables. Dashboard en tiempo real para el equipo de exportación.',
+    example: 'Todo lo anterior → Expediente auditado ✓',
     color: '#C9F03B',
     highlight: true,
   },
@@ -764,7 +851,7 @@ function Features() {
             <span className="text-campo">Sin que nadie lo transcriba.</span>
           </h2>
           <p className="text-[17px] text-n700 leading-[1.65] max-w-xl mb-14">
-            El trabajador habla como siempre. Wasagro extrae el dato estructurado y lo pone donde la exportadora lo necesita.
+            El trabajador habla como siempre. Wasagro extrae el dato estructurado y lo pone donde el equipo de exportación lo necesita.
           </p>
         </FadeUp>
 
@@ -772,26 +859,20 @@ function Features() {
           {FEATURES.map((f, i) => (
             <FadeUp key={f.title} delay={i * 0.07}>
               <div
-                className={`border-2 border-negro rounded-xl p-6 bg-pergamino shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-150 h-full flex flex-col ${
-                  f.highlight ? 'bg-negro' : ''
+                className={`border-2 border-negro rounded-xl p-6 shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-150 h-full flex flex-col ${
+                  f.highlight ? 'bg-negro' : 'bg-pergamino'
                 }`}
               >
                 <div
                   className="w-10 h-10 rounded-lg border-2 border-negro flex items-center justify-center mb-4 flex-shrink-0"
-                  style={{
-                    background: f.highlight ? '#C9F03B' : `${f.color}15`,
-                  }}
+                  style={{ background: f.highlight ? '#C9F03B' : `${f.color}15` }}
                 >
                   <f.icon size={18} color={f.highlight ? '#0D0F0C' : f.color} strokeWidth={2} />
                 </div>
-                <h3
-                  className={`font-bold text-[16px] mb-2 ${f.highlight ? 'text-pergamino' : 'text-negro'}`}
-                >
+                <h3 className={`font-bold text-[16px] mb-2 ${f.highlight ? 'text-pergamino' : 'text-negro'}`}>
                   {f.title}
                 </h3>
-                <p
-                  className={`text-[13px] leading-[1.6] mb-4 ${f.highlight ? 'text-pergamino/60' : 'text-n700'}`}
-                >
+                <p className={`text-[13px] leading-[1.6] mb-4 ${f.highlight ? 'text-pergamino/60' : 'text-n700'}`}>
                   {f.desc}
                 </p>
                 <div
@@ -813,120 +894,18 @@ function Features() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// EUDR SECTION
-// ─────────────────────────────────────────────────────────────
-function EUDRSection() {
-  return (
-    <section
-      id="eudr"
-      className="py-24 relative overflow-hidden"
-      style={{ background: '#1B3D24' }}
-      aria-label="Cumplimiento EUDR"
-    >
-      <div className="absolute inset-0 dot-grid-light pointer-events-none" />
-      <div className="relative max-w-6xl mx-auto px-6">
-        <div className="grid lg:grid-cols-[1fr_360px] gap-14 items-start">
-          {/* Left */}
-          <div>
-            <FadeUp>
-              <span className="inline-flex items-center gap-2 border border-tierra/40 rounded-full px-3 py-1 font-mono text-[10px] font-bold text-tierra tracking-[.1em] uppercase mb-5">
-                <AlertTriangle size={11} strokeWidth={2.5} color="#D45828" />
-                Urgente · EUDR 2025
-              </span>
-              <h2
-                className="font-bold leading-[1.0] tracking-[-0.02em] text-pergamino mb-5"
-                style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}
-              >
-                El EUDR no es opcional.
-                <br />
-                <span className="text-senal">Wasagro te deja listo hoy.</span>
-              </h2>
-              <p className="text-[16px] text-pergamino/65 leading-[1.7] max-w-lg mb-8">
-                Desde 2025, los exportadores de cacao, café y banano que no tengan trazabilidad georreferenciada por lote pierden acceso al mercado europeo. Wasagro genera los registros EUDR automáticamente desde el primer mensaje de WhatsApp — sin trabajo extra.
-              </p>
-            </FadeUp>
-
-            <div className="grid sm:grid-cols-2 gap-3">
-              {[
-                { icon: Shield, text: 'Georreferenciación automática de cada lote', note: 'Coordenadas GPS en cada evento' },
-                { icon: CheckCircle, text: 'Registro de insumos por hectárea', note: 'Trazabilidad química completa' },
-                { icon: Globe, text: 'Historial auditizable por exportación', note: 'Exportable a certificadoras EU' },
-                { icon: BarChart3, text: 'PDF listo para Due Diligence EUDR', note: 'Formato aceptado en aduana' },
-              ].map(({ icon: Icon, text, note }) => (
-                <FadeUp key={text}>
-                  <div className="border border-senal/20 rounded-xl p-4 flex gap-3 items-start">
-                    <div className="w-8 h-8 rounded-lg bg-senal/10 flex items-center justify-center flex-shrink-0">
-                      <Icon size={15} color="#C9F03B" strokeWidth={2} />
-                    </div>
-                    <div>
-                      <p className="text-[13px] font-bold text-pergamino leading-tight mb-1">{text}</p>
-                      <p className="font-mono text-[10px] text-pergamino/40">{note}</p>
-                    </div>
-                  </div>
-                </FadeUp>
-              ))}
-            </div>
-          </div>
-
-          {/* Right — compliance card */}
-          <FadeUp delay={0.2}>
-            <div
-              className="border-2 border-senal/40 rounded-2xl overflow-hidden"
-              style={{ boxShadow: '6px 6px 0 0 rgba(201,240,59,0.15)' }}
-            >
-              {/* Header */}
-              <div className="bg-senal px-5 py-4 flex items-center justify-between">
-                <div>
-                  <p className="font-mono text-[10px] font-bold tracking-[.1em] uppercase text-negro/60 mb-0.5">
-                    Expediente EUDR
-                  </p>
-                  <p className="font-bold text-[15px] text-negro">Finca La Palma · Sem. 16</p>
-                </div>
-                <CheckCircle size={22} color="#1B3D24" strokeWidth={2.5} />
-              </div>
-              {/* Body */}
-              <div className="bg-negro/40 px-5 py-4 flex flex-col gap-3">
-                {[
-                  { label: 'Eventos registrados', value: '47' },
-                  { label: 'Lotes documentados', value: '8 / 8' },
-                  { label: 'Cobertura geográfica', value: '100%' },
-                  { label: 'Insumos trazados', value: '23 productos' },
-                  { label: 'Estado EUDR', value: '✓ Compliant', ok: true },
-                ].map((row) => (
-                  <div key={row.label} className="flex justify-between items-center py-2 border-b border-pergamino/10 last:border-0">
-                    <span className="font-mono text-[11px] text-pergamino/50">{row.label}</span>
-                    <span
-                      className={`font-bold text-[13px] ${row.ok ? 'text-senal' : 'text-pergamino'}`}
-                    >
-                      {row.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-campo px-5 py-3">
-                <p className="font-mono text-[10px] text-senal/60">Generado automáticamente · Wasagro v1</p>
-              </div>
-            </div>
-          </FadeUp>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
 // AUDIENCES
 // ─────────────────────────────────────────────────────────────
-function Audiences() {
+function Audiences({ onOpenModal }: { onOpenModal: () => void }) {
   const audiences = [
     {
       id: 'exportadoras',
       tag: 'Para exportadoras',
-      title: 'Trazabilidad EUDR automática.\nSin contratar más personal.',
+      title: 'Visibilidad total de tus fincas.\nSin contratar más personal.',
       items: [
         'Dashboard de todas las fincas en tiempo real',
         'Reportes semanales PDF por finca y lote',
-        'Expediente EUDR listo para certificadoras',
+        'Trazabilidad lista para auditorías EUDR y certificaciones de exportación',
         '0 capacitación adicional para el campo',
         'Alertas de plagas y dosis antes de que escalen',
         'API para integrar con tu ERP exportador',
@@ -996,16 +975,13 @@ function Audiences() {
                 >
                   <p
                     className="font-mono text-[10px] font-bold tracking-[.12em] uppercase mb-1"
-                    style={{ color: a.dark ? '#C9F03B' : '#C9F03B' }}
+                    style={{ color: '#C9F03B' }}
                   >
                     {a.tag}
                   </p>
                   <h3
-                    className="font-bold leading-[1.2] whitespace-pre-line"
-                    style={{
-                      fontSize: 'clamp(18px, 2.5vw, 24px)',
-                      color: a.dark ? '#F5F1E8' : '#F5F1E8',
-                    }}
+                    className="font-bold leading-[1.2] whitespace-pre-line text-pergamino"
+                    style={{ fontSize: 'clamp(18px, 2.5vw, 24px)' }}
                   >
                     {a.title}
                   </h3>
@@ -1029,28 +1005,18 @@ function Audiences() {
                   ))}
                 </div>
                 <div className="px-6 pb-6">
-                  <a
-                    href="https://wa.me/593999999999?text=Hola%2C%20quiero%20conocer%20Wasagro"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={onOpenModal}
                     className="flex items-center justify-center gap-2 w-full py-3 font-bold text-[14px] rounded-xl border-2 transition-all duration-100 hover:gap-3"
                     style={
                       a.dark
-                        ? {
-                            background: '#C9F03B',
-                            color: '#0D0F0C',
-                            borderColor: '#C9F03B',
-                          }
-                        : {
-                            background: '#0D0F0C',
-                            color: '#F5F1E8',
-                            borderColor: '#0D0F0C',
-                          }
+                        ? { background: '#C9F03B', color: '#0D0F0C', borderColor: '#C9F03B' }
+                        : { background: '#0D0F0C', color: '#F5F1E8', borderColor: '#0D0F0C' }
                     }
                   >
                     {a.cta}
                     <ArrowRight size={14} strokeWidth={2.5} />
-                  </a>
+                  </button>
                 </div>
               </div>
             </FadeUp>
@@ -1074,13 +1040,16 @@ function ProofBar() {
       <div className="max-w-6xl mx-auto px-6">
         <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-3">
           {[
-            'Ecuador · Guatemala',
             'Cacao de exportación',
             'Banano orgánico',
-            'EUDR-ready',
             'WhatsApp Business API oficial',
+            'Voz · Texto · Imagen',
+            'América Latina',
           ].map((item, i) => (
-            <span key={item} className="flex items-center gap-2.5 font-mono text-[12px] font-bold text-negro tracking-[.06em] uppercase">
+            <span
+              key={item}
+              className="flex items-center gap-2.5 font-mono text-[12px] font-bold text-negro tracking-[.06em] uppercase"
+            >
               {i > 0 && <span className="opacity-30">·</span>}
               {item}
             </span>
@@ -1094,7 +1063,7 @@ function ProofBar() {
 // ─────────────────────────────────────────────────────────────
 // FINAL CTA
 // ─────────────────────────────────────────────────────────────
-function FinalCTA() {
+function FinalCTA({ onOpenModal }: { onOpenModal: () => void }) {
   return (
     <section
       className="py-28 relative overflow-hidden dot-grid"
@@ -1112,21 +1081,17 @@ function FinalCTA() {
           >
             Empieza con un
             <br />
-            <span
-              style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}
-            >
+            <span style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}>
               mensaje de WhatsApp.
             </span>
           </h2>
           <p className="text-[18px] text-n700 leading-[1.65] max-w-lg mx-auto mb-10">
-            Sin formularios, sin demo calls, sin contratos. Manda un mensaje y en 5 minutos tu primer evento de campo está registrado.
+            Sin formularios, sin demo calls, sin demoras. Manda un mensaje y en 5 minutos tu primer evento de campo está registrado.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <a
-              href="https://wa.me/593999999999?text=Hola%2C%20quiero%20conocer%20Wasagro"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={onOpenModal}
               className="flex items-center gap-3 px-8 py-4 font-bold text-[16px] bg-negro text-pergamino border-2 border-negro rounded-xl transition-all duration-100 hover:translate-x-[-2px] hover:translate-y-[-2px]"
               style={{ boxShadow: '4px 4px 0 0 #1B3D24' }}
             >
@@ -1135,18 +1100,18 @@ function FinalCTA() {
               </svg>
               Escribir a Wasagro
               <ArrowRight size={16} strokeWidth={2.5} />
-            </a>
+            </button>
 
             <a
-              href="mailto:hello@wasagro.co"
-              className="flex items-center gap-2 px-6 py-4 font-semibold text-[15px] border-2 border-negro rounded-xl text-negro hover:bg-n200 transition-colors duration-100"
+              href="mailto:wasagro@proton.me"
+              className="flex items-center gap-2 px-6 py-4 font-mono text-[13px] border-2 border-negro rounded-xl text-negro hover:bg-n200 transition-colors duration-100"
             >
-              hello@wasagro.co
+              wasagro@proton.me
             </a>
           </div>
 
           <p className="font-mono text-[11px] text-n400 mt-8 tracking-[.04em]">
-            Ecuador · Guatemala · Cacao · Banano · EUDR
+            Cacao · Banano · Café · WhatsApp · Latinoamérica
           </p>
         </FadeUp>
       </div>
@@ -1179,7 +1144,6 @@ function Footer() {
             {[
               { label: 'Cómo funciona', href: '#como-funciona' },
               { label: 'Para exportadoras', href: '#exportadoras' },
-              { label: 'EUDR', href: '#eudr' },
               { label: 'Privacidad', href: '#' },
             ].map((l) => (
               <a
@@ -1195,13 +1159,13 @@ function Footer() {
           {/* Right */}
           <div className="text-right">
             <a
-              href="mailto:hello@wasagro.co"
-              className="font-mono text-[12px] text-pergamino/50 hover:text-senal transition-colors duration-100"
+              href="mailto:wasagro@proton.me"
+              className="font-mono text-[13px] text-pergamino/60 hover:text-pergamino transition-colors duration-100"
             >
-              hello@wasagro.co
+              wasagro@proton.me
             </a>
             <p className="font-mono text-[11px] text-pergamino/30 mt-1">
-              © 2025 Wasagro · Ecuador · Guatemala
+              © 2025 Wasagro
             </p>
           </div>
         </div>
@@ -1209,10 +1173,10 @@ function Footer() {
         {/* Bottom rule */}
         <div className="border-t border-pergamino/10 mt-8 pt-6 flex flex-wrap items-center justify-between gap-4">
           <p className="font-mono text-[10px] text-pergamino/25 tracking-[.08em] uppercase">
-            Gestión agrícola · Trazabilidad EUDR · WhatsApp · Cacao · Banano
+            Gestión agrícola · Trazabilidad · WhatsApp · Cacao · Banano
           </p>
           <a
-            href="https://wa.me/593999999999"
+            href={WA_LINK}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-senal tracking-[.08em] uppercase hover:opacity-80 transition-opacity duration-100"
@@ -1232,20 +1196,27 @@ function Footer() {
 // APP
 // ─────────────────────────────────────────────────────────────
 export default function App() {
+  const [modalOpen, setModalOpen] = useState(false)
+  const openModal = () => setModalOpen(true)
+  const closeModal = () => setModalOpen(false)
+
   return (
     <>
-      <Nav />
+      <AnimatePresence>
+        {modalOpen && <WhatsAppModal onClose={closeModal} />}
+      </AnimatePresence>
+
+      <Nav onOpenModal={openModal} />
       <main>
-        <Hero />
+        <Hero onOpenModal={openModal} />
         <Stats />
         <Manifesto />
         <HowItWorks />
         <WhatsAppSection />
         <Features />
-        <EUDRSection />
-        <Audiences />
+        <Audiences onOpenModal={openModal} />
         <ProofBar />
-        <FinalCTA />
+        <FinalCTA onOpenModal={openModal} />
       </main>
       <Footer />
     </>
