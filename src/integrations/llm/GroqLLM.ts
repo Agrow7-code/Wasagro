@@ -21,6 +21,8 @@ import {
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
+import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
+import { cargarSDRPrompt, buildSDRContexto } from './sdrUtils.js'
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
@@ -258,6 +260,47 @@ export class GroqLLM implements IWasagroLLM {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
       throw new LLMError('GROQ_ERROR', `Error en resumen semanal: ${String(err)}`, err)
+    }
+  }
+
+  async atenderSDR(entrada: EntradaSDR, traceId: string): Promise<RespuestaSDR> {
+    const promptBase = cargarSDRPrompt('SP-SDR-01-master.md')
+    const contexto = buildSDRContexto(entrada)
+    const userContent = `${contexto}\n\nMensaje del prospecto: ${entrada.mensaje}`
+
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: 'atender_sdr',
+      model: this.#model,
+      input: { turno: entrada.turno, segmento: entrada.segmento_icp, narrativa: entrada.narrativa },
+    })
+
+    const inicio = Date.now()
+    try {
+      const texto = await this.#llamar(promptBase, userContent)
+      const latencia = Date.now() - inicio
+
+      let json: unknown
+      try {
+        json = JSON.parse(texto)
+      } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Groq SDR devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
+      }
+
+      const parsed = RespuestaSDRSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `SDR schema inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: { action: parsed.data.action, score_delta: parsed.data.score_delta }, metadata: { latencia_ms: latencia } })
+      trace.event({ name: 'sdr_narrative_ab', input: { narrativa: entrada.narrativa, segmento: entrada.segmento_icp, turno: entrada.turno } })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error en SDR: ${String(err)}`, err)
     }
   }
 

@@ -12,6 +12,9 @@ import {
   getLotesByFinca,
   getOrCreateSession,
   saveEvento,
+  createSDRProspecto,
+  getSDRProspecto,
+  getSDRProspectosPendingApproval,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -157,6 +160,102 @@ describe('supabaseQueries', () => {
       const mockFinal = { from: vi.fn().mockReturnValue(thenable) }
 
       await expect(actualizarMensaje('msg-1', { status: 'processed' }, mockFinal as any)).resolves.toBeUndefined()
+    })
+  })
+})
+
+// ─── Phase 8: SDR Supabase query tests (REQ-mem coverage) ──────────────────────
+
+describe('SDR supabaseQueries', () => {
+  describe('createSDRProspecto', () => {
+    it('inserta prospecto con defaults de DB (score_champion=7, score_presupuesto=5 vienen del schema)', async () => {
+      const prospectoConDefaults = {
+        id: 'uuid-sdr-1',
+        phone: '593987654321',
+        narrativa_asignada: 'A',
+        segmento_icp: 'desconocido',
+        score_total: 0,
+        score_eudr_urgency: 0,
+        score_tamano_cartera: 0,
+        score_calidad_dato: 0,
+        score_champion: 7,
+        score_presupuesto: 5,
+        score_timeline_decision: 0,
+        status: 'new',
+        turns_total: 0,
+      }
+      const mock = crearSupabaseMock()
+      mock._chain.single.mockResolvedValue({ data: prospectoConDefaults, error: null })
+
+      const result = await createSDRProspecto({ phone: '593987654321', narrativa_asignada: 'A' }, mock as any)
+
+      // should NOT explicitly override the DB defaults
+      const insertCall = mock._chain.insert.mock.calls[0][0] as Record<string, unknown>
+      expect(insertCall).not.toHaveProperty('score_champion')
+      expect(insertCall).not.toHaveProperty('score_presupuesto')
+
+      // should return the DB row including the defaults
+      expect(result['score_champion']).toBe(7)
+      expect(result['score_presupuesto']).toBe(5)
+    })
+
+    it('usa "desconocido" como segmento_icp por defecto', async () => {
+      const mock = crearSupabaseMock()
+      mock._chain.single.mockResolvedValue({ data: { id: 'uuid-1', phone: '593987654321' }, error: null })
+
+      await createSDRProspecto({ phone: '593987654321', narrativa_asignada: 'B' }, mock as any)
+
+      const insertCall = mock._chain.insert.mock.calls[0][0] as Record<string, unknown>
+      expect(insertCall['segmento_icp']).toBe('desconocido')
+    })
+  })
+
+  describe('getSDRProspecto', () => {
+    it('retorna null para número de teléfono desconocido', async () => {
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: null, error: null })
+
+      const result = await getSDRProspecto('5930000000000', mock as any)
+
+      expect(result).toBeNull()
+      expect(mock._chain.eq).toHaveBeenCalledWith('phone', '5930000000000')
+    })
+
+    it('retorna el prospecto cuando existe', async () => {
+      const prospectoExistente = { id: 'uuid-sdr-1', phone: '593987654321', status: 'en_discovery' }
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: prospectoExistente, error: null })
+
+      const result = await getSDRProspecto('593987654321', mock as any)
+
+      expect(result).toEqual(prospectoExistente)
+    })
+  })
+
+  describe('getSDRProspectosPendingApproval', () => {
+    it('filtra por status qualified y founder_notified_at IS NOT NULL', async () => {
+      const pendientes = [
+        { id: 'uuid-1', phone: '593111111111', status: 'qualified', founder_notified_at: '2026-04-24T10:00:00Z' },
+        { id: 'uuid-2', phone: '593222222222', status: 'qualified', founder_notified_at: '2026-04-24T09:00:00Z' },
+      ]
+      const mock = crearSupabaseMock()
+      ;(mock._chain as Record<string, ReturnType<typeof vi.fn>>)['not'] = vi.fn().mockReturnThis()
+      ;(mock._chain as Record<string, ReturnType<typeof vi.fn>>)['order'] = vi.fn().mockResolvedValue({ data: pendientes, error: null })
+
+      const result = await getSDRProspectosPendingApproval(mock as any)
+
+      expect(mock._chain.eq).toHaveBeenCalledWith('status', 'qualified')
+      expect(result).toHaveLength(2)
+    })
+
+    it('retorna array vacío cuando no hay prospectos pendientes', async () => {
+      const mock = crearSupabaseMock()
+      ;(mock._chain as Record<string, ReturnType<typeof vi.fn>>)['not'] = vi.fn().mockReturnThis()
+      ;(mock._chain as Record<string, ReturnType<typeof vi.fn>>)['order'] = vi.fn().mockResolvedValue({ data: [], error: null })
+
+      const result = await getSDRProspectosPendingApproval(mock as any)
+
+      expect(result).toEqual([])
     })
   })
 })

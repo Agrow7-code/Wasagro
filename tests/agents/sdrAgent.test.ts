@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { handleSDRSession, handleFounderApproval, detectarObjecion } from '../../src/agents/sdrAgent.js'
 import type { NormalizedMessage } from '../../src/integrations/whatsapp/NormalizedMessage.js'
+import { langfuse } from '../../src/integrations/langfuse.js'
 
 vi.mock('../../src/pipeline/supabaseQueries.js', () => ({
   getSDRProspecto: vi.fn(),
@@ -76,6 +77,7 @@ const respuestaDiscovery = {
 beforeEach(() => {
   vi.clearAllMocks()
   delete process.env['FOUNDER_PHONE']
+  delete process.env['DEMO_BOOKING_URL']
 })
 
 describe('detectarObjecion', () => {
@@ -535,5 +537,287 @@ describe('handleFounderApproval', () => {
       }),
       undefined,
     )
+  })
+
+  describe('DEMO_BOOKING_URL (REQ-hand-006)', () => {
+    it('envía URL de booking al prospecto cuando DEMO_BOOKING_URL está configurado', async () => {
+      process.env['DEMO_BOOKING_URL'] = 'https://calendly.com/wasagro/demo'
+      vi.mocked(queries.getSDRProspectosPendingApproval).mockResolvedValue([prospectoCalificado])
+
+      await handleFounderApproval(msgFounder, 'msg-1', 'trace-1', mockSender)
+
+      const mensajesAlProspecto = mockSender.enviarTexto.mock.calls.filter(
+        ([to]: [string]) => to === prospectoCalificado.phone,
+      )
+      const tieneURL = mensajesAlProspecto.some(([, msg]: [string, string]) => msg.includes('https://calendly.com/wasagro/demo'))
+      expect(tieneURL).toBe(true)
+    })
+
+    it('envía mensaje de disponibilidad cuando DEMO_BOOKING_URL no está configurado', async () => {
+      vi.mocked(queries.getSDRProspectosPendingApproval).mockResolvedValue([prospectoCalificado])
+
+      await handleFounderApproval(msgFounder, 'msg-1', 'trace-1', mockSender)
+
+      const mensajesAlProspecto = mockSender.enviarTexto.mock.calls.filter(
+        ([to]: [string]) => to === prospectoCalificado.phone,
+      )
+      const tieneDisponibilidad = mensajesAlProspecto.some(([, msg]: [string, string]) => msg.includes('20 minutos'))
+      expect(tieneDisponibilidad).toBe(true)
+    })
+  })
+})
+
+// ─── Phase 2: Score evidence validation (REQ-qual-009) ─────────────────────────
+
+describe('score evidence validation (REQ-qual-009)', () => {
+  it('no llama saveSDRInteraccion cuando preguntas_respondidas tiene delta sin evidence_quote', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoBase)
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      preguntas_respondidas: [
+        { question_id: 'Q-01', dimension: 'tamano_cartera', answer_text: '50 fincas', score_delta: 20, evidence_quote: null },
+      ],
+      score_delta: { ...respuestaDiscovery.score_delta, tamano_cartera: 20 },
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    expect(queries.saveSDRInteraccion).not.toHaveBeenCalled()
+  })
+
+  it('loga evento sdr_evidence_validation_error cuando falta evidence_quote', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoBase)
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      preguntas_respondidas: [
+        { question_id: 'Q-01', dimension: 'tamano_cartera', answer_text: '50 fincas', score_delta: 20, evidence_quote: null },
+      ],
+      score_delta: { ...respuestaDiscovery.score_delta, tamano_cartera: 20 },
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(expect.objectContaining({ name: 'sdr_evidence_validation_error' }))
+  })
+
+  it('llama saveSDRInteraccion cuando evidence_quote está presente para delta no-cero', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoBase)
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      preguntas_respondidas: [
+        { question_id: 'Q-01', dimension: 'tamano_cartera', answer_text: '50 fincas', score_delta: 20, evidence_quote: 'manejamos 50 fincas' },
+      ],
+      score_delta: { ...respuestaDiscovery.score_delta, tamano_cartera: 20 },
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    expect(queries.saveSDRInteraccion).toHaveBeenCalled()
+  })
+})
+
+// ─── Phase 3: Handoff trigger detection (REQ-hand-001) ─────────────────────────
+
+describe('handoff trigger (REQ-hand-001)', () => {
+  it('mensaje con "quiero hablar con alguien" fuerza propose_pilot sin importar el score', async () => {
+    process.env['FOUNDER_PHONE'] = '593000000001'
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({ ...prospectoBase, score_total: 20 })
+    mockLLM.atenderSDR.mockResolvedValue(respuestaDiscovery)
+
+    const msgHandoff = { ...mockMsg, texto: 'quiero hablar con alguien del equipo' }
+    await handleSDRSession(msgHandoff, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
+      prospectoBase.id,
+      expect.objectContaining({ status: 'qualified' }),
+      undefined,
+    )
+  })
+
+  it('pregunta de precio en turno > 3 activa handoff', async () => {
+    process.env['FOUNDER_PHONE'] = '593000000001'
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({ ...prospectoBase, turns_total: 3 })
+    mockLLM.atenderSDR.mockResolvedValue(respuestaDiscovery)
+
+    const msgPrecio = { ...mockMsg, texto: '¿cuánto cuesta para mis fincas?' }
+    await handleSDRSession(msgPrecio, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
+      prospectoBase.id,
+      expect.objectContaining({ status: 'qualified' }),
+      undefined,
+    )
+  })
+
+  it('pregunta de precio en turno ≤ 3 NO activa handoff', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({ ...prospectoBase, turns_total: 2 })
+    mockLLM.atenderSDR.mockResolvedValue(respuestaDiscovery)
+
+    const msgPrecio = { ...mockMsg, texto: '¿cuánto cuesta?' }
+    await handleSDRSession(msgPrecio, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const updateCall = vi.mocked(queries.updateSDRProspecto).mock.calls[0][1]
+    expect(updateCall['status']).not.toBe('qualified')
+  })
+})
+
+// ─── Phase 4: Founder notification format (REQ-hand-003) ───────────────────────
+
+describe('founder notification format (REQ-hand-003)', () => {
+  it('incluye todos los campos del deal brief en el formato especificado', async () => {
+    process.env['FOUNDER_PHONE'] = '593000000001'
+    const prospectoConDatos = {
+      ...prospectoBase,
+      status: 'en_discovery',
+      nombre: 'María García',
+      empresa: 'Exportadora ABC',
+      segmento_icp: 'exportadora',
+      narrativa_asignada: 'B',
+      score_total: 72,
+      score_presupuesto: 5,
+      fincas_en_cartera: 38,
+      eudr_urgency_nivel: 'alta',
+      sistema_actual: 'Excel',
+      objeciones_manejadas: ['sin_presupuesto'],
+      punto_de_dolor_principal: 'trazabilidad EUDR',
+    }
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoConDatos)
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      respuesta: 'Te propongo un piloto de 4 semanas con 3 fincas. ¿Podemos agendar 20 minutos?',
+      action: 'propose_pilot' as const,
+      requires_founder_approval: true,
+      deal_brief: {
+        nombre_contacto: 'María García',
+        empresa: 'Exportadora ABC',
+        cargo: 'Gerente de Exportaciones',
+        segmento_icp: 'exportadora',
+        narrativa_asignada: 'B',
+        qualification_score: 72,
+        scores_por_dimension: { eudr_urgency: 25, tamano_cartera: 15, calidad_dato: 12, champion: 7, timeline_decision: 8, presupuesto: 5 },
+        fincas_en_cartera: 38,
+        cultivo_principal: 'cacao',
+        pais: 'Ecuador',
+        eudr_urgency_nivel: 'alta',
+        sistema_actual: 'Excel',
+        objeciones_manejadas: ['sin_presupuesto'],
+        punto_de_dolor_principal: 'trazabilidad EUDR',
+        compromiso_logrado: 'piloto',
+        fecha_propuesta_reunion: null,
+        conversacion_resumen: 'Exportadora con 38 fincas, urgencia EUDR alta',
+        turns_total: 5,
+        questions_asked: 4,
+        handoff_trigger: 'score_threshold',
+      },
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const founderMsg = mockSender.enviarTexto.mock.calls.find(
+      ([to]: [string]) => to === '593000000001',
+    )?.[1] as string
+
+    expect(founderMsg).toContain('⚡ LEAD CALIFICADO')
+    expect(founderMsg).toContain('72/100')
+    expect(founderMsg).toContain('exportadora')
+    expect(founderMsg).toContain('María García')
+    expect(founderMsg).toContain('Exportadora ABC')
+    expect(founderMsg).toContain('BORRADOR DE PROPUESTA')
+    expect(founderMsg).toContain('Responde *SÍ*')
+    expect(founderMsg).toContain('Responde *NO*')
+  })
+})
+
+// ─── Phase 5: Segment detection (REQ-disc-003) ─────────────────────────────────
+
+describe('segmento_icp mid-conversation update (REQ-disc-003)', () => {
+  it('actualiza segmento_icp cuando el LLM lo incluye en la respuesta', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoBase)
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      segmento_icp: 'exportadora',
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
+      prospectoBase.id,
+      expect.objectContaining({ segmento_icp: 'exportadora' }),
+      undefined,
+    )
+  })
+
+  it('no incluye segmento_icp en update si el LLM no lo retorna', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoBase)
+    mockLLM.atenderSDR.mockResolvedValue(respuestaDiscovery)
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const updateCall = vi.mocked(queries.updateSDRProspecto).mock.calls[0][1]
+    expect(Object.keys(updateCall)).not.toContain('segmento_icp')
+  })
+})
+
+// ─── Phase 6: LangFuse A/B events (REQ-narr-005) ───────────────────────────────
+
+describe('LangFuse A/B narrative events (REQ-narr-005)', () => {
+  it('emite sdr_session_started en prospecto nuevo con narrativa y segmento', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(null)
+    vi.mocked(queries.createSDRProspecto).mockResolvedValue({
+      ...prospectoBase,
+      narrativa_asignada: 'A',
+      segmento_icp: 'exportadora',
+    })
+    mockLLM.atenderSDR.mockResolvedValue(respuestaDiscovery)
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'sdr_session_started',
+      input: expect.objectContaining({ narrativa: 'A' }),
+    }))
+  })
+
+  it('emite sdr_qualified cuando action === propose_pilot', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({
+      ...prospectoBase,
+      turns_total: 4,
+      score_total: 50,
+      status: 'en_discovery',
+    })
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      action: 'propose_pilot' as const,
+      requires_founder_approval: true,
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'sdr_qualified',
+      input: expect.objectContaining({ turns_to_qualify: 5 }),
+    }))
+  })
+
+  it('emite sdr_unqualified cuando action === graceful_exit', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({
+      ...prospectoBase,
+      status: 'en_discovery',
+      score_total: 20,
+    })
+    mockLLM.atenderSDR.mockResolvedValue({
+      ...respuestaDiscovery,
+      action: 'graceful_exit' as const,
+    })
+
+    await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'sdr_unqualified',
+    }))
   })
 })

@@ -46,6 +46,17 @@ export function detectarObjecion(texto: string): string | null {
   return null
 }
 
+// REQ-hand-001: text-based handoff triggers (score_threshold is handled separately)
+export function detectarHandoffTrigger(texto: string, turno: number): 'human_request' | 'price_readiness' | null {
+  if (/hablar\s+con\s+alguien|hablar\s+con\s+ustedes|hablar\s+con\s+el\s+equipo|persona\s+real|hablar\s+directamente/i.test(texto)) {
+    return 'human_request'
+  }
+  if (turno > 3 && /cu[aá]nto\s+cuesta|qu[eé]\s+precio\s+tienen|cu[aá]nto\s+es/i.test(texto)) {
+    return 'price_readiness'
+  }
+  return null
+}
+
 export async function handleSDRSession(
   msg: NormalizedMessage,
   mensajeId: string,
@@ -58,10 +69,12 @@ export async function handleSDRSession(
   const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : '[mensaje de voz o imagen]'
 
   let prospecto = await getSDRProspecto(msg.from, client) as Record<string, unknown> | null
+  let isNuevoProspecto = false
 
   if (!prospecto) {
     const narrativa: 'A' | 'B' = Math.random() < 0.5 ? 'A' : 'B'
     prospecto = await createSDRProspecto({ phone: msg.from, narrativa_asignada: narrativa }, client)
+    isNuevoProspecto = true
     trace.event({ name: 'sdr_prospecto_created', input: { phone: msg.from, narrativa } })
   }
 
@@ -69,6 +82,17 @@ export async function handleSDRSession(
     await sender.enviarTexto(msg.from, 'Estamos revisando tu caso internamente. Te contactamos pronto. ✅')
     await actualizarMensaje(mensajeId, { status: 'processed' })
     return
+  }
+
+  // REQ-narr-005: sdr_session_started fires on new prospect
+  if (isNuevoProspecto) {
+    trace.event({
+      name: 'sdr_session_started',
+      input: {
+        narrativa: prospecto['narrativa_asignada'],
+        segmento_icp: prospecto['segmento_icp'],
+      },
+    })
   }
 
   const objection_detected = detectarObjecion(texto)
@@ -105,12 +129,40 @@ export async function handleSDRSession(
     segmento_icp: prospecto['segmento_icp'] as string,
   }
 
-  const resultado = await llm.atenderSDR(entrada, traceId)
+  // REQ-hand-001: detect text-based handoff trigger before calling LLM
+  const preHandoffTrigger = detectarHandoffTrigger(texto, entrada.turno)
+
+  const rawResultado = await llm.atenderSDR(entrada, traceId)
+  // Shallow copy so we never mutate the LLM response object (critical for test isolation)
+  const resultado = {
+    ...rawResultado,
+    score_delta: { ...rawResultado.score_delta },
+  }
+
+  // REQ-hand-001: force propose_pilot when text-based trigger detected
+  if (preHandoffTrigger && resultado.action !== 'propose_pilot' && resultado.action !== 'graceful_exit') {
+    resultado.action = 'propose_pilot'
+    resultado.requires_founder_approval = true
+    const brief = { ...((resultado.deal_brief as Record<string, unknown>) ?? {}), handoff_trigger: preHandoffTrigger }
+    resultado.deal_brief = brief
+  }
 
   // Regla 2: hard cap — never loop past MAX_SDR_TURNS turns
   if (resultado.action === 'continue_discovery' && entrada.turno >= MAX_SDR_TURNS) {
     resultado.action = 'graceful_exit'
     resultado.respuesta = 'Gracias por tu tiempo. Si en algún momento quieres retomar la conversación, aquí estaremos. ✅'
+  }
+
+  // REQ-qual-009: evidence-gated score validation — reject non-zero deltas without evidence_quote
+  const invalidEvidence = resultado.preguntas_respondidas.some(p => p.score_delta !== 0 && p.evidence_quote === null)
+  if (invalidEvidence) {
+    trace.event({
+      name: 'sdr_evidence_validation_error',
+      input: { preguntas: resultado.preguntas_respondidas.filter(p => p.score_delta !== 0 && p.evidence_quote === null) },
+    })
+    for (const dim of SCORE_DIMS) {
+      resultado.score_delta[dim] = 0
+    }
   }
 
   const nuevosDimensions: Record<string, number> = {}
@@ -161,8 +213,7 @@ export async function handleSDRSession(
     if (founderPhone) {
       const brief = resultado.deal_brief as Record<string, unknown> | null
       await sender.enviarTexto(founderPhone, buildFounderNotification(
-        prospecto['phone'] as string,
-        prospecto['nombre'] as string | null,
+        prospecto,
         resultado.respuesta,
         brief,
       ))
@@ -176,8 +227,35 @@ export async function handleSDRSession(
 
   const scoreAfter = SCORE_DIMS.reduce((sum, dim) => sum + nuevosDimensions[`score_${dim}`], 0)
 
+  // REQ-narr-005: fire A/B tracking events
+  if (resultado.action === 'propose_pilot' || resultado.requires_founder_approval) {
+    trace.event({
+      name: 'sdr_qualified',
+      input: {
+        narrativa: prospecto['narrativa_asignada'],
+        segmento_icp: prospecto['segmento_icp'],
+        score_total: scoreAfter,
+        turns_to_qualify: nuevoTurno,
+      },
+    })
+  } else if (resultado.action === 'graceful_exit') {
+    trace.event({
+      name: 'sdr_unqualified',
+      input: {
+        narrativa: prospecto['narrativa_asignada'],
+        segmento_icp: prospecto['segmento_icp'],
+        score_total: scoreAfter,
+        exit_reason: entrada.turno >= MAX_SDR_TURNS ? 'max_turns' : 'no_qualify',
+      },
+    })
+  }
+
+  // REQ-disc-003: persist segmento_icp if LLM updated it
+  const segmentoUpdate = resultado.segmento_icp ? { segmento_icp: resultado.segmento_icp } : {}
+
   await updateSDRProspecto(prospecto['id'] as string, {
     ...nuevosDimensions,
+    ...segmentoUpdate,
     preguntas_realizadas: preguntasActualizadas,
     objeciones_manejadas: nuevasObjeciones,
     status: nuevoStatus,
@@ -186,21 +264,24 @@ export async function handleSDRSession(
     founder_notified_at: founderNotifiedAt,
   }, client)
 
-  await saveSDRInteraccion({
-    prospecto_id: prospecto['id'],
-    phone: msg.from,
-    turno: nuevoTurno,
-    tipo: 'inbound',
-    contenido: texto,
-    score_before: prospecto['score_total'],
-    score_after: scoreAfter,
-    score_delta: resultado.score_delta,
-    objection_detected,
-    action_taken: resultado.action,
-    narrativa: prospecto['narrativa_asignada'],
-    segmento_icp: prospecto['segmento_icp'],
-    langfuse_trace_id: traceId,
-  }, client)
+  // REQ-qual-009: skip interaction log when evidence validation failed
+  if (!invalidEvidence) {
+    await saveSDRInteraccion({
+      prospecto_id: prospecto['id'],
+      phone: msg.from,
+      turno: nuevoTurno,
+      tipo: 'inbound',
+      contenido: texto,
+      score_before: prospecto['score_total'],
+      score_after: scoreAfter,
+      score_delta: resultado.score_delta,
+      objection_detected,
+      action_taken: resultado.action,
+      narrativa: prospecto['narrativa_asignada'],
+      segmento_icp: prospecto['segmento_icp'],
+      langfuse_trace_id: traceId,
+    }, client)
+  }
 
   await actualizarMensaje(mensajeId, { status: 'processed' })
 }
@@ -246,6 +327,15 @@ export async function handleFounderApproval(
 
   if (mensajeAlProspecto) {
     await sender.enviarTexto(prospecto['phone'] as string, mensajeAlProspecto)
+
+    // REQ-hand-006: send booking link or availability question after pilot proposal
+    if (isSi || !isNo) {
+      const bookingUrl = process.env['DEMO_BOOKING_URL']
+      const followUp = bookingUrl
+        ? `Perfecto — puedes agendar aquí: ${bookingUrl}`
+        : 'Perfecto — ¿cuándo tienes 20 minutos disponibles?'
+      await sender.enviarTexto(prospecto['phone'] as string, followUp)
+    }
   }
 
   await updateSDRProspecto(prospecto['id'] as string, { status: nuevoStatus }, client)
@@ -273,23 +363,59 @@ export async function handleFounderApproval(
   return true
 }
 
+// REQ-hand-003: full founder notification format
 function buildFounderNotification(
-  prospectoPhone: string,
-  nombre: string | null,
+  prospecto: Record<string, unknown>,
   draftMessage: string,
   brief: Record<string, unknown> | null,
 ): string {
+  const scoreTotal = (brief?.['qualification_score'] as number | undefined) ?? (prospecto['score_total'] as number)
+  const segmento = String(brief?.['segmento_icp'] ?? prospecto['segmento_icp'] ?? 'desconocido')
+  const narrativa = String(brief?.['narrativa_asignada'] ?? prospecto['narrativa_asignada'] ?? '?')
+  const nombre = String(brief?.['nombre_contacto'] ?? prospecto['nombre'] ?? prospecto['phone'])
+  const cargo = brief?.['cargo'] ? ` — ${String(brief['cargo'])}` : ''
+  const empresa = brief?.['empresa'] ? String(brief['empresa']) : null
+  const pais = brief?.['pais'] ? String(brief['pais']) : null
+  const cultivo = brief?.['cultivo_principal'] ? String(brief['cultivo_principal']) : null
+  const fincas = brief?.['fincas_en_cartera'] != null ? String(brief['fincas_en_cartera']) : '?'
+  const sistemaActual = brief?.['sistema_actual'] ? String(brief['sistema_actual']) : 'desconocido'
+  const eudrNivel = brief?.['eudr_urgency_nivel'] ? String(brief['eudr_urgency_nivel']) : 'desconocida'
+  const scoresDim = brief?.['scores_por_dimension'] as Record<string, number> | null
+  const presupuestoScore = scoresDim?.['presupuesto'] ?? (prospecto['score_presupuesto'] as number ?? 0)
+  const dolor = brief?.['punto_de_dolor_principal'] ? String(brief['punto_de_dolor_principal']) : null
+  const objeciones = (brief?.['objeciones_manejadas'] as string[] | null) ?? []
+  const objecionesStr = objeciones.length > 0 ? objeciones.join(', ') : 'ninguna'
+
   const lines = [
-    '🎯 *Prospecto calificado*',
-    `📱 ${nombre ?? prospectoPhone}`,
+    '⚡ LEAD CALIFICADO — Wasagro SDR',
+    '',
+    `Score: ${scoreTotal}/100 | ${segmento} | ${narrativa}`,
+    '',
+    `👤 ${nombre}${cargo}`,
   ]
-  if (brief) {
-    if (brief['empresa']) lines.push(`🏢 ${String(brief['empresa'])}`)
-    if (brief['segmento_icp']) lines.push(`👤 ${String(brief['segmento_icp'])}`)
-    if (brief['qualification_score']) lines.push(`⭐ Score: ${String(brief['qualification_score'])}/100`)
-    if (brief['punto_de_dolor_principal']) lines.push(`💡 Pain: ${String(brief['punto_de_dolor_principal'])}`)
-  }
-  lines.push(`\n*Draft propuesta:*\n${draftMessage}`)
-  lines.push('\nResponde *SÍ* para enviar, *NO* para descartar, o escribe tu propio mensaje.')
+
+  if (empresa) lines.push(`🏢 ${empresa}`)
+
+  const ubicacion = [pais, cultivo].filter(Boolean).join(' | ')
+  if (ubicacion) lines.push(`📍 ${ubicacion}`)
+
+  lines.push(`🌾 ${fincas} fincas`)
+  lines.push(`📋 Sistema actual: ${sistemaActual}`)
+  lines.push(`🔥 EUDR: ${eudrNivel}`)
+  lines.push(`💰 Presupuesto: ${presupuestoScore}/10`)
+  lines.push('')
+  if (dolor) lines.push(`Dolor principal: ${dolor}`)
+  lines.push(`Objeciones manejadas: ${objecionesStr}`)
+  lines.push('')
+  lines.push('─────────────────────────────')
+  lines.push('BORRADOR DE PROPUESTA:')
+  lines.push('')
+  lines.push(draftMessage)
+  lines.push('')
+  lines.push('─────────────────────────────')
+  lines.push('Responde *SÍ* para enviar al prospecto.')
+  lines.push('Responde *NO* para descartar.')
+  lines.push('Escribe una corrección para ajustar y enviar.')
+
   return lines.join('\n')
 }

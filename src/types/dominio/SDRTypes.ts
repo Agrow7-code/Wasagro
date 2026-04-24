@@ -29,6 +29,7 @@ export const RespuestaSDRSchema = z.object({
   objection_type: z.string().nullable().default(null),
   requires_founder_approval: z.boolean().default(false),
   deal_brief: z.unknown().nullable().default(null),
+  segmento_icp: z.string().optional(),
 })
 
 export type RespuestaSDR = z.infer<typeof RespuestaSDRSchema>
