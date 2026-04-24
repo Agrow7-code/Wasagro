@@ -79,3 +79,9 @@ body {
   background: #C9F03B;
   color: #0D0F0C;
 }
+
+/* ── Ticker ── */
+@keyframes wa-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}

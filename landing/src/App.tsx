@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion, useInView, AnimatePresence } from 'motion/react'
+import { motion, useInView } from 'motion/react'
 import {
   ArrowRight, ChevronDown, Mic, CheckCircle, AlertTriangle,
   BarChart3, Leaf, Droplets, Cloud, DollarSign, Grid3x3,
-  Zap, Menu, X
+  Zap, Menu, X, Phone, Video, MoreVertical,
 } from 'lucide-react'
 
 const WA_LINK = 'https://wa.me/593999999999?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
@@ -72,89 +72,9 @@ function FadeUp({
 }
 
 // ─────────────────────────────────────────────────────────────
-// WHATSAPP MODAL
-// ─────────────────────────────────────────────────────────────
-function WhatsAppModal({ onClose }: { onClose: () => void }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(13,15,12,0.60)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="bg-pergamino border-2 border-tierra rounded-2xl p-8 max-w-sm w-full"
-        style={{ boxShadow: '8px 8px 0 0 #0D0F0C' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Logo */}
-        <div className="flex justify-center mb-5">
-          <Logo size={26} />
-        </div>
-
-        {/* Title */}
-        <h3
-          className="font-bold text-negro text-center mb-2 tracking-[-0.02em]"
-          style={{ fontSize: 22 }}
-        >
-          Vas a abrir WhatsApp
-        </h3>
-
-        {/* Subtitle */}
-        <p className="text-[14px] text-tierra text-center leading-[1.6] mb-6">
-          Escríbenos cualquier cosa para empezar. Te guiamos desde el primer mensaje.
-        </p>
-
-        {/* Preview bubble */}
-        <div className="flex justify-center mb-6">
-          <div
-            className="bg-[#DCF8C6] rounded-xl rounded-tr-[3px] px-4 py-3 max-w-[90%] text-[13px] text-negro leading-[1.5]"
-            style={{ boxShadow: '0 1px 2px rgba(0,0,0,.1)' }}
-          >
-            "Hola, quiero registrar eventos de mi finca"
-          </div>
-        </div>
-
-        {/* CTA */}
-        <a
-          href={WA_LINK}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 w-full py-3.5 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-xl mb-3 hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform duration-100"
-          style={{ boxShadow: '3px 3px 0 0 #1B3D24' }}
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="#25D366" aria-hidden="true">
-            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-          </svg>
-          Abrir WhatsApp →
-        </a>
-
-        {/* Cancel */}
-        <button
-          onClick={onClose}
-          className="w-full text-center text-[13px] cursor-pointer transition-colors duration-100"
-          style={{ color: 'rgba(212,88,40,0.55)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = '#D45828')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(212,88,40,0.55)')}
-        >
-          Cancelar
-        </button>
-      </motion.div>
-    </motion.div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────
-function Nav({ onOpenModal }: { onOpenModal: () => void }) {
+function Nav() {
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
@@ -185,7 +105,6 @@ function Nav({ onOpenModal }: { onOpenModal: () => void }) {
           <Logo size={26} />
         </a>
 
-        {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-1" aria-label="Navegación principal">
           {links.map((l) => (
             <a
@@ -199,14 +118,15 @@ function Nav({ onOpenModal }: { onOpenModal: () => void }) {
         </nav>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={onOpenModal}
-            className="hidden md:flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard-sm hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[4px_4px_0_0_#0D0F0C] transition-all duration-100"
+          <a
+            href={WA_LINK}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden md:flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard-sm hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform duration-100"
           >
             Solicitar acceso
             <ArrowRight size={13} strokeWidth={2.5} />
-          </button>
-
+          </a>
           <button
             className="md:hidden p-2 border-2 border-negro rounded-md"
             onClick={() => setOpen(!open)}
@@ -217,7 +137,6 @@ function Nav({ onOpenModal }: { onOpenModal: () => void }) {
         </div>
       </div>
 
-      {/* Mobile menu */}
       {open && (
         <div className="md:hidden border-t-2 border-negro bg-pergamino px-6 py-4 flex flex-col gap-2">
           {links.map((l) => (
@@ -230,12 +149,14 @@ function Nav({ onOpenModal }: { onOpenModal: () => void }) {
               {l.label}
             </a>
           ))}
-          <button
-            onClick={() => { setOpen(false); onOpenModal() }}
+          <a
+            href={WA_LINK}
+            target="_blank"
+            rel="noopener noreferrer"
             className="mt-2 flex items-center justify-center gap-2 px-4 py-3 font-bold bg-negro text-pergamino border-2 border-negro rounded-md"
           >
             Solicitar acceso <ArrowRight size={14} />
-          </button>
+          </a>
         </div>
       )}
     </header>
@@ -243,7 +164,7 @@ function Nav({ onOpenModal }: { onOpenModal: () => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// WHATSAPP PHONE MOCK
+// WHATSAPP PHONE MOCK — modern redesign
 // ─────────────────────────────────────────────────────────────
 type WaMessage = {
   from: 'user' | 'bot'
@@ -277,24 +198,27 @@ const WA_MESSAGES: WaMessage[] = [
   },
 ]
 
-const WAVEFORM_HEIGHTS = [3, 5, 8, 4, 7, 10, 5, 3, 6, 9, 4, 7, 5, 3, 8, 6, 4]
+const WAVEFORM = [2, 4, 7, 3, 6, 9, 5, 3, 7, 5, 3, 6, 8, 4, 6, 3, 5]
 
 function VoiceBubble({ duration }: { duration: string }) {
   return (
-    <div className="flex items-center gap-2 px-1 py-0.5 min-w-[150px]">
-      <div className="w-8 h-8 rounded-full bg-[#128C7E] flex items-center justify-center flex-shrink-0">
+    <div className="flex items-center gap-2 py-0.5 min-w-[155px]">
+      <div
+        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{ background: '#128C7E' }}
+      >
         <Mic size={14} color="#fff" strokeWidth={2} />
       </div>
-      <div className="flex gap-[2px] items-center flex-1 h-5">
-        {WAVEFORM_HEIGHTS.map((h, i) => (
+      <div className="flex gap-[2px] items-center flex-1" style={{ height: 20 }}>
+        {WAVEFORM.map((h, i) => (
           <div
             key={i}
-            className="w-[2px] rounded-full bg-[#128C7E]"
-            style={{ height: h * 1.5 }}
+            className="w-[2.5px] rounded-full"
+            style={{ height: Math.max(3, h * 1.8), background: i < 9 ? '#128C7E' : 'rgba(18,140,126,0.35)' }}
           />
         ))}
       </div>
-      <span className="font-mono text-[10px] text-[#667781] ml-1 flex-shrink-0">{duration}</span>
+      <span className="font-mono text-[10px] ml-1 flex-shrink-0" style={{ color: '#667781' }}>{duration}</span>
     </div>
   )
 }
@@ -319,97 +243,225 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
   }, [isInView, autoPlay]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div ref={ref} className="mx-auto" style={{ maxWidth: 280 }}>
-      {/* Phone body */}
+    <div ref={ref} className="select-none mx-auto" style={{ maxWidth: 290, width: '100%' }}>
+      {/* ── Phone shell ── */}
       <div
-        className="relative bg-negro overflow-hidden"
         style={{
-          borderRadius: 36,
-          border: '8px solid #0D0F0C',
+          background: '#111',
+          borderRadius: 52,
+          padding: '14px 11px 10px',
           boxShadow: '12px 12px 0 0 #0D0F0C',
+          border: '1.5px solid rgba(255,255,255,0.07)',
+          outline: '2px solid #0D0F0C',
+          outlineOffset: 0,
         }}
       >
-        {/* Notch */}
-        <div className="flex justify-center mt-3 mb-1">
-          <div
-            className="bg-negro"
-            style={{ width: 60, height: 6, borderRadius: 4 }}
-          />
+        {/* Dynamic Island */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
+          <div style={{ width: 120, height: 30, background: '#000', borderRadius: 999 }} />
         </div>
 
-        {/* Screen */}
-        <div style={{ background: '#ECE5DD' }}>
-          {/* WA Header */}
+        {/* ── Screen ── */}
+        <div style={{ borderRadius: 38, overflow: 'hidden' }}>
+
+          {/* Status bar */}
           <div
-            className="flex items-center gap-2.5"
-            style={{ background: '#1B3D24', padding: '12px 16px' }}
+            style={{
+              background: '#128C7E',
+              padding: '5px 18px 4px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
           >
+            <span style={{ color: '#fff', fontSize: 10, fontWeight: 600, fontFamily: 'monospace' }}>9:41</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {/* Signal bars */}
+              {[3, 4, 5, 6].map((h, i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 2.5,
+                    height: h,
+                    background: i < 3 ? '#fff' : 'rgba(255,255,255,0.35)',
+                    borderRadius: 1,
+                  }}
+                />
+              ))}
+              {/* Battery */}
+              <div
+                style={{
+                  marginLeft: 5,
+                  width: 18,
+                  height: 9,
+                  border: '1.5px solid rgba(255,255,255,0.6)',
+                  borderRadius: 3,
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '1.5px 2px',
+                  position: 'relative',
+                }}
+              >
+                <div style={{ width: '72%', height: '100%', background: '#fff', borderRadius: 1.5 }} />
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: -4,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 2.5,
+                    height: 5,
+                    background: 'rgba(255,255,255,0.5)',
+                    borderRadius: 1,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* WA Chat header */}
+          <div
+            style={{
+              background: '#128C7E',
+              padding: '8px 14px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 9,
+            }}
+          >
+            {/* Back chevron */}
+            <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 20, lineHeight: 1, marginLeft: -2 }}>‹</span>
+
+            {/* Avatar */}
             <div
-              className="w-8 h-8 rounded-full bg-negro flex items-center justify-center flex-shrink-0"
-              style={{ border: '1px solid rgba(201,240,59,0.30)' }}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: '50%',
+                background: '#0D0F0C',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                border: '1.5px solid rgba(201,240,59,0.4)',
+              }}
             >
-              <svg viewBox="0 -22 60 96" width="14" height="29" fill="none" aria-hidden="true">
+              <svg viewBox="0 -22 60 96" width="14" height="28" fill="none" aria-hidden="true">
                 <path d="M8,8 L18,72 L30,36 L42,72 L52,8" stroke="#F5F1E8" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round" />
                 <circle cx="30" cy="-6" r="12" fill="#C9F03B" />
               </svg>
             </div>
-            <div>
-              <div className="text-[12px] font-bold text-[#F5F1E8] leading-none">
+
+            {/* Name + status */}
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1.2, fontFamily: 'Space Grotesk, sans-serif' }}>
                 Wasagro<span style={{ color: '#C9F03B' }}>.</span>
               </div>
-              <div className="text-[9px] text-[#F5F1E8]/50 font-mono mt-0.5">en línea</div>
+              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, fontFamily: 'monospace' }}>en línea</div>
+            </div>
+
+            {/* Action icons */}
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <Video size={16} color="rgba(255,255,255,0.7)" strokeWidth={1.5} />
+              <Phone size={15} color="rgba(255,255,255,0.7)" strokeWidth={1.5} />
+              <MoreVertical size={15} color="rgba(255,255,255,0.7)" strokeWidth={1.5} />
             </div>
           </div>
 
-          {/* Chat */}
+          {/* Divider line */}
+          <div style={{ height: 1, background: 'rgba(0,0,0,0.08)' }} />
+
+          {/* Chat area */}
           <div
-            className="px-2.5 py-2 flex flex-col gap-1.5 overflow-hidden"
-            style={{ background: '#E5DDD5', minHeight: 320 }}
+            style={{
+              background: '#E5DDD5',
+              padding: '10px 10px 6px',
+              minHeight: 310,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              overflow: 'hidden',
+            }}
           >
+            {/* Date chip */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 2 }}>
+              <span
+                style={{
+                  background: 'rgba(255,255,255,0.75)',
+                  color: '#667781',
+                  fontSize: 10,
+                  padding: '2px 8px',
+                  borderRadius: 8,
+                  fontFamily: 'monospace',
+                  backdropFilter: 'blur(4px)',
+                }}
+              >
+                HOY
+              </span>
+            </div>
+
             {WA_MESSAGES.slice(0, visible).map((msg, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, y: 6, scale: 0.97 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.25, ease: 'easeOut' }}
-                className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                style={{ display: 'flex', justifyContent: msg.from === 'user' ? 'flex-end' : 'flex-start' }}
               >
                 <div
-                  className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-[11px] leading-[1.45] ${
-                    msg.from === 'user'
-                      ? 'bg-[#DCF8C6] text-[#111] rounded-tr-[3px]'
-                      : msg.alert
-                      ? 'bg-white text-[#0D0F0C] rounded-tl-[3px] border-l-2 border-[#D45828]'
-                      : 'bg-white text-[#0D0F0C] rounded-tl-[3px]'
-                  }`}
-                  style={{ boxShadow: '0 1px 2px rgba(0,0,0,.08)' }}
+                  style={{
+                    maxWidth: '82%',
+                    borderRadius: msg.from === 'user' ? '12px 3px 12px 12px' : '3px 12px 12px 12px',
+                    padding: msg.voice ? '6px 10px 4px' : '6px 10px',
+                    fontSize: 11.5,
+                    lineHeight: 1.45,
+                    background: msg.from === 'user' ? '#DCF8C6' : '#fff',
+                    color: '#111',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                    borderLeft: msg.alert ? '2.5px solid #D45828' : undefined,
+                  }}
                 >
                   {msg.voice && <VoiceBubble duration={msg.duration ?? '0:00'} />}
-                  {msg.text && <p>{msg.text}</p>}
+                  {msg.text && <p style={{ margin: 0 }}>{msg.text}</p>}
                   {msg.lines && msg.lines.map((l, li) => (
                     <p
                       key={li}
-                      className={li === 0 ? 'font-bold' : li === msg.lines!.length - 1 ? 'opacity-50 text-[9.5px] mt-0.5' : ''}
-                      style={msg.alert && li === 0 ? { color: '#D45828' } : undefined}
+                      style={{
+                        margin: 0,
+                        fontWeight: li === 0 ? 700 : 400,
+                        fontSize: li === msg.lines!.length - 1 ? 9.5 : 11.5,
+                        opacity: li === msg.lines!.length - 1 ? 0.5 : 1,
+                        marginTop: li === msg.lines!.length - 1 ? 2 : 0,
+                        color: msg.alert && li === 0 ? '#D45828' : undefined,
+                      }}
                     >
                       {l}
                     </p>
                   ))}
-                  <p className="text-right text-[8.5px] opacity-40 mt-0.5">{msg.time} ✓✓</p>
+                  <p style={{ margin: '2px 0 0', fontSize: 8.5, opacity: 0.4, textAlign: 'right', color: '#667781' }}>
+                    {msg.time} ✓✓
+                  </p>
                 </div>
               </motion.div>
             ))}
+
             {visible > 0 && visible < WA_MESSAGES.length && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex justify-start"
-              >
-                <div className="bg-white rounded-lg rounded-tl-[3px] px-3 py-2 flex gap-1 items-center" style={{ boxShadow: '0 1px 2px rgba(0,0,0,.08)' }}>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex' }}>
+                <div
+                  style={{
+                    background: '#fff',
+                    borderRadius: '3px 12px 12px 12px',
+                    padding: '8px 12px',
+                    display: 'flex',
+                    gap: 4,
+                    alignItems: 'center',
+                    boxShadow: '0 1px 2px rgba(0,0,0,.1)',
+                  }}
+                >
                   {[0, 1, 2].map((d) => (
                     <motion.div
                       key={d}
-                      className="w-1.5 h-1.5 rounded-full bg-[#9C9080]"
+                      style={{ width: 6, height: 6, borderRadius: '50%', background: '#9C9080' }}
                       animate={{ y: [0, -3, 0] }}
                       transition={{ duration: 0.7, repeat: Infinity, delay: d * 0.15 }}
                     />
@@ -420,26 +472,49 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
           </div>
 
           {/* Input bar */}
-          <div className="bg-[#F0F0F0] px-2.5 py-1.5 flex items-center gap-2 border-t border-[#0D0F0C]/10">
-            <div className="flex-1 bg-white rounded-full px-3 py-1 text-[10px] text-[#9C9080]">
+          <div
+            style={{
+              background: '#F0F2F0',
+              padding: '8px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              borderTop: '1px solid rgba(0,0,0,0.06)',
+            }}
+          >
+            <div
+              style={{
+                flex: 1,
+                background: '#fff',
+                borderRadius: 999,
+                padding: '5px 14px',
+                fontSize: 10.5,
+                color: '#aaa',
+                fontFamily: 'Space Grotesk, sans-serif',
+              }}
+            >
               Escribe un mensaje…
             </div>
-            <div className="w-6 h-6 rounded-full bg-[#1B3D24] flex items-center justify-center flex-shrink-0">
-              <Mic size={11} color="#C9F03B" strokeWidth={2.5} />
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: '#128C7E',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Mic size={14} color="#fff" strokeWidth={2} />
             </div>
           </div>
         </div>
 
         {/* Home indicator */}
-        <div className="flex justify-center" style={{ margin: '8px auto' }}>
-          <div
-            style={{
-              width: 40,
-              height: 4,
-              borderRadius: 4,
-              background: 'rgba(245,241,232,0.25)',
-            }}
-          />
+        <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0 2px' }}>
+          <div style={{ width: 42, height: 4, background: 'rgba(255,255,255,0.18)', borderRadius: 999 }} />
         </div>
       </div>
     </div>
@@ -449,7 +524,7 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
 // ─────────────────────────────────────────────────────────────
 // HERO
 // ─────────────────────────────────────────────────────────────
-function Hero({ onOpenModal }: { onOpenModal: () => void }) {
+function Hero() {
   return (
     <section
       className="relative overflow-hidden dot-grid"
@@ -457,7 +532,6 @@ function Hero({ onOpenModal }: { onOpenModal: () => void }) {
       aria-label="Propuesta de valor principal"
     >
       <div className="max-w-6xl mx-auto px-6 py-20 lg:py-28 grid lg:grid-cols-[1fr_420px] gap-12 lg:gap-16 items-center">
-        {/* Left */}
         <div>
           <motion.div
             initial={{ opacity: 0, x: -16 }}
@@ -482,10 +556,7 @@ function Hero({ onOpenModal }: { onOpenModal: () => void }) {
             <br />
             ya era el sistema.
             <br />
-            <span
-              className="inline"
-              style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}
-            >
+            <span style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}>
               Solo faltaba
             </span>
             <br />
@@ -512,14 +583,16 @@ function Hero({ onOpenModal }: { onOpenModal: () => void }) {
             transition={{ duration: 0.5, delay: 0.28, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-wrap gap-3"
           >
-            <button
-              onClick={onOpenModal}
+            <a
+              href={WA_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex items-center gap-2 px-5 py-3 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
               style={{ boxShadow: '4px 4px 0 0 #1B3D24' }}
             >
               Empezar con WhatsApp
               <ArrowRight size={15} strokeWidth={2.5} />
-            </button>
+            </a>
             <a
               href="#como-funciona"
               className="flex items-center gap-2 px-5 py-3 font-semibold text-[15px] border-2 border-negro rounded-md text-negro hover:bg-n200 transition-colors duration-100"
@@ -530,7 +603,6 @@ function Hero({ onOpenModal }: { onOpenModal: () => void }) {
           </motion.div>
         </div>
 
-        {/* Right — Phone */}
         <motion.div
           initial={{ opacity: 0, x: 24 }}
           animate={{ opacity: 1, x: 0 }}
@@ -556,11 +628,7 @@ const STATS = [
 
 function Stats() {
   return (
-    <section
-      className="border-y-2 border-negro"
-      style={{ background: '#F5F1E8' }}
-      aria-label="Métricas clave"
-    >
+    <section className="border-y-2 border-negro" style={{ background: '#F5F1E8' }} aria-label="Métricas clave">
       <div className="max-w-6xl mx-auto px-6">
         <div className="grid grid-cols-2 lg:grid-cols-4">
           {STATS.map((s, i) => (
@@ -569,16 +637,11 @@ function Stats() {
               delay={i * 0.07}
               className={`py-10 px-6 ${i < STATS.length - 1 ? 'border-b-2 lg:border-b-0 lg:border-r-2 border-negro' : ''} ${i === 1 ? 'border-r-2 lg:border-r-2' : ''}`}
             >
-              <div
-                className="font-bold leading-none tracking-[-0.03em] text-campo mb-2"
-                style={{ fontSize: 'clamp(48px, 5vw, 68px)' }}
-              >
+              <div className="font-bold leading-none tracking-[-0.03em] text-campo mb-2" style={{ fontSize: 'clamp(48px, 5vw, 68px)' }}>
                 {s.value}
                 <span className="text-senal">{s.unit}</span>
               </div>
-              <div className="font-mono text-[12px] text-n400 uppercase tracking-[.08em]">
-                {s.label}
-              </div>
+              <div className="font-mono text-[12px] text-n400 uppercase tracking-[.08em]">{s.label}</div>
             </FadeUp>
           ))}
         </div>
@@ -588,7 +651,7 @@ function Stats() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// MANIFESTO (rebel statements — Campo Verde bg)
+// MANIFESTO
 // ─────────────────────────────────────────────────────────────
 const MANIFESTO = [
   {
@@ -603,17 +666,14 @@ const MANIFESTO = [
   {
     quote: '"El agtech te pide un formulario.\nNosotros te pedimos que hables."',
     sub: 'Las apps agrícolas especializadas tienen tasas de adopción menores al 15% en LATAM. WhatsApp ya está en el 90% de los teléfonos de la región.',
-    source: 'GSMA Mobile Economy Latin America 2024 · estimaciones de mercado',
+    sourceText: 'Statista',
+    sourceUrl: 'https://www.statista.com/statistics/1323702/whatsapp-penetration-latin-american-countries/',
   },
 ]
 
 function Manifesto() {
   return (
-    <section
-      className="py-20 relative overflow-hidden"
-      style={{ background: '#1B3D24' }}
-      aria-label="Manifiesto de marca"
-    >
+    <section className="py-20 relative overflow-hidden" style={{ background: '#1B3D24' }} aria-label="Manifiesto de marca">
       <div className="absolute inset-0 dot-grid-light pointer-events-none" />
       <div className="relative max-w-6xl mx-auto px-6">
         <div className="grid md:grid-cols-3 gap-5">
@@ -624,19 +684,19 @@ function Manifesto() {
                   m.highlight ? 'border-senal/60 bg-senal/5' : 'border-white/10'
                 }`}
               >
-                <blockquote
-                  className="font-bold leading-[1.25] text-pergamino whitespace-pre-line"
-                  style={{ fontSize: 'clamp(17px, 2vw, 21px)' }}
-                >
+                <blockquote className="font-bold leading-[1.25] text-pergamino whitespace-pre-line" style={{ fontSize: 'clamp(17px, 2vw, 21px)' }}>
                   {m.quote}
                 </blockquote>
-                <p className="font-mono text-[13px] text-pergamino/50 leading-[1.65] mt-auto">
-                  {m.sub}
-                </p>
-                {m.source && (
-                  <p className="font-mono text-[11px] text-pergamino/25 leading-[1.5]">
-                    {m.source}
-                  </p>
+                <p className="font-mono text-[13px] text-pergamino/50 leading-[1.65] mt-auto">{m.sub}</p>
+                {m.sourceText && (
+                  <a
+                    href={m.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[11px] text-pergamino/25 hover:text-pergamino/50 transition-colors duration-100"
+                  >
+                    {m.sourceText}
+                  </a>
                 )}
               </div>
             </FadeUp>
@@ -684,13 +744,8 @@ function HowItWorks() {
     >
       <div className="max-w-6xl mx-auto px-6">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">
-            — 03 pasos
-          </p>
-          <h2
-            className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5"
-            style={{ fontSize: 'clamp(32px, 4.5vw, 56px)' }}
-          >
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— 03 pasos</p>
+          <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5" style={{ fontSize: 'clamp(32px, 4.5vw, 56px)' }}>
             Sin app. Sin form. Sin magia.
             <br />
             Solo WhatsApp.
@@ -700,22 +755,20 @@ function HowItWorks() {
           </p>
         </FadeUp>
 
-        <div className="grid md:grid-cols-3 gap-5 relative">
+        <div className="grid md:grid-cols-3 gap-5 relative items-stretch">
           <div className="hidden md:block absolute top-10 left-[calc(33%+10px)] right-[calc(33%+10px)] h-[2px] bg-negro/20" />
 
           {STEPS.map((step, i) => (
-            <FadeUp key={step.num} delay={i * 0.12}>
-              <div className="border-2 border-negro rounded-xl overflow-hidden bg-pergamino shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-150">
-                <div className="bg-negro px-5 py-3 flex items-center gap-3">
-                  <span className="font-mono text-[11px] font-bold text-senal tracking-[.1em]">
-                    {step.num}
-                  </span>
+            <FadeUp key={step.num} delay={i * 0.12} className="h-full">
+              <div className="border-2 border-negro rounded-xl overflow-hidden bg-pergamino shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-150 h-full flex flex-col">
+                <div className="bg-negro px-5 py-3 flex items-center gap-3 flex-shrink-0">
+                  <span className="font-mono text-[11px] font-bold text-senal tracking-[.1em]">{step.num}</span>
                   <step.icon size={15} color="#C9F03B" strokeWidth={2} />
                 </div>
-                <div className="p-6">
+                <div className="p-6 flex flex-col flex-1">
                   <h3 className="font-bold text-[18px] text-negro mb-3">{step.title}</h3>
-                  <p className="text-[14px] text-n700 leading-[1.65] mb-5">{step.desc}</p>
-                  <div className="border-l-3 border-senal pl-3 font-mono text-[12px] text-campo font-bold">
+                  <p className="text-[14px] text-n700 leading-[1.65] flex-1">{step.desc}</p>
+                  <div className="border-l-3 border-senal pl-3 font-mono text-[12px] text-campo font-bold mt-5">
                     {step.example}
                   </div>
                 </div>
@@ -729,26 +782,16 @@ function HowItWorks() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// WHATSAPP DEMO (dark section, animated chat)
+// WHATSAPP DEMO (dark section)
 // ─────────────────────────────────────────────────────────────
 function WhatsAppSection() {
   return (
-    <section
-      className="py-24 relative overflow-hidden"
-      style={{ background: '#0D0F0C' }}
-      aria-label="Demo en WhatsApp"
-    >
+    <section className="py-24 relative overflow-hidden" style={{ background: '#0D0F0C' }} aria-label="Demo en WhatsApp">
       <div className="absolute inset-0 dot-grid-light pointer-events-none opacity-40" />
       <div className="relative max-w-6xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
-        {/* Text */}
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-senal/70 mb-4">
-            — Demo en vivo
-          </p>
-          <h2
-            className="font-bold leading-[1.0] tracking-[-0.02em] text-pergamino mb-5"
-            style={{ fontSize: 'clamp(30px, 4vw, 52px)' }}
-          >
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-senal/70 mb-4">— Demo en vivo</p>
+          <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-pergamino mb-5" style={{ fontSize: 'clamp(30px, 4vw, 52px)' }}>
             Demo en vivo — escribe como
             <br />
             <span className="text-senal">si fuera tu equipo de campo.</span>
@@ -756,8 +799,7 @@ function WhatsAppSection() {
           <p className="text-[16px] text-pergamino/60 leading-[1.65] mb-8 max-w-md">
             Estos son ejemplos reales de mensajes que Wasagro procesa. Texto, voz o foto — el resultado es el mismo.
           </p>
-
-          <div className="flex flex-col gap-3 mb-8">
+          <div className="flex flex-col gap-3">
             {[
               { icon: CheckCircle, text: 'Tipo de insumo y dosis por hectárea', color: '#3EBB6A' },
               { icon: CheckCircle, text: 'Lote y hectáreas afectadas', color: '#3EBB6A' },
@@ -771,8 +813,6 @@ function WhatsAppSection() {
             ))}
           </div>
         </FadeUp>
-
-        {/* Phone */}
         <div className="flex justify-center">
           <PhoneMock />
         </div>
@@ -803,7 +843,7 @@ const FEATURES = [
     icon: Leaf,
     title: 'Eventos de cosecha',
     desc: 'Kg o toneladas por lote, calidad de fruta, rechazo. Comparativa automática vs semana anterior.',
-    example: '"Cosechamos 420 kg" → Cosecha · Lote · Delta',
+    example: '"Cosecha · 420 kg · Lote 7" → Delta +8%',
     color: '#3EBB6A',
   },
   {
@@ -817,13 +857,13 @@ const FEATURES = [
     icon: DollarSign,
     title: 'Gastos de campo',
     desc: 'Jornales, insumos, combustible. Control de costos por lote sin contabilidad manual.',
-    example: '"Deshierbe · 3 jornales · Lote 2" → Gasto · Lote',
+    example: '"Deshierbe · 3 jornales · Lote 2" → Gasto',
     color: '#C9F03B',
   },
   {
     icon: Grid3x3,
     title: 'Trazabilidad completa',
-    desc: 'Todos los eventos quedan georreferenciados y auditables. Dashboard en tiempo real para el equipo de exportación.',
+    desc: 'Todos los eventos quedan georreferenciados y auditables. Dashboard en tiempo real para exportación.',
     example: 'Todo lo anterior → Expediente auditado ✓',
     color: '#C9F03B',
     highlight: true,
@@ -832,20 +872,11 @@ const FEATURES = [
 
 function Features() {
   return (
-    <section
-      className="py-24 border-b-2 border-negro"
-      style={{ background: '#EAE6DC' }}
-      aria-label="Qué captura Wasagro"
-    >
+    <section className="py-24 border-b-2 border-negro" style={{ background: '#EAE6DC' }} aria-label="Qué captura Wasagro">
       <div className="max-w-6xl mx-auto px-6">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">
-            — Eventos que captura
-          </p>
-          <h2
-            className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5"
-            style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}
-          >
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— Eventos que captura</p>
+          <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}>
             Todo lo que pasa en el campo.
             <br />
             <span className="text-campo">Sin que nadie lo transcriba.</span>
@@ -854,7 +885,6 @@ function Features() {
             El trabajador habla como siempre. Wasagro extrae el dato estructurado y lo pone donde el equipo de exportación lo necesita.
           </p>
         </FadeUp>
-
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {FEATURES.map((f, i) => (
             <FadeUp key={f.title} delay={i * 0.07}>
@@ -869,19 +899,9 @@ function Features() {
                 >
                   <f.icon size={18} color={f.highlight ? '#0D0F0C' : f.color} strokeWidth={2} />
                 </div>
-                <h3 className={`font-bold text-[16px] mb-2 ${f.highlight ? 'text-pergamino' : 'text-negro'}`}>
-                  {f.title}
-                </h3>
-                <p className={`text-[13px] leading-[1.6] mb-4 ${f.highlight ? 'text-pergamino/60' : 'text-n700'}`}>
-                  {f.desc}
-                </p>
-                <div
-                  className={`mt-auto font-mono text-[11px] px-3 py-2 rounded-md ${
-                    f.highlight
-                      ? 'bg-senal/10 text-senal'
-                      : 'bg-campo/8 text-campo border border-campo/20'
-                  }`}
-                >
+                <h3 className={`font-bold text-[16px] mb-2 ${f.highlight ? 'text-pergamino' : 'text-negro'}`}>{f.title}</h3>
+                <p className={`text-[13px] leading-[1.6] mb-4 flex-1 ${f.highlight ? 'text-pergamino/60' : 'text-n700'}`}>{f.desc}</p>
+                <div className={`mt-auto font-mono text-[11px] px-3 py-2 rounded-md ${f.highlight ? 'bg-senal/10 text-senal' : 'bg-campo/8 text-campo border border-campo/20'}`}>
                   {f.example}
                 </div>
               </div>
@@ -896,7 +916,7 @@ function Features() {
 // ─────────────────────────────────────────────────────────────
 // AUDIENCES
 // ─────────────────────────────────────────────────────────────
-function Audiences({ onOpenModal }: { onOpenModal: () => void }) {
+function Audiences() {
   const audiences = [
     {
       id: 'exportadoras',
@@ -942,19 +962,13 @@ function Audiences({ onOpenModal }: { onOpenModal: () => void }) {
     >
       <div className="max-w-6xl mx-auto px-6">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">
-            — Dos perspectivas
-          </p>
-          <h2
-            className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-14"
-            style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}
-          >
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— Dos perspectivas</p>
+          <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-14" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}>
             Una herramienta.
             <br />
             Dos mundos que conecta.
           </h2>
         </FadeUp>
-
         <div className="grid md:grid-cols-2 gap-5">
           {audiences.map((a, i) => (
             <FadeUp key={a.id} delay={i * 0.12}>
@@ -966,47 +980,27 @@ function Audiences({ onOpenModal }: { onOpenModal: () => void }) {
                   boxShadow: `6px 6px 0 0 ${a.dark ? 'rgba(201,240,59,0.2)' : '#0D0F0C'}`,
                 }}
               >
-                <div
-                  className="px-6 py-5 border-b-2"
-                  style={{
-                    background: a.dark ? 'rgba(0,0,0,0.2)' : '#0D0F0C',
-                    borderColor: a.border,
-                  }}
-                >
-                  <p
-                    className="font-mono text-[10px] font-bold tracking-[.12em] uppercase mb-1"
-                    style={{ color: '#C9F03B' }}
-                  >
-                    {a.tag}
-                  </p>
-                  <h3
-                    className="font-bold leading-[1.2] whitespace-pre-line text-pergamino"
-                    style={{ fontSize: 'clamp(18px, 2.5vw, 24px)' }}
-                  >
+                <div className="px-6 py-5 border-b-2" style={{ background: a.dark ? 'rgba(0,0,0,0.2)' : '#0D0F0C', borderColor: a.border }}>
+                  <p className="font-mono text-[10px] font-bold tracking-[.12em] uppercase mb-1" style={{ color: '#C9F03B' }}>{a.tag}</p>
+                  <h3 className="font-bold leading-[1.2] whitespace-pre-line text-pergamino" style={{ fontSize: 'clamp(18px, 2.5vw, 24px)' }}>
                     {a.title}
                   </h3>
                 </div>
                 <div className="px-6 py-6 flex flex-col gap-3 flex-1">
                   {a.items.map((item) => (
                     <div key={item} className="flex items-start gap-3">
-                      <CheckCircle
-                        size={15}
-                        color={a.dark ? '#C9F03B' : '#3EBB6A'}
-                        strokeWidth={2.5}
-                        className="flex-shrink-0 mt-0.5"
-                      />
-                      <span
-                        className="text-[14px] leading-[1.5]"
-                        style={{ color: a.dark ? 'rgba(245,241,232,0.8)' : '#3A3530' }}
-                      >
+                      <CheckCircle size={15} color={a.dark ? '#C9F03B' : '#3EBB6A'} strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
+                      <span className="text-[14px] leading-[1.5]" style={{ color: a.dark ? 'rgba(245,241,232,0.8)' : '#3A3530' }}>
                         {item}
                       </span>
                     </div>
                   ))}
                 </div>
                 <div className="px-6 pb-6">
-                  <button
-                    onClick={onOpenModal}
+                  <a
+                    href={WA_LINK}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 w-full py-3 font-bold text-[14px] rounded-xl border-2 transition-all duration-100 hover:gap-3"
                     style={
                       a.dark
@@ -1016,7 +1010,7 @@ function Audiences({ onOpenModal }: { onOpenModal: () => void }) {
                   >
                     {a.cta}
                     <ArrowRight size={14} strokeWidth={2.5} />
-                  </button>
+                  </a>
                 </div>
               </div>
             </FadeUp>
@@ -1028,33 +1022,43 @@ function Audiences({ onOpenModal }: { onOpenModal: () => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PROOF BAR
+// PROOF BAR — animated ticker
 // ─────────────────────────────────────────────────────────────
+const TICKER_ITEMS = [
+  'REGISTRA EN 30 SEGUNDOS',
+  'SIN APPS QUE INSTALAR',
+  'VOZ · TEXTO · IMAGEN',
+  'DATOS ESTRUCTURADOS DESDE EL CAMPO',
+  'TRAZABILIDAD AUTOMÁTICA',
+  'OPERA EN WHATSAPP',
+]
+
 function ProofBar() {
+  const track = [...TICKER_ITEMS, ...TICKER_ITEMS]
   return (
     <section
-      className="py-8 border-b-2 border-negro"
+      className="py-3.5 border-b-2 border-negro overflow-hidden"
       style={{ background: '#C9F03B' }}
-      aria-label="Contexto de uso"
+      aria-hidden="true"
     >
-      <div className="max-w-6xl mx-auto px-6">
-        <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-3">
-          {[
-            'Cacao de exportación',
-            'Banano orgánico',
-            'WhatsApp Business API oficial',
-            'Voz · Texto · Imagen',
-            'América Latina',
-          ].map((item, i) => (
-            <span
-              key={item}
-              className="flex items-center gap-2.5 font-mono text-[12px] font-bold text-negro tracking-[.06em] uppercase"
-            >
-              {i > 0 && <span className="opacity-30">·</span>}
-              {item}
-            </span>
-          ))}
-        </div>
+      <div
+        style={{
+          display: 'flex',
+          width: 'max-content',
+          animation: 'wa-ticker 24s linear infinite',
+          willChange: 'transform',
+        }}
+      >
+        {track.map((item, i) => (
+          <span
+            key={i}
+            className="font-mono text-[11.5px] font-bold text-negro tracking-[.10em] whitespace-nowrap"
+            style={{ padding: '0 28px' }}
+          >
+            {item}
+            <span className="mx-3 opacity-30">·</span>
+          </span>
+        ))}
       </div>
     </section>
   )
@@ -1063,35 +1067,25 @@ function ProofBar() {
 // ─────────────────────────────────────────────────────────────
 // FINAL CTA
 // ─────────────────────────────────────────────────────────────
-function FinalCTA({ onOpenModal }: { onOpenModal: () => void }) {
+function FinalCTA() {
   return (
-    <section
-      className="py-28 relative overflow-hidden dot-grid"
-      style={{ background: '#F5F1E8' }}
-      aria-label="Llamado a acción"
-    >
+    <section className="py-28 relative overflow-hidden dot-grid" style={{ background: '#F5F1E8' }} aria-label="Llamado a acción">
       <div className="max-w-3xl mx-auto px-6 text-center">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-5">
-            — Empieza hoy
-          </p>
-          <h2
-            className="font-bold leading-[1.0] tracking-[-0.03em] text-negro mb-6"
-            style={{ fontSize: 'clamp(36px, 5vw, 68px)' }}
-          >
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-5">— Empieza hoy</p>
+          <h2 className="font-bold leading-[1.0] tracking-[-0.03em] text-negro mb-6" style={{ fontSize: 'clamp(36px, 5vw, 68px)' }}>
             Empieza con un
             <br />
-            <span style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}>
-              mensaje de WhatsApp.
-            </span>
+            <span style={{ background: '#C9F03B', padding: '0 8px', display: 'inline' }}>mensaje de WhatsApp.</span>
           </h2>
           <p className="text-[18px] text-n700 leading-[1.65] max-w-lg mx-auto mb-10">
             Sin formularios, sin demo calls, sin demoras. Manda un mensaje y en 5 minutos tu primer evento de campo está registrado.
           </p>
-
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <button
-              onClick={onOpenModal}
+            <a
+              href={WA_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex items-center gap-3 px-8 py-4 font-bold text-[16px] bg-negro text-pergamino border-2 border-negro rounded-xl transition-all duration-100 hover:translate-x-[-2px] hover:translate-y-[-2px]"
               style={{ boxShadow: '4px 4px 0 0 #1B3D24' }}
             >
@@ -1100,8 +1094,7 @@ function FinalCTA({ onOpenModal }: { onOpenModal: () => void }) {
               </svg>
               Escribir a Wasagro
               <ArrowRight size={16} strokeWidth={2.5} />
-            </button>
-
+            </a>
             <a
               href="mailto:wasagro@proton.me"
               className="flex items-center gap-2 px-6 py-4 font-mono text-[13px] border-2 border-negro rounded-xl text-negro hover:bg-n200 transition-colors duration-100"
@@ -1109,7 +1102,6 @@ function FinalCTA({ onOpenModal }: { onOpenModal: () => void }) {
               wasagro@proton.me
             </a>
           </div>
-
           <p className="font-mono text-[11px] text-n400 mt-8 tracking-[.04em]">
             Cacao · Banano · Café · WhatsApp · Latinoamérica
           </p>
@@ -1124,53 +1116,31 @@ function FinalCTA({ onOpenModal }: { onOpenModal: () => void }) {
 // ─────────────────────────────────────────────────────────────
 function Footer() {
   return (
-    <footer
-      className="border-t-2 border-negro py-10"
-      style={{ background: '#1B3D24' }}
-      role="contentinfo"
-    >
+    <footer className="border-t-2 border-negro py-10" style={{ background: '#1B3D24' }} role="contentinfo">
       <div className="max-w-6xl mx-auto px-6">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-          {/* Logo */}
           <div>
             <Logo size={28} onDark />
-            <p className="font-mono text-[11px] text-pergamino/40 mt-2 tracking-[.04em]">
-              Asistente de campo inteligente
-            </p>
+            <p className="font-mono text-[11px] text-pergamino/40 mt-2 tracking-[.04em]">Asistente de campo inteligente</p>
           </div>
-
-          {/* Links */}
           <nav className="flex flex-wrap gap-x-6 gap-y-2" aria-label="Footer">
             {[
               { label: 'Cómo funciona', href: '#como-funciona' },
               { label: 'Para exportadoras', href: '#exportadoras' },
               { label: 'Privacidad', href: '#' },
             ].map((l) => (
-              <a
-                key={l.label}
-                href={l.href}
-                className="text-[13px] text-pergamino/50 hover:text-pergamino/90 transition-colors duration-100"
-              >
+              <a key={l.label} href={l.href} className="text-[13px] text-pergamino/50 hover:text-pergamino/90 transition-colors duration-100">
                 {l.label}
               </a>
             ))}
           </nav>
-
-          {/* Right */}
           <div className="text-right">
-            <a
-              href="mailto:wasagro@proton.me"
-              className="font-mono text-[13px] text-pergamino/60 hover:text-pergamino transition-colors duration-100"
-            >
+            <a href="mailto:wasagro@proton.me" className="font-mono text-[13px] text-pergamino/60 hover:text-pergamino transition-colors duration-100">
               wasagro@proton.me
             </a>
-            <p className="font-mono text-[11px] text-pergamino/30 mt-1">
-              © 2025 Wasagro
-            </p>
+            <p className="font-mono text-[11px] text-pergamino/30 mt-1">© 2025 Wasagro</p>
           </div>
         </div>
-
-        {/* Bottom rule */}
         <div className="border-t border-pergamino/10 mt-8 pt-6 flex flex-wrap items-center justify-between gap-4">
           <p className="font-mono text-[10px] text-pergamino/25 tracking-[.08em] uppercase">
             Gestión agrícola · Trazabilidad · WhatsApp · Cacao · Banano
@@ -1196,27 +1166,19 @@ function Footer() {
 // APP
 // ─────────────────────────────────────────────────────────────
 export default function App() {
-  const [modalOpen, setModalOpen] = useState(false)
-  const openModal = () => setModalOpen(true)
-  const closeModal = () => setModalOpen(false)
-
   return (
     <>
-      <AnimatePresence>
-        {modalOpen && <WhatsAppModal onClose={closeModal} />}
-      </AnimatePresence>
-
-      <Nav onOpenModal={openModal} />
+      <Nav />
       <main>
-        <Hero onOpenModal={openModal} />
+        <Hero />
         <Stats />
         <Manifesto />
         <HowItWorks />
         <WhatsAppSection />
         <Features />
-        <Audiences onOpenModal={openModal} />
+        <Audiences />
         <ProofBar />
-        <FinalCTA onOpenModal={openModal} />
+        <FinalCTA />
       </main>
       <Footer />
     </>
