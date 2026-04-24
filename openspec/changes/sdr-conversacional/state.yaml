@@ -1,0 +1,26 @@
+change: sdr-conversacional
+status: in-progress
+artifact_store: openspec
+created: "2026-04-23"
+updated: "2026-04-23"
+
+phases:
+  explore: completed
+  propose: completed
+  spec: completed
+  design: completed
+  tasks: pending
+  apply: pending
+  verify: pending
+  archive: pending
+
+artifacts:
+  - exploration.md
+  - proposal.md
+  - design.md
+  - specs/qualification/spec.md
+  - specs/objections/spec.md
+  - specs/discovery/spec.md
+  - specs/narratives/spec.md
+  - specs/handoff/spec.md
+  - specs/memory/spec.md
