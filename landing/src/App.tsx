@@ -252,25 +252,26 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
       <div style={{ position: 'absolute', left: -2, top: 204, width: 2, height: 44, background: '#0a0a0a', borderRadius: '1px 0 0 1px' }} />
       <div style={{ position: 'absolute', right: -2, top: 164, width: 2, height: 60, background: '#0a0a0a', borderRadius: '0 1px 1px 0' }} />
 
-      {/* Phone frame — one background, one shadow, nothing else */}
+      {/* Phone frame — padding uniforme en los 4 lados: frame_radius - padding = screen_radius */}
       <div
         style={{
           background: '#111',
-          borderRadius: 52,
-          padding: '13px 9px 9px',
+          borderRadius: 50,
+          padding: '10px',
           boxShadow: '8px 8px 0 0 #0D0F0C',
         }}
       >
-        {/* Dynamic Island */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 9 }}>
-          <div style={{ width: 108, height: 29, background: '#000', borderRadius: 999 }} />
-        </div>
+        {/* Screen — position relative para que el DI sea overlay interno */}
+        <div style={{ borderRadius: 40, overflow: 'hidden', position: 'relative' }}>
 
-        {/* Screen — single clip, no extra borders */}
-        <div style={{ borderRadius: 40, overflow: 'hidden' }}>
+          {/* Dynamic Island — flota DENTRO de la pantalla, igual que un iPhone real */}
+          <div style={{
+            position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+            width: 106, height: 28, background: '#000', borderRadius: 999, zIndex: 10,
+          }} />
 
-          {/* Status bar */}
-          <div style={{ background: '#075E54', padding: '4px 18px 3px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {/* Status bar — altura suficiente para convivir con el DI */}
+          <div style={{ background: '#075E54', height: 44, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 16px 6px' }}>
             <span style={{ color: '#fff', fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>9:41</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {[3, 4, 5, 7].map((h, i) => (
@@ -388,8 +389,8 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
           </div>
         </div>
 
-        {/* Home indicator */}
-        <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0 2px' }}>
+        {/* Home indicator — dentro del frame, centrado */}
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
           <div style={{ width: 42, height: 5, background: 'rgba(255,255,255,0.18)', borderRadius: 999 }} />
         </div>
       </div>
