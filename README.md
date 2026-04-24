@@ -25,10 +25,6 @@ Sistema operativo de campo agrícola AI-first. Captura datos en fincas via Whats
 | Variable | Descripción | Impacto si falta |
 |---|---|---|
 | `DEMO_BOOKING_URL` | URL de Calendly para demos (ej. `https://calendly.com/...`) | No se envían links de demo |
-| `CALENDAR_ICS_URL` | URL privada ICS de Google Calendar | Sin verificación de disponibilidad por ICS |
-| `GCAL_CLIENT_ID` | OAuth2 client ID de Google Calendar API | Sin agendamiento automático de reuniones |
-| `GCAL_CLIENT_SECRET` | OAuth2 client secret de Google Calendar API | Sin agendamiento automático de reuniones |
-| `GCAL_REFRESH_TOKEN` | Refresh token OAuth2 (generado con `scripts/setup-gcal-auth.mjs`) | Sin agendamiento automático de reuniones |
 | `REPORTE_SECRET` | Secret para `POST /reportes/semanal` | Endpoint sin protección |
 | `LANGFUSE_SECRET_KEY` | Clave secreta LangFuse | Sin observabilidad de LLM |
 | `LANGFUSE_PUBLIC_KEY` | Clave pública LangFuse | Sin observabilidad de LLM |
@@ -37,16 +33,6 @@ Sistema operativo de campo agrícola AI-first. Captura datos en fincas via Whats
 | `OLLAMA_MODEL` | Modelo Ollama (default: `llama3.2`) | — |
 | `GEMINI_MODEL` | Modelo Gemini (default: `gemini-2.0-flash`) | — |
 
-## Setup de Google Calendar (agendamiento automático)
-
-Para activar el agendamiento automático de reuniones con Meet link:
-
-1. Crear credenciales OAuth2 en Google Cloud Console (tipo "Desktop app")
-2. Copiar `GCAL_CLIENT_ID` y `GCAL_CLIENT_SECRET` en Railway
-3. Ejecutar: `node scripts/setup-gcal-auth.mjs`
-4. Seguir el flujo OAuth en el navegador
-5. Copiar el `GCAL_REFRESH_TOKEN` resultante en Railway
-
 ## Arquitectura
 
-Ver `docs/02-arquitectura.md` y los ADRs en `docs/decisions/`.
+Ver los ADRs en `docs/decisions/`.

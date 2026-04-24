@@ -51,7 +51,7 @@ Hono service (Railway)
 - Sin UI visual para leer flujos — compensado con tests y nombres descriptivos
 - Bus factor aumenta si el único desarrollador no conoce TypeScript — bajo riesgo en H0
 
-**Flujos n8n archivados**: `flows/` renombrado a `docs/archive/n8n-flows-deprecated/`. No borrar hasta H1 — pueden servir como referencia de lógica de negocio.
+**Flujos n8n eliminados**: La lógica equivalente está en `src/pipeline/` y `src/agents/`.
 
 ## Condición de revisión
 
