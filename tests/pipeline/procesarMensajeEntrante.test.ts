@@ -44,9 +44,15 @@ vi.mock('../../src/integrations/calendar.js', () => ({
   buildCalendlyUrl: vi.fn().mockImplementation((base: string) => base),
 }))
 
+vi.mock('../../src/agents/sdrAgent.js', () => ({
+  handleSDRSession: vi.fn().mockResolvedValue(undefined),
+  handleFounderApproval: vi.fn().mockResolvedValue(false),
+}))
+
 import * as queries from '../../src/pipeline/supabaseQueries.js'
 import * as sttService from '../../src/pipeline/sttService.js'
 import * as gcal from '../../src/integrations/gcal.js'
+import * as sdrAgent from '../../src/agents/sdrAgent.js'
 
 const usuarioActivo = {
   id: 'usr-1', phone: '593987654321', nombre: 'Carlos', rol: 'agricultor',
@@ -126,6 +132,7 @@ function crearLlmMock(extraido: EventoCampoExtraido = extractedEventoMock) {
     corregirTranscripcion: vi.fn(),
     analizarImagen: vi.fn(),
     resumirSemana: vi.fn(),
+    atenderSDR: vi.fn(),
   }
 }
 
@@ -166,89 +173,6 @@ describe('procesarMensajeEntrante', () => {
 
       expect(queries.registrarMensaje).not.toHaveBeenCalled()
       expect(sender.enviarTexto).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('número no registrado → flujo prospecto', () => {
-    it('SC1: número desconocido llama a atenderProspecto y guarda historial', async () => {
-      const sender = crearSenderMock()
-      const llm = crearLlmMock()
-      inicializarPipeline(sender, llm)
-      vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
-
-      await procesarMensajeEntrante({ ...msgTexto, texto: 'Hola' }, 'trace-sc1')
-
-      expect(llm.atenderProspecto).toHaveBeenCalledOnce()
-      expect(llm.extraerEvento).not.toHaveBeenCalled()
-      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', prospectoResponseMock.mensaje_para_usuario)
-      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({
-        contexto_parcial: expect.objectContaining({ historial: expect.any(Array) }),
-      }))
-    })
-
-    it('SC2: prospecto con horario + GCal disponible → propone slot y espera confirmación', async () => {
-      const sender = crearSenderMock()
-      const llm = crearLlmMock()
-      inicializarPipeline(sender, llm)
-      vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
-      vi.mocked(gcal.gcalConfigurado).mockReturnValue(true)
-      vi.mocked(gcal.verificarDisponibilidad).mockResolvedValue('available')
-      vi.mocked(llm.atenderProspecto).mockResolvedValue({
-        ...prospectoResponseMock,
-        enviar_link_demo: true,
-        datos_extraidos: { ...prospectoResponseMock.datos_extraidos, nombre: 'Pedro', horario_preferido: '2026-04-30T14:00:00.000Z' },
-        mensaje_para_usuario: 'Perfecto Pedro, te envío el link.',
-      })
-
-      await procesarMensajeEntrante({ ...msgTexto, texto: 'Me interesa, ¿puedes el 30 a las 2pm?' }, 'trace-sc2')
-
-      expect(gcal.verificarDisponibilidad).toHaveBeenCalledOnce()
-      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({
-        status: 'pending_confirmation',
-        contexto_parcial: expect.objectContaining({ horario_propuesto: '2026-04-30T14:00:00.000Z' }),
-      }))
-      expect(sender.enviarTexto).toHaveBeenCalledWith(
-        '593987654321',
-        expect.stringContaining('Confirmamos'),
-      )
-    })
-
-    it('SC3: pending_confirmation "sí" + Meet creado → envía Meet link y completa sesión', async () => {
-      const sender = crearSenderMock()
-      const llm = crearLlmMock()
-      inicializarPipeline(sender, llm)
-      vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
-      vi.mocked(gcal.crearReunionConMeet).mockResolvedValue({ meetLink: 'https://meet.google.com/abc-def-ghi', eventId: 'evt-gcal-1' })
-      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
-        status: 'pending_confirmation',
-        tipo_sesion: 'reporte',
-        contexto_parcial: { horario_propuesto: '2026-04-30T14:00:00.000Z', nombre_contacto: 'Pedro' },
-      }))
-
-      await procesarMensajeEntrante({ ...msgTexto, texto: 'sí' }, 'trace-sc3')
-
-      expect(gcal.crearReunionConMeet).toHaveBeenCalledOnce()
-      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'completed' }))
-      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('meet.google.com'))
-    })
-
-    it('SC4: pending_confirmation "sí" + Meet falla → cae a Calendly', async () => {
-      vi.stubEnv('DEMO_BOOKING_URL', 'https://calendly.com/test/30min')
-      const sender = crearSenderMock()
-      const llm = crearLlmMock()
-      inicializarPipeline(sender, llm)
-      vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
-      vi.mocked(gcal.crearReunionConMeet).mockResolvedValue(null)
-      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
-        status: 'pending_confirmation',
-        tipo_sesion: 'reporte',
-        contexto_parcial: { horario_propuesto: '2026-04-30T14:00:00.000Z', nombre_contacto: 'Pedro' },
-      }))
-
-      await procesarMensajeEntrante({ ...msgTexto, texto: 'sí' }, 'trace-sc4')
-
-      expect(gcal.crearReunionConMeet).toHaveBeenCalledOnce()
-      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('calendly.com'))
     })
   })
 
@@ -465,6 +389,65 @@ describe('procesarMensajeEntrante', () => {
       inicializarPipeline(null, null)
 
       await expect(procesarMensajeEntrante(msgTexto, 'trace-err')).rejects.toThrow('Pipeline no inicializado')
+    })
+  })
+
+  describe('SDR routing', () => {
+    beforeEach(() => {
+      delete process.env['FOUNDER_PHONE']
+      vi.mocked(sdrAgent.handleSDRSession).mockResolvedValue(undefined)
+      vi.mocked(sdrAgent.handleFounderApproval).mockResolvedValue(false)
+    })
+
+    it('número desconocido → handleSDRSession llamado', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
+
+      await procesarMensajeEntrante(msgTexto, 'trace-sdr-1')
+
+      expect(sdrAgent.handleSDRSession).toHaveBeenCalledWith(
+        msgTexto,
+        'msg-uuid',
+        'trace-sdr-1',
+        sender,
+        llm,
+      )
+    })
+
+    it('número del founder con aprobación pendiente → handleFounderApproval llamado', async () => {
+      process.env['FOUNDER_PHONE'] = '593000000001'
+      vi.mocked(sdrAgent.handleFounderApproval).mockResolvedValue(true)
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+
+      const msgFounder: NormalizedMessage = { wamid: 'wamid.founder', from: '593000000001', timestamp: new Date(), tipo: 'texto', texto: 'sí', rawPayload: {} }
+      await procesarMensajeEntrante(msgFounder, 'trace-founder-1')
+
+      expect(sdrAgent.handleFounderApproval).toHaveBeenCalledWith(
+        msgFounder,
+        'msg-uuid',
+        'trace-founder-1',
+        sender,
+      )
+      expect(queries.getUserByPhone).not.toHaveBeenCalled()
+    })
+
+    it('número del founder sin aprobación pendiente → cae al flujo normal', async () => {
+      process.env['FOUNDER_PHONE'] = '593000000001'
+      vi.mocked(sdrAgent.handleFounderApproval).mockResolvedValue(false)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva())
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+
+      const msgFounder: NormalizedMessage = { wamid: 'wamid.founder2', from: '593000000001', timestamp: new Date(), tipo: 'texto', texto: 'Hola', rawPayload: {} }
+      await procesarMensajeEntrante(msgFounder, 'trace-founder-2')
+
+      expect(queries.getUserByPhone).toHaveBeenCalledWith('593000000001')
     })
   })
 })

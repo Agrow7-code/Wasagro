@@ -29,6 +29,7 @@ import {
 import { transcribirAudio } from './sttService.js'
 import { gcalConfigurado, verificarDisponibilidad, crearReunionConMeet } from '../integrations/gcal.js'
 import { checkCalendarAvailability, buildCalendlyUrl } from '../integrations/calendar.js'
+import { handleSDRSession, handleFounderApproval } from '../agents/sdrAgent.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -71,12 +72,19 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
   })
 
   try {
-    // 3. Lookup usuario
+    // 3. Founder approval check (before user lookup — founder may not be a registered user)
+    const founderPhone = process.env['FOUNDER_PHONE']
+    if (founderPhone && msg.from === founderPhone) {
+      const handled = await handleFounderApproval(msg, mensajeId, traceId, _sender!)
+      if (handled) return
+    }
+
+    // 4. Lookup usuario
     const usuario = await getUserByPhone(msg.from)
 
-    // Número desconocido → flujo de prospecto
+    // Número desconocido → SDR conversacional
     if (!usuario) {
-      await handleProspecto(msg, mensajeId, traceId)
+      await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!)
       return
     }
 

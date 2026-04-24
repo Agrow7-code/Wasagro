@@ -387,3 +387,65 @@ export async function approveAgricultor(userId: string, client: SupabaseClient =
     .eq('id', userId)
   if (error) throw error
 }
+
+// ─── SDR Prospectos ────────────────────────────────────────────────────────
+
+export async function getSDRProspecto(phone: string, client: SupabaseClient = defaultClient): Promise<Record<string, unknown> | null> {
+  const { data, error } = await client
+    .from('sdr_prospectos')
+    .select('*')
+    .eq('phone', phone)
+    .maybeSingle()
+  if (error) throw error
+  return data as Record<string, unknown> | null
+}
+
+export interface SDRProspectoInsertDB {
+  phone: string
+  narrativa_asignada: 'A' | 'B'
+  nombre?: string | null
+  empresa?: string | null
+  segmento_icp?: string
+}
+
+export async function createSDRProspecto(insert: SDRProspectoInsertDB, client: SupabaseClient = defaultClient): Promise<Record<string, unknown>> {
+  const { data, error } = await client
+    .from('sdr_prospectos')
+    .insert({
+      phone: insert.phone,
+      narrativa_asignada: insert.narrativa_asignada,
+      nombre: insert.nombre ?? null,
+      empresa: insert.empresa ?? null,
+      segmento_icp: insert.segmento_icp ?? 'desconocido',
+    })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data as Record<string, unknown>
+}
+
+export async function updateSDRProspecto(id: string, updates: Record<string, unknown>, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client
+    .from('sdr_prospectos')
+    .update({ ...updates, ultima_interaccion: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function saveSDRInteraccion(insert: Record<string, unknown>, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client
+    .from('sdr_interacciones')
+    .insert({ ...insert, created_at: new Date().toISOString() })
+  if (error) throw error
+}
+
+export async function getSDRProspectosPendingApproval(client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await client
+    .from('sdr_prospectos')
+    .select('*')
+    .eq('status', 'qualified')
+    .not('founder_notified_at', 'is', null)
+    .order('founder_notified_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as Array<Record<string, unknown>>
+}

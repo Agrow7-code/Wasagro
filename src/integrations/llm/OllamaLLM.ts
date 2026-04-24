@@ -8,6 +8,7 @@ import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
+import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 
 interface OllamaLLMConfig {
@@ -118,6 +119,46 @@ export class OllamaLLM implements IWasagroLLM {
     throw new LLMError('OLLAMA_UNAVAILABLE', 'OllamaLLM: atenderProspecto no implementado — usa GroqLLM')
   }
 
+  async atenderSDR(entrada: EntradaSDR, traceId: string): Promise<RespuestaSDR> {
+    const promptBase = cargarSDRPrompt('SP-SDR-01-master.md')
+    const contexto = buildSDRContexto(entrada)
+    const contenido = `${promptBase}\n\n${contexto}\n\nMensaje del prospecto: ${entrada.mensaje}`
+
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: 'atender_sdr',
+      model: this.#model,
+      input: { turno: entrada.turno, segmento: entrada.segmento_icp, narrativa: entrada.narrativa },
+    })
+
+    const inicio = Date.now()
+    try {
+      const respuesta = await this.#llamar(contenido)
+      const latencia = Date.now() - inicio
+
+      let json: unknown
+      try {
+        json = JSON.parse(respuesta)
+      } catch {
+        generation.end({ output: respuesta, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Ollama SDR devolvió respuesta no-JSON: ${respuesta.slice(0, 100)}`)
+      }
+
+      const parsed = RespuestaSDRSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `SDR schema inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: { action: parsed.data.action, score_delta: parsed.data.score_delta }, metadata: { latencia_ms: latencia } })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw this.#envolverError(err)
+    }
+  }
+
   async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
@@ -173,4 +214,39 @@ function cargarPrompt(nombre: string): string {
   } catch (err) {
     throw new LLMError('PARSE_ERROR', `Prompt requerido no encontrado: prompts/${nombre}`, err)
   }
+}
+
+function cargarSDRPrompt(nombre: string): string {
+  try {
+    return readFileSync(join(process.cwd(), 'sdr', 'prompts', nombre), 'utf-8')
+  } catch (err) {
+    throw new LLMError('PARSE_ERROR', `SDR prompt requerido no encontrado: sdr/prompts/${nombre}`, err)
+  }
+}
+
+function buildSDRContexto(entrada: EntradaSDR): string {
+  const p = entrada.prospecto
+  const lines = [
+    '## Contexto del prospecto',
+    `- Nombre: ${p.nombre ?? 'desconocido'}`,
+    `- Empresa: ${p.empresa ?? 'no especificada'}`,
+    `- Segmento ICP: ${entrada.segmento_icp}`,
+    `- Narrativa: ${entrada.narrativa}`,
+    `- Turno: ${entrada.turno}`,
+    `- Score actual: ${entrada.score_actual}/100`,
+    `- Scores: eudr_urgency=${p.scores_por_dimension.eudr_urgency}/25, tamano_cartera=${p.scores_por_dimension.tamano_cartera}/20, calidad_dato=${p.scores_por_dimension.calidad_dato}/20, champion=${p.scores_por_dimension.champion}/15, timeline_decision=${p.scores_por_dimension.timeline_decision}/10, presupuesto=${p.scores_por_dimension.presupuesto}/10`,
+  ]
+  if (p.preguntas_realizadas.length > 0) {
+    lines.push(`- Preguntas ya respondidas (NO repetir): ${p.preguntas_realizadas.map(q => q.question_id).join(', ')}`)
+  }
+  if (p.objeciones_manejadas.length > 0) {
+    lines.push(`- Objeciones ya manejadas: ${p.objeciones_manejadas.join(', ')}`)
+  }
+  if (p.punto_de_dolor_principal) {
+    lines.push(`- Pain principal identificado: ${p.punto_de_dolor_principal}`)
+  }
+  if (entrada.objection_detected) {
+    lines.push(`- OBJECIÓN DETECTADA en este mensaje: ${entrada.objection_detected}`)
+  }
+  return lines.join('\n')
 }

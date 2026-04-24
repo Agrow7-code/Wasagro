@@ -2,6 +2,7 @@ import type { EntradaEvento, EventoCampoExtraido } from '../../types/dominio/Eve
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
+import type { EntradaSDR, RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 
 export interface IWasagroLLM {
   extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido>
@@ -11,4 +12,5 @@ export interface IWasagroLLM {
   onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding>
   atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto>
   resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal>
+  atenderSDR(entrada: EntradaSDR, traceId: string): Promise<RespuestaSDR>
 }
