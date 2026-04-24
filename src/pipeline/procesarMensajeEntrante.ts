@@ -4,7 +4,6 @@ import type { IWhatsAppSender } from '../integrations/whatsapp/IWhatsAppSender.j
 import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/EventoCampo.js'
 import type { ContextoOnboardingAgricultor } from '../types/dominio/Onboarding.js'
-import type { ContextoProspecto } from '../types/dominio/Prospecto.js'
 import {
   getMensajeByWamid,
   registrarMensaje,
@@ -15,7 +14,6 @@ import {
   getOrCreateSession,
   updateSession,
   saveEvento,
-  saveProspecto,
   getFincasDisponibles,
   updateUsuario,
   saveUserConsent,
@@ -27,8 +25,6 @@ import {
   approveAgricultor,
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
-import { gcalConfigurado, verificarDisponibilidad, crearReunionConMeet } from '../integrations/gcal.js'
-import { checkCalendarAvailability, buildCalendlyUrl } from '../integrations/calendar.js'
 import { handleSDRSession, handleFounderApproval } from '../agents/sdrAgent.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
@@ -37,7 +33,6 @@ const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director
 const CONSENT_TEXT_ADMIN = 'Para guardar los reportes de tu finca necesito tu autorización. Tus datos son tuyos — solo se usan para generar tus reportes. Nadie más los ve sin tu permiso. ¿Aceptas?'
 const CONSENT_TEXT_AGRICULTOR = 'Para guardar tus reportes de campo necesito tu permiso. Tus datos solo se usan para los reportes de tu finca. ¿Está bien?'
 const MAX_ONBOARDING_STEPS = 10
-const MAX_PROSPECTO_STEPS = 6
 
 let _sender: IWhatsAppSender | null = null
 let _llm: IWasagroLLM | null = null
@@ -107,179 +102,6 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
     await _sender.enviarTexto(msg.from, 'Tuve un problema con tu mensaje. Intenta de nuevo en un momento. ⚠️')
       .catch(e => console.error('[pipeline] Error enviando mensaje de error al usuario:', e))
   }
-}
-
-// ─── Flujo prospecto (número no registrado) ────────────────────────────────
-
-async function handleProspecto(
-  msg: NormalizedMessage,
-  mensajeId: string,
-  traceId: string,
-): Promise<void> {
-  const session = await getOrCreateSession(msg.from, 'reporte')
-  const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : '[mensaje de voz o imagen]'
-
-  // ── Confirmación de reunión pendiente (prospecto responde al horario propuesto) ──
-  if (session.status === 'pending_confirmation' && session.contexto_parcial['horario_propuesto']) {
-    const respuesta = texto.toLowerCase().trim()
-    const confirma = /^(sí|si|s|yes|ok|correcto|exacto|dale|listo|confirmo|✅)/.test(respuesta)
-
-    if (confirma) {
-      const horarioIso = session.contexto_parcial['horario_propuesto'] as string
-      const nombreContacto = (session.contexto_parcial['nombre_contacto'] as string | null) ?? 'Cliente'
-      const dt = new Date(horarioIso)
-
-      const reunion = await crearReunionConMeet(dt, 30, nombreContacto)
-      if (reunion) {
-        await updateSession(session.session_id, { status: 'completed', contexto_parcial: {} })
-        await _sender!.enviarTexto(
-          msg.from,
-          `Reunión agendada ✅\n📅 ${formatearFecha(dt)}\n🔗 ${reunion.meetLink}\n\nTe espero ahí.`,
-        )
-        await actualizarMensaje(mensajeId, { status: 'processed' })
-        return
-      }
-      // GCal falló → caer a Calendly
-      await updateSession(session.session_id, { status: 'active', contexto_parcial: {} })
-      await enviarCalendly(msg.from, new Date(horarioIso))
-      await actualizarMensaje(mensajeId, { status: 'processed' })
-      return
-    }
-
-    // Prospecto no confirmó → reset y seguir flujo normal
-    await updateSession(session.session_id, { status: 'active', contexto_parcial: {} })
-  }
-
-  const contexto: ContextoProspecto = {
-    historial: (session.contexto_parcial['historial'] as Array<{ rol: 'usuario' | 'agente'; contenido: string }>) ?? [],
-    paso_actual: session.clarification_count,
-    datos_recopilados: (session.contexto_parcial['datos'] as Record<string, unknown>) ?? {},
-  }
-
-  const resultado = await _llm!.atenderProspecto(texto, contexto, traceId)
-
-  // Guardar lead si es decision_maker con datos suficientes
-  if (resultado.guardar_en_prospectos && resultado.tipo_contacto === 'decision_maker') {
-    await saveProspecto({
-      phone: msg.from,
-      tipo_contacto: 'decision_maker',
-      nombre: resultado.datos_extraidos.nombre,
-      finca_nombre: resultado.datos_extraidos.finca_nombre,
-      cultivo_principal: resultado.datos_extraidos.cultivo_principal,
-      pais: resultado.datos_extraidos.pais,
-      tamanio_aproximado: resultado.datos_extraidos.tamanio_aproximado,
-      interes_demo: resultado.datos_extraidos.interes_demo || resultado.enviar_link_demo,
-    }).catch(err => {
-      console.error('[pipeline] Error guardando prospecto:', err)
-      langfuse.trace({ id: traceId }).event({ name: 'save_prospecto_error', level: 'ERROR', input: { error: String(err) } })
-    })
-  }
-
-  await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
-
-  if (resultado.enviar_link_demo) {
-    const horarioIso = resultado.datos_extraidos.horario_preferido ?? null
-    const nombre = resultado.datos_extraidos.nombre ?? null
-    const preferredDate = horarioIso ? new Date(horarioIso) : null
-    const isValidDate = preferredDate instanceof Date && !isNaN(preferredDate.getTime())
-
-    if (isValidDate && gcalConfigurado()) {
-      // Verificar disponibilidad — si libre, proponer y esperar confirmación del prospecto
-      const disponibilidad = await verificarDisponibilidad(preferredDate!)
-
-      if (disponibilidad === 'available') {
-        // Guardar horario propuesto y pedir confirmación explícita antes de crear el evento
-        await updateSession(session.session_id, {
-          clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS),
-          status: 'pending_confirmation',
-          contexto_parcial: {
-            historial: [...contexto.historial, { rol: 'usuario' as const, contenido: texto }, { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario }],
-            datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos },
-            horario_propuesto: horarioIso,
-            nombre_contacto: nombre,
-          },
-        })
-        await _sender!.enviarTexto(
-          msg.from,
-          `📅 ${formatearFecha(preferredDate!)} — ese horario está libre.\n\n¿Confirmamos la demo a esa hora? Responde *sí* para agendar.`,
-        )
-        await actualizarMensaje(mensajeId, { status: 'processing' })
-        return
-      }
-
-      if (disponibilidad === 'busy') {
-        await updateSession(session.session_id, { clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS), contexto_parcial: { historial: [...contexto.historial, { rol: 'usuario' as const, contenido: texto }, { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario }], datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos } } })
-        await enviarCalendly(msg.from)
-        await actualizarMensaje(mensajeId, { status: 'processed' })
-        return
-      }
-    }
-
-    // Sin GCal o fecha inválida o unknown → Calendly con o sin fecha pre-cargada
-    await updateSession(session.session_id, { clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS), contexto_parcial: { historial: [...contexto.historial, { rol: 'usuario' as const, contenido: texto }, { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario }], datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos } } })
-    await enviarCalendly(msg.from, isValidDate ? preferredDate! : undefined)
-    await actualizarMensaje(mensajeId, { status: 'processed' })
-    return
-  }
-
-  await updateSession(session.session_id, {
-    clarification_count: Math.min(resultado.siguiente_paso, MAX_PROSPECTO_STEPS),
-    contexto_parcial: {
-      historial: [
-        ...contexto.historial,
-        { rol: 'usuario' as const, contenido: texto },
-        { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario },
-      ],
-      datos: { ...contexto.datos_recopilados, ...resultado.datos_extraidos },
-    },
-  })
-
-  await actualizarMensaje(mensajeId, { status: 'processed' })
-}
-
-async function enviarCalendly(to: string, preferredDate?: Date): Promise<void> {
-  const base = process.env['DEMO_BOOKING_URL'] ?? ''
-  if (!base) {
-    console.error('[pipeline] DEMO_BOOKING_URL no configurado — no se puede enviar link de demo')
-    return
-  }
-
-  if (!preferredDate) {
-    await _sender!.enviarTexto(
-      to,
-      `Aquí tienes el link para reservar:\n${buildCalendlyUrl(base)}\n\nElige el horario que mejor te quede. ✅`,
-    )
-    return
-  }
-
-  // Con fecha concreta: verificar disponibilidad para dar mensaje correcto
-  const disponibilidad = gcalConfigurado()
-    ? await verificarDisponibilidad(preferredDate)
-    : await checkCalendarAvailability(preferredDate)
-
-  if (disponibilidad === 'busy') {
-    await _sender!.enviarTexto(
-      to,
-      `Ese horario ya lo tengo ocupado ⚠️ Elige el que mejor te quede:\n${buildCalendlyUrl(base)}`,
-    )
-    return
-  }
-
-  await _sender!.enviarTexto(
-    to,
-    `Aquí tienes el link — ya va a esa fecha:\n${buildCalendlyUrl(base, preferredDate)}\n\nElige y confirma. ✅`,
-  )
-}
-
-function formatearFecha(date: Date): string {
-  return date.toLocaleString('es-EC', {
-    timeZone: 'America/Guayaquil',
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 // ─── Onboarding admin / propietario ───────────────────────────────────────
@@ -508,6 +330,11 @@ async function handleEvento(
         await actualizarMensaje(mensajeId, { status: 'processed' })
         return
       }
+      langfuse.trace({ id: traceId }).event({
+        name: 'stt_error',
+        level: 'ERROR',
+        input: { audio_ref: audioRef, wamid: msg.wamid, error: String(err) },
+      })
       throw err
     }
     await actualizarMensaje(mensajeId, { contenido_raw: transcripcion })
