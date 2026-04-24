@@ -225,7 +225,7 @@ export async function handleSDRSession(
     await sender.enviarTexto(msg.from, resultado.respuesta)
   }
 
-  const scoreAfter = SCORE_DIMS.reduce((sum, dim) => sum + nuevosDimensions[`score_${dim}`], 0)
+  const scoreAfter = SCORE_DIMS.reduce((sum, dim) => sum + (nuevosDimensions[`score_${dim}`] ?? 0), 0)
 
   // REQ-narr-005: fire A/B tracking events
   if (resultado.action === 'propose_pilot' || resultado.requires_founder_approval) {
@@ -296,7 +296,8 @@ export async function handleFounderApproval(
   const pendientes = await getSDRProspectosPendingApproval(client)
   if (pendientes.length === 0) return false
 
-  const prospecto = pendientes[0]
+  // pendientes.length > 0 is guaranteed above — non-null assertion is safe
+  const prospecto = pendientes[0]!
   const trace = langfuse.trace({ id: traceId })
   const texto = (msg.texto ?? '').trim()
 
