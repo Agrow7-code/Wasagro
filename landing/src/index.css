@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Brand Colors ── */
+  --color-pergamino: #F5F1E8;
+  --color-negro: #0D0F0C;
+  --color-senal: #C9F03B;
+  --color-campo: #1B3D24;
+  --color-tierra: #D45828;
+  --color-n100: #FFFFFF;
+  --color-n200: #EAE6DC;
+  --color-n400: #9C9080;
+  --color-n700: #3A3530;
+
+  /* ── System Status Colors ── */
+  --color-ok: #3EBB6A;
+  --color-warn: #F5C443;
+  --color-error: #E53935;
+  --color-info: #2A50D4;
+
+  /* ── Typography ── */
+  --font-sans: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* ── Shadows (hard, Wasagro style) ── */
+  --shadow-hard: 4px 4px 0 0 #0D0F0C;
+  --shadow-hard-sm: 3px 3px 0 0 #0D0F0C;
+  --shadow-hard-lg: 6px 6px 0 0 #0D0F0C;
+  --shadow-hard-verde: 4px 4px 0 0 #1B3D24;
+}
+
+/* ── Base ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #F5F1E8;
+  color: #0D0F0C;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+}
+
+/* ── Dot Grid Texture ── */
+.dot-grid {
+  background-image: radial-gradient(circle, rgba(13,15,12,0.09) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.dot-grid-light {
+  background-image: radial-gradient(circle, rgba(201,240,59,0.12) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* ── Hard Shadows ── */
+.shadow-hard {
+  box-shadow: 4px 4px 0 0 #0D0F0C;
+}
+.shadow-hard-sm {
+  box-shadow: 3px 3px 0 0 #0D0F0C;
+}
+.shadow-hard-lg {
+  box-shadow: 6px 6px 0 0 #0D0F0C;
+}
+.shadow-hard-verde {
+  box-shadow: 4px 4px 0 0 #1B3D24;
+}
+
+/* ── Selection ── */
+::selection {
+  background: #C9F03B;
+  color: #0D0F0C;
+}
