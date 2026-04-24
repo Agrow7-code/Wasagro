@@ -243,78 +243,74 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
   }, [isInView, autoPlay]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div ref={ref} className="select-none mx-auto" style={{ maxWidth: 290, width: '100%' }}>
+    <div ref={ref} className="select-none mx-auto" style={{ maxWidth: 258, width: '100%', position: 'relative' }}>
+
+      {/* ── Side buttons ── */}
+      {/* Mute */}
+      <div style={{ position: 'absolute', left: -3, top: 104, width: 3, height: 24, background: '#1e1e1e', borderRadius: '2px 0 0 2px', zIndex: 1 }} />
+      {/* Vol + */}
+      <div style={{ position: 'absolute', left: -3, top: 140, width: 3, height: 38, background: '#1e1e1e', borderRadius: '2px 0 0 2px', zIndex: 1 }} />
+      {/* Vol - */}
+      <div style={{ position: 'absolute', left: -3, top: 188, width: 3, height: 38, background: '#1e1e1e', borderRadius: '2px 0 0 2px', zIndex: 1 }} />
+      {/* Power */}
+      <div style={{ position: 'absolute', right: -3, top: 152, width: 3, height: 52, background: '#1e1e1e', borderRadius: '0 2px 2px 0', zIndex: 1 }} />
+
       {/* ── Phone shell ── */}
       <div
         style={{
-          background: '#111',
-          borderRadius: 52,
-          padding: '14px 11px 10px',
-          boxShadow: '12px 12px 0 0 #0D0F0C',
-          border: '1.5px solid rgba(255,255,255,0.07)',
-          outline: '2px solid #0D0F0C',
-          outlineOffset: 0,
+          background: 'linear-gradient(160deg, #2c2c2c 0%, #111 45%, #222 100%)',
+          borderRadius: 50,
+          padding: '12px 9px 9px',
+          boxShadow: '10px 10px 0 0 #0D0F0C, inset 0 1px 0 rgba(255,255,255,0.1)',
+          border: '1px solid rgba(255,255,255,0.1)',
         }}
       >
         {/* Dynamic Island */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
-          <div style={{ width: 120, height: 30, background: '#000', borderRadius: 999 }} />
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+          <div
+            style={{
+              width: 96,
+              height: 26,
+              background: '#000',
+              borderRadius: 999,
+              boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.9)',
+            }}
+          />
         </div>
 
         {/* ── Screen ── */}
-        <div style={{ borderRadius: 38, overflow: 'hidden' }}>
+        <div style={{ borderRadius: 36, overflow: 'hidden', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.25)' }}>
 
           {/* Status bar */}
           <div
             style={{
               background: '#128C7E',
-              padding: '5px 18px 4px',
+              padding: '4px 16px 3px',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
             }}
           >
-            <span style={{ color: '#fff', fontSize: 10, fontWeight: 600, fontFamily: 'monospace' }}>9:41</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {/* Signal bars */}
-              {[3, 4, 5, 6].map((h, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 2.5,
-                    height: h,
-                    background: i < 3 ? '#fff' : 'rgba(255,255,255,0.35)',
-                    borderRadius: 1,
-                  }}
-                />
+            <span style={{ color: '#fff', fontSize: 9.5, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '-0.02em' }}>9:41</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3.5 }}>
+              {[3, 4, 5, 7].map((h, i) => (
+                <div key={i} style={{ width: 2.5, height: h, background: i < 3 ? '#fff' : 'rgba(255,255,255,0.3)', borderRadius: 1 }} />
               ))}
-              {/* Battery */}
               <div
                 style={{
-                  marginLeft: 5,
-                  width: 18,
-                  height: 9,
-                  border: '1.5px solid rgba(255,255,255,0.6)',
-                  borderRadius: 3,
+                  marginLeft: 4,
+                  width: 17,
+                  height: 8.5,
+                  border: '1.5px solid rgba(255,255,255,0.55)',
+                  borderRadius: 2.5,
                   display: 'flex',
                   alignItems: 'center',
-                  padding: '1.5px 2px',
+                  padding: '1.5px 1.5px',
                   position: 'relative',
                 }}
               >
-                <div style={{ width: '72%', height: '100%', background: '#fff', borderRadius: 1.5 }} />
-                <div
-                  style={{
-                    position: 'absolute',
-                    right: -4,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: 2.5,
-                    height: 5,
-                    background: 'rgba(255,255,255,0.5)',
-                    borderRadius: 1,
-                  }}
-                />
+                <div style={{ width: '75%', height: '100%', background: '#fff', borderRadius: 1 }} />
+                <div style={{ position: 'absolute', right: -3.5, top: '50%', transform: 'translateY(-50%)', width: 2, height: 4.5, background: 'rgba(255,255,255,0.45)', borderRadius: 1 }} />
               </div>
             </div>
           </div>
@@ -322,80 +318,63 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
           {/* WA Chat header */}
           <div
             style={{
-              background: '#128C7E',
-              padding: '8px 14px 10px',
+              background: '#075E54',
+              padding: '7px 12px 8px',
               display: 'flex',
               alignItems: 'center',
-              gap: 9,
+              gap: 8,
             }}
           >
-            {/* Back chevron */}
-            <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 20, lineHeight: 1, marginLeft: -2 }}>‹</span>
-
-            {/* Avatar */}
+            <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 22, lineHeight: 1, marginLeft: -1, fontWeight: 300 }}>‹</span>
             <div
               style={{
-                width: 36,
-                height: 36,
+                width: 34,
+                height: 34,
                 borderRadius: '50%',
                 background: '#0D0F0C',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
-                border: '1.5px solid rgba(201,240,59,0.4)',
+                border: '1px solid rgba(201,240,59,0.35)',
               }}
             >
-              <svg viewBox="0 -22 60 96" width="14" height="28" fill="none" aria-hidden="true">
+              <svg viewBox="0 -22 60 96" width="13" height="26" fill="none" aria-hidden="true">
                 <path d="M8,8 L18,72 L30,36 L42,72 L52,8" stroke="#F5F1E8" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round" />
                 <circle cx="30" cy="-6" r="12" fill="#C9F03B" />
               </svg>
             </div>
-
-            {/* Name + status */}
-            <div style={{ flex: 1 }}>
-              <div style={{ color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1.2, fontFamily: 'Space Grotesk, sans-serif' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: '#fff', fontSize: 12.5, fontWeight: 700, lineHeight: 1.2, fontFamily: 'Space Grotesk, sans-serif' }}>
                 Wasagro<span style={{ color: '#C9F03B' }}>.</span>
               </div>
-              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, fontFamily: 'monospace' }}>en línea</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#25D366' }} />
+                <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 9.5, fontFamily: 'monospace' }}>en línea</span>
+              </div>
             </div>
-
-            {/* Action icons */}
-            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-              <Video size={16} color="rgba(255,255,255,0.7)" strokeWidth={1.5} />
-              <Phone size={15} color="rgba(255,255,255,0.7)" strokeWidth={1.5} />
-              <MoreVertical size={15} color="rgba(255,255,255,0.7)" strokeWidth={1.5} />
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <Video size={15} color="rgba(255,255,255,0.65)" strokeWidth={1.5} />
+              <Phone size={14} color="rgba(255,255,255,0.65)" strokeWidth={1.5} />
+              <MoreVertical size={14} color="rgba(255,255,255,0.65)" strokeWidth={1.5} />
             </div>
           </div>
-
-          {/* Divider line */}
-          <div style={{ height: 1, background: 'rgba(0,0,0,0.08)' }} />
 
           {/* Chat area */}
           <div
             style={{
               background: '#E5DDD5',
-              padding: '10px 10px 6px',
-              minHeight: 310,
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Ccircle cx=\'1\' cy=\'1\' r=\'0.8\' fill=\'rgba(0,0,0,0.04)\'/%3E%3C/svg%3E")',
+              padding: '8px 8px 4px',
+              minHeight: 300,
               display: 'flex',
               flexDirection: 'column',
-              gap: 6,
+              gap: 5,
               overflow: 'hidden',
             }}
           >
-            {/* Date chip */}
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 2 }}>
-              <span
-                style={{
-                  background: 'rgba(255,255,255,0.75)',
-                  color: '#667781',
-                  fontSize: 10,
-                  padding: '2px 8px',
-                  borderRadius: 8,
-                  fontFamily: 'monospace',
-                  backdropFilter: 'blur(4px)',
-                }}
-              >
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 1 }}>
+              <span style={{ background: 'rgba(255,255,255,0.78)', color: '#667781', fontSize: 9.5, padding: '1.5px 7px', borderRadius: 7, fontFamily: 'monospace' }}>
                 HOY
               </span>
             </div>
@@ -403,21 +382,21 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
             {WA_MESSAGES.slice(0, visible).map((msg, i) => (
               <motion.div
                 key={i}
-                initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                initial={{ opacity: 0, y: 5, scale: 0.97 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
                 style={{ display: 'flex', justifyContent: msg.from === 'user' ? 'flex-end' : 'flex-start' }}
               >
                 <div
                   style={{
-                    maxWidth: '82%',
-                    borderRadius: msg.from === 'user' ? '12px 3px 12px 12px' : '3px 12px 12px 12px',
-                    padding: msg.voice ? '6px 10px 4px' : '6px 10px',
-                    fontSize: 11.5,
+                    maxWidth: '84%',
+                    borderRadius: msg.from === 'user' ? '11px 2px 11px 11px' : '2px 11px 11px 11px',
+                    padding: msg.voice ? '5px 9px 3px' : '5px 9px',
+                    fontSize: 11,
                     lineHeight: 1.45,
                     background: msg.from === 'user' ? '#DCF8C6' : '#fff',
                     color: '#111',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                    boxShadow: '0 1px 1px rgba(0,0,0,0.08)',
                     borderLeft: msg.alert ? '2.5px solid #D45828' : undefined,
                   }}
                 >
@@ -429,8 +408,8 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
                       style={{
                         margin: 0,
                         fontWeight: li === 0 ? 700 : 400,
-                        fontSize: li === msg.lines!.length - 1 ? 9.5 : 11.5,
-                        opacity: li === msg.lines!.length - 1 ? 0.5 : 1,
+                        fontSize: li === msg.lines!.length - 1 ? 9 : 11,
+                        opacity: li === msg.lines!.length - 1 ? 0.45 : 1,
                         marginTop: li === msg.lines!.length - 1 ? 2 : 0,
                         color: msg.alert && li === 0 ? '#D45828' : undefined,
                       }}
@@ -438,7 +417,7 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
                       {l}
                     </p>
                   ))}
-                  <p style={{ margin: '2px 0 0', fontSize: 8.5, opacity: 0.4, textAlign: 'right', color: '#667781' }}>
+                  <p style={{ margin: '1px 0 0', fontSize: 8, opacity: 0.4, textAlign: 'right', color: '#667781' }}>
                     {msg.time} ✓✓
                   </p>
                 </div>
@@ -447,23 +426,13 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
 
             {visible > 0 && visible < WA_MESSAGES.length && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex' }}>
-                <div
-                  style={{
-                    background: '#fff',
-                    borderRadius: '3px 12px 12px 12px',
-                    padding: '8px 12px',
-                    display: 'flex',
-                    gap: 4,
-                    alignItems: 'center',
-                    boxShadow: '0 1px 2px rgba(0,0,0,.1)',
-                  }}
-                >
+                <div style={{ background: '#fff', borderRadius: '2px 11px 11px 11px', padding: '7px 10px', display: 'flex', gap: 3.5, alignItems: 'center', boxShadow: '0 1px 1px rgba(0,0,0,.08)' }}>
                   {[0, 1, 2].map((d) => (
                     <motion.div
                       key={d}
-                      style={{ width: 6, height: 6, borderRadius: '50%', background: '#9C9080' }}
+                      style={{ width: 5.5, height: 5.5, borderRadius: '50%', background: '#B0B0B0' }}
                       animate={{ y: [0, -3, 0] }}
-                      transition={{ duration: 0.7, repeat: Infinity, delay: d * 0.15 }}
+                      transition={{ duration: 0.65, repeat: Infinity, delay: d * 0.14 }}
                     />
                   ))}
                 </div>
@@ -475,11 +444,11 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
           <div
             style={{
               background: '#F0F2F0',
-              padding: '8px 10px',
+              padding: '6px 9px 6px',
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              borderTop: '1px solid rgba(0,0,0,0.06)',
+              gap: 6,
+              borderTop: '1px solid rgba(0,0,0,0.05)',
             }}
           >
             <div
@@ -487,9 +456,9 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
                 flex: 1,
                 background: '#fff',
                 borderRadius: 999,
-                padding: '5px 14px',
-                fontSize: 10.5,
-                color: '#aaa',
+                padding: '4.5px 12px',
+                fontSize: 10,
+                color: '#bbb',
                 fontFamily: 'Space Grotesk, sans-serif',
               }}
             >
@@ -497,8 +466,8 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
             </div>
             <div
               style={{
-                width: 32,
-                height: 32,
+                width: 30,
+                height: 30,
                 borderRadius: '50%',
                 background: '#128C7E',
                 display: 'flex',
@@ -507,14 +476,14 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
                 flexShrink: 0,
               }}
             >
-              <Mic size={14} color="#fff" strokeWidth={2} />
+              <Mic size={13} color="#fff" strokeWidth={2} />
             </div>
           </div>
         </div>
 
         {/* Home indicator */}
-        <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0 2px' }}>
-          <div style={{ width: 42, height: 4, background: 'rgba(255,255,255,0.18)', borderRadius: 999 }} />
+        <div style={{ display: 'flex', justifyContent: 'center', margin: '7px 0 2px' }}>
+          <div style={{ width: 38, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 999 }} />
         </div>
       </div>
     </div>
@@ -665,7 +634,7 @@ const MANIFESTO = [
   },
   {
     quote: '"El agtech te pide un formulario.\nNosotros te pedimos que hables."',
-    sub: 'Las apps agrícolas especializadas tienen tasas de adopción menores al 15% en LATAM. WhatsApp ya está en el 90% de los teléfonos de la región.',
+    sub: 'Apps agrícolas: <15% adopción en LATAM. WhatsApp: 90% de cobertura.',
     sourceText: 'Statista',
     sourceUrl: 'https://www.statista.com/statistics/1323702/whatsapp-penetration-latin-american-countries/',
   },
