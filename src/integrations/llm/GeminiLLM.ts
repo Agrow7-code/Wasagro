@@ -8,7 +8,7 @@ import { LLMError } from './LLMError.js'
 import { EventoCampoExtraidoSchema, type EntradaEvento, type EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
-import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
+import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { cargarSDRPrompt, buildSDRContexto } from './sdrUtils.js'
@@ -80,12 +80,13 @@ export class GeminiLLM implements IWasagroLLM {
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'corregir_transcripcion', model: this.#model, input: { raw } })
+    const inicio = Date.now()
     try {
       const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
       const prompt = cargarPrompt('sp-02-post-correccion-stt.md')
       const result = await gemini.generateContent(`${prompt}\n\nTranscripción: ${raw}`)
       const corrected = result.response.text().trim()
-      generation.end({ output: corrected })
+      generation.end({ output: corrected, metadata: { latencia_ms: Date.now() - inicio } })
       return corrected
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })
@@ -96,12 +97,13 @@ export class GeminiLLM implements IWasagroLLM {
   async analizarImagen(imageUrl: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'analizar_imagen', model: this.#model, input: { imageUrl } })
+    const inicio = Date.now()
     try {
       const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
       const prompt = cargarPrompt('sp-03-analisis-imagen.md')
       const result = await gemini.generateContent([prompt, { inlineData: { mimeType: 'image/jpeg', data: imageUrl } }])
       const analisis = result.response.text()
-      generation.end({ output: analisis })
+      generation.end({ output: analisis, metadata: { latencia_ms: Date.now() - inicio } })
       return analisis
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })
@@ -167,18 +169,25 @@ export class GeminiLLM implements IWasagroLLM {
   async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
+    const inicio = Date.now()
     try {
       const gemini = this.#sdk.getGenerativeModel({ model: this.#model })
       const prompt = cargarPrompt('sp-05-resumen-semanal.md')
       const result = await gemini.generateContent(`${prompt}\n\nFinca: ${entrada.finca_nombre}\nCultivo: ${entrada.cultivo_principal}\nSemana: ${entrada.fecha_inicio} al ${entrada.fecha_fin}\n\nEventos:\n${JSON.stringify(entrada.eventos, null, 2)}`)
       const texto = result.response.text()
+      const latencia = Date.now() - inicio
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', 'Gemini no devolvió JSON para resumen semanal')
       }
-      generation.end({ output: json })
-      return json as ResumenSemanal
+      const parsed = ResumenSemanalSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Resumen semanal schema inválido: ${parsed.error.message}`)
+      }
+      generation.end({ output: parsed.data, metadata: { latencia_ms: latencia } })
+      return parsed.data
     } catch (err) {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
