@@ -514,7 +514,7 @@ async function handleEvento(
     // El usuario quiere corregir → mergear corrección con lo ya extraído y re-extraer
     const stored = session.contexto_parcial as { extracted_data?: EventoCampoExtraido; transcripcion_original?: string }
     const transcripcionMerged = stored.transcripcion_original
-      ? `${stored.transcripcion_original}. Corrección: ${transcripcion}`
+      ? `Corrección del agricultor: ${transcripcion}. Contexto previo (puede estar incorrecto): ${stored.transcripcion_original}`
       : transcripcion
 
     const entradaCorreccion: EntradaEvento = {

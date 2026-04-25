@@ -750,6 +750,29 @@ describe('procesarMensajeEntrante', () => {
       expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'active' }))
       expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('no está registrado'))
     })
+
+    it('corrección de tipo (gasto vs infraestructura) → transcripción merged con corrección PRIMERO', async () => {
+      const sender = crearSenderMock()
+      const extractedGasto = { ...extractedEventoMock, tipo_evento: 'gasto' as const, campos_extraidos: { monto: 200, descripcion: 'motor' } }
+      const llm = crearLlmMock(extractedGasto)
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        status: 'pending_confirmation',
+        contexto_parcial: {
+          extracted_data: { ...extractedEventoMock, tipo_evento: 'infraestructura' } as unknown as Record<string, unknown>,
+          transcripcion_original: 'hoy gasté 200 en una compra de un motor. Va a reemplazar uno dañado',
+        },
+      }))
+
+      await procesarMensajeEntrante({ ...msgTexto, texto: 'No, compré el motor, es un gasto' }, 'trace-corr-gasto')
+
+      const llamada = vi.mocked(llm.extraerEvento).mock.calls[0]![0]
+      expect(llamada.transcripcion).toMatch(/^Corrección del agricultor:/)
+      expect(llamada.transcripcion).toContain('No, compré el motor, es un gasto')
+      expect(llamada.transcripcion).toContain('Contexto previo')
+      expect(queries.saveEvento).not.toHaveBeenCalled()
+    })
   })
 
   // ─── clarification_count >= 2 ────────────────────────────────────────────────

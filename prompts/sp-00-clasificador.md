@@ -58,6 +58,8 @@ responde EXACTAMENTE esto y nada más:
 
 **Nota sobre gasto vs insumo:** Si el mensaje es sobre aplicar un producto en el campo → `insumo`. Si es sobre comprarlo o pagar por él → `gasto`.
 
+**Nota sobre gasto vs infraestructura — MUY IMPORTANTE:** Si el mensaje menciona un monto de dinero ("gasté", "compré", "pagué", "costó", "$", número + moneda) junto con una compra o pago, clasifica como `gasto` SIN IMPORTAR qué se compró. Comprar un motor, una bomba, una cerca o una herramienta → `gasto`. Reportar que un motor se dañó, que una cerca se cayó, o hacer una reparación sin mención de compra → `infraestructura`. La señal monetaria tiene PRIORIDAD absoluta sobre el objeto mencionado.
+
 **Nota sobre "helada":** Cuando un agricultor de cacao dice "helada" se refiere a un brote severo de moniliasis, NO a temperatura baja. Clasifica como `plaga`.
 
 ## Formato de salida
