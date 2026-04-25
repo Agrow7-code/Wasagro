@@ -60,10 +60,43 @@ Busca el lote en `{{LISTA_LOTES}}`:
 | "punta de cigarro" | Síntoma de nematodos o deficiencia |
 | "corazón muerto" | Daño en el cogollo del banano — picudo negro |
 
-## Plagas y enfermedades principales
+## Plagas y enfermedades por cultivo
 
-**Cacao:** moniliasis, escoba de bruja, mazorca negra (Phytophthora), antracnosis, cochinilla harinosa, roya
-**Banano:** Sigatoka negra, Sigatoka amarilla, nematodos, picudo negro, moko bacteriano, trips de la mancha roja
+### Cacao
+| Nombre común | Nombre científico | Señales |
+|---|---|---|
+| Moniliasis / helada | Moniliophthora roreri | Manchas acuosas → necrosis en mazorca |
+| Escoba de bruja | Moniliophthora perniciosa | Brotes deformados, escobas |
+| Mazorca negra | Phytophthora palmivora | Mazorcas negras, podredumbre |
+| Antracnosis | Colletotrichum gloeosporioides | Manchas necróticas en hojas y frutos |
+| Cochinilla harinosa | Planococcus citri | Masas blancas algodonosas |
+| Barrenador del tronco | Xylotrechus quadripes | Aserrín y galerías en tronco |
+
+### Banano / Plátano
+| Nombre común | Nombre científico | Señales |
+|---|---|---|
+| Sigatoka negra | Mycosphaerella fijiensis | Rayas amarillas → manchas negras en hojas |
+| Sigatoka amarilla | Mycosphaerella musicola | Rayas amarillas sin necrosis negra |
+| Moko bacteriano | Ralstonia solanacearum | Marchitez súbita, frutos internamente negros — CUARENTENA |
+| Picudo negro | Cosmopolites sordidus | Corazón muerto, galerías en cormo |
+| Trips de la mancha roja | Chaetanaphothrips signipennis | Manchas rojizas en dedos |
+| Nematodos | Radopholus similis | Raíces necróticas, volcamiento |
+| Fusarium (Mal de Panamá) | Fusarium oxysporum f.sp. cubense | Amarillamiento y muerte de planta — CUARENTENA |
+
+### Arroz
+| Nombre común | Nombre científico | Señales |
+|---|---|---|
+| Pyricularia / quemazón | Pyricularia oryzae | Manchas grises con bordes marrones en hojas |
+| Chinche de la espiga | Oebalus pugnax | Granos vanos, manchados |
+| Sogata / virosis | Tagosodes orizicolus | Amarillamiento, enrojecimiento |
+| Punta blanca | Hirschmanniella oryzae | Espigas con granos vacíos |
+
+### Café
+| Nombre común | Nombre científico | Señales |
+|---|---|---|
+| Roya | Hemileia vastatrix | Polvo amarillo-naranja en hojas |
+| Broca | Hypothenemus hampei | Perforaciones en granos |
+| Ojo de gallo | Mycena citricolor | Manchas circulares en hojas |
 
 ## Formato de salida
 

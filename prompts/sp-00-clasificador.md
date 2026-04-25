@@ -43,7 +43,10 @@ responde EXACTAMENTE esto y nada más:
 |------|---------------|
 | `insumo` | Aplicó algo: fumigó, abonó, echó herbicida, puso fungicida |
 | `labor` | Trabajo de campo sin productos: chapeo, deshoje, poda, siembra, enfunde, apuntalado |
-| `cosecha` | Cortó, pesó, despachó: cajas, quintales, racimos |
+| `cosecha` | Cortó, pesó, recogió producto: cajas, quintales, racimos, mazorcas |
+| `calidad` | Midió o evaluó calidad: brix, rechazo, calibre, fermentación, humedad del grano |
+| `venta` | Vendió o despachó producto a un comprador: precio, factura, despacho, ingreso |
+| `gasto` | Compró algo o pagó un servicio: insumos, jornales, flete, reparaciones |
 | `plaga` | Vio o reporta enfermedad/plaga: Sigatoka, moniliasis, escoba, roya, cochinilla, mazorca negra |
 | `clima` | Evento del tiempo que afectó la finca: lluvia fuerte, viento, inundación, sequía |
 | `infraestructura` | Daño o trabajo en instalaciones: riel roto, bomba dañada, pozo, cerca |
@@ -51,13 +54,17 @@ responde EXACTAMENTE esto y nada más:
 | `saludo` | Saludo puro, sin información de campo |
 | `ambiguo` | No puedes determinar el tipo con confianza |
 
+**Nota sobre calidad vs cosecha:** Si el mensaje menciona solo cantidad cosechada → `cosecha`. Si menciona brix, rechazo, calibre, fermentación → `calidad`. Si menciona cantidad Y precio/comprador → probablemente `venta`.
+
+**Nota sobre gasto vs insumo:** Si el mensaje es sobre aplicar un producto en el campo → `insumo`. Si es sobre comprarlo o pagar por él → `gasto`.
+
 **Nota sobre "helada":** Cuando un agricultor de cacao dice "helada" se refiere a un brote severo de moniliasis, NO a temperatura baja. Clasifica como `plaga`.
 
 ## Formato de salida
 
 ```json
 {
-  "tipo_evento": "insumo|labor|cosecha|plaga|clima|infraestructura|consulta|saludo|ambiguo",
+  "tipo_evento": "insumo|labor|cosecha|calidad|venta|gasto|plaga|clima|infraestructura|consulta|saludo|ambiguo",
   "confidence": 0.0,
   "requiere_imagen_para_confirmar": false,
   "motivo_ambiguo": null,

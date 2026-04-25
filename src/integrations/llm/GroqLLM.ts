@@ -23,6 +23,7 @@ import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal }
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { cargarSDRPrompt, buildSDRContexto } from './sdrUtils.js'
+import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
@@ -34,10 +35,13 @@ const EXTRACTOR_POR_TIPO: Record<string, string> = {
   plaga: 'sp-01d-extractor-plaga.md',
   infraestructura: 'sp-01e-extractor-infraestructura.md',
   clima: 'sp-01f-extractor-clima.md',
+  calidad: 'sp-01g-extractor-calidad.md',
+  venta: 'sp-01h-extractor-venta.md',
+  gasto: 'sp-01i-extractor-gasto.md',
 }
 
 const ResultadoClasificacionSchema = z.object({
-  tipo_evento: z.enum(['insumo', 'labor', 'cosecha', 'plaga', 'clima', 'infraestructura', 'consulta', 'saludo', 'ambiguo']),
+  tipo_evento: z.enum(['insumo', 'labor', 'cosecha', 'calidad', 'venta', 'gasto', 'plaga', 'clima', 'infraestructura', 'consulta', 'saludo', 'ambiguo']),
   confidence: z.number().min(0).max(1),
   requiere_imagen_para_confirmar: z.boolean().default(false),
   motivo_ambiguo: z.string().nullable().default(null),
@@ -304,6 +308,43 @@ export class GroqLLM implements IWasagroLLM {
     }
   }
 
+  async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: 'clasificar_excel',
+      model: this.#model,
+      input: { nombre_archivo: entrada.nombre_archivo, total_filas: entrada.total_filas, columnas: entrada.columnas },
+    })
+    try {
+      const prompt = injectarVariables(cargarPrompt('sp-06-clasificar-excel.md'), {
+        FINCA_NOMBRE: entrada.finca_nombre ?? 'No especificada',
+        CULTIVO_PRINCIPAL: entrada.cultivo_principal ?? 'No especificado',
+        NOMBRE_ARCHIVO: entrada.nombre_archivo,
+        COLUMNAS: entrada.columnas.join(', '),
+        MUESTRA_FILAS: JSON.stringify(entrada.muestra_filas, null, 2),
+        TOTAL_FILAS: String(entrada.total_filas),
+      })
+      const userContent = `Archivo: ${entrada.nombre_archivo}. Columnas: ${entrada.columnas.join(', ')}. Total filas: ${entrada.total_filas}.`
+      const texto = await this.#llamar(prompt, userContent)
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Clasificador Excel devolvió no-JSON: ${texto.slice(0, 100)}`)
+      }
+      const parsed = ClasificacionExcelSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema clasificación Excel inválido: ${parsed.error.message}`)
+      }
+      generation.end({ output: parsed.data })
+      return parsed.data
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error clasificando Excel: ${String(err)}`, err)
+    }
+  }
+
   // ─── private ─────────────────────────────────────────────────────────────
 
   async #clasificar(input: EntradaEvento, traceId: string): Promise<ResultadoClasificacion> {
@@ -321,6 +362,7 @@ export class GroqLLM implements IWasagroLLM {
       input: { transcripcion: input.transcripcion },
     })
 
+    const inicio = Date.now()
     try {
       const texto = await this.#llamar(prompt, input.transcripcion)
       let json: unknown
@@ -335,7 +377,7 @@ export class GroqLLM implements IWasagroLLM {
         throw new LLMError('PARSE_ERROR', `Schema clasificación inválido: ${parsed.error.message}`)
       }
 
-      generation.end({ output: parsed.data })
+      generation.end({ output: parsed.data, metadata: { latencia_ms: Date.now() - inicio } })
       return parsed.data
     } catch (err) {
       if (err instanceof LLMError) throw err

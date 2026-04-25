@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const EventoCampoExtraidoSchema = z.object({
-  tipo_evento: z.enum(['labor', 'insumo', 'plaga', 'clima', 'cosecha', 'gasto', 'infraestructura', 'observacion', 'nota_libre', 'sin_evento']),
+  tipo_evento: z.enum(['labor', 'insumo', 'plaga', 'clima', 'cosecha', 'gasto', 'calidad', 'venta', 'inventario', 'infraestructura', 'observacion', 'nota_libre', 'sin_evento']),
   lote_id: z.string().nullable(),
   lote_detectado_raw: z.string().nullable().default(null),
   fecha_evento: z.string().nullable(),

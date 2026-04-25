@@ -209,6 +209,10 @@ export class OllamaLLM implements IWasagroLLM {
     return data.message.content
   }
 
+  async clasificarExcel(_entrada: import('../../types/dominio/Excel.js').EntradaClasificacionExcel, _traceId: string): Promise<import('../../types/dominio/Excel.js').ClasificacionExcel> {
+    throw this.#envolverError(new Error('clasificarExcel no implementado en OllamaLLM'))
+  }
+
   #envolverError(err: unknown): LLMError {
     const msg = String(err)
     if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {

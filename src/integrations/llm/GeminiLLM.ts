@@ -194,6 +194,10 @@ export class GeminiLLM implements IWasagroLLM {
       throw new LLMError('GEMINI_ERROR', `Error en resumen semanal: ${String(err)}`, err)
     }
   }
+
+  async clasificarExcel(_entrada: import('../../types/dominio/Excel.js').EntradaClasificacionExcel, _traceId: string): Promise<import('../../types/dominio/Excel.js').ClasificacionExcel> {
+    throw new LLMError('GEMINI_ERROR', 'clasificarExcel no implementado en GeminiLLM')
+  }
 }
 
 function cargarPrompt(nombre: string): string {

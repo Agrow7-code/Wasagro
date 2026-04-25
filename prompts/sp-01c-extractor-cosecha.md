@@ -45,15 +45,41 @@ Busca el lote en `{{LISTA_LOTES}}`:
 - Dudoso → `null` + `lote_detectado_raw` + baja confidence
 - No menciona → `null`
 
-## Glosario
+## Glosario general
 
 | Término | Significado | Conversión |
 |---------|-------------|------------|
 | quintal / qq | Unidad de peso | 1 qq = 45.4 kg |
 | rechazo | Fruta no apta para exportación | Porcentaje del total |
 | brix | Grados de madurez en refractómetro | Decimal |
-| caja | Caja estándar de exportación | Según mercado: 18–22 kg |
+| caja | Caja estándar de exportación | 18–22 kg según mercado |
 | racimo | Racimo de banano completo | Conteo directo |
+
+## Campos específicos por cultivo
+
+### Cacao
+- `mazorcas_cortadas`: número de mazorcas cosechadas
+- `kg_cacao_fresco`: kilos de cacao fresco (baba)
+- `qq_cacao_seco`: quintales de cacao seco (después de fermentación y secado)
+- `dias_fermentacion`: días completados en cajones
+- `porcentaje_fermentacion`: % de fermentación lograda
+
+### Banano / Plátano
+- `cajas_exportacion`: cajas aprobadas para exportación
+- `cajas_rechazo`: cajas rechazadas (no exportables)
+- `calibre`: calibre en mm o categoría (extra, primera, segunda)
+- `numero_racimos`: racimos cortados
+- `semana_corte`: número de semana de corte del ciclo productivo
+
+### Arroz
+- `qq_paddy`: quintales de arroz en cáscara (paddy)
+- `humedad_cosecha`: % de humedad al momento de cosecha
+- `rendimiento_pct`: % de rendimiento industrial esperado
+
+### Café
+- `qq_pergamino`: quintales de café pergamino
+- `qq_cereza`: quintales de café cereza (fruto completo)
+- `variedad`: variedad cosechada (typica, caturra, geisha, etc.)
 
 ## Formato de salida
 

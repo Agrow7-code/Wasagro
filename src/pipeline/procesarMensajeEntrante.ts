@@ -27,6 +27,7 @@ import {
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
 import { handleSDRSession, handleFounderApproval, handleMeetingConfirmation } from '../agents/sdrAgent.js'
+import { handleDocumento, procesarFilasExcelConfirmadas } from './procesarExcel.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -316,23 +317,40 @@ async function handleEvento(
     }
   }
 
-  // Ubicación — guardar coordenadas de la finca (una sola vez por agricultor)
+  // Ubicación — solicitar confirmación antes de persistir coordenadas (P7)
   if (msg.tipo === 'ubicacion') {
     if (!usuario.finca_id) {
       await _sender!.enviarTexto(msg.from, 'Para guardar tu ubicación primero necesitas registrar tu finca. ⚠️')
       await actualizarMensaje(mensajeId, { status: 'processed' })
       return
     }
-    await updateFincaCoordenadas(usuario.finca_id, msg.latitud!, msg.longitud!)
-    langfuse.trace({ id: traceId }).event({
-      name: 'finca_coordenadas_actualizadas',
-      input: { finca_id: usuario.finca_id, lat: msg.latitud, lng: msg.longitud },
+    const session = await getOrCreateSession(msg.from, 'reporte')
+    await updateSession(session.session_id, {
+      status: 'pending_location_confirm',
+      contexto_parcial: { lat: msg.latitud, lng: msg.longitud },
     })
     await _sender!.enviarTexto(
       msg.from,
-      'Guardé la ubicación de tu finca. ✅ Con esto puedo avisarte del clima y más. Cuando quieras, cuéntame lo que pasó en el campo.',
+      `Voy a guardar la ubicación de tu finca (${msg.latitud?.toFixed(5)}, ${msg.longitud?.toFixed(5)}). ¿Confirmas? Responde *sí* o *no*. ✅`,
     )
-    await actualizarMensaje(mensajeId, { status: 'processed' })
+    await actualizarMensaje(mensajeId, { status: 'awaiting_confirmation' })
+    return
+  }
+
+  // Documento (XLSX / CSV) — clasificar y pedir confirmación
+  if (msg.tipo === 'documento') {
+    const finca = usuario.finca_id ? await getFincaById(usuario.finca_id) : null
+    const docUsuario: { id: string; finca_id: string | null; finca_nombre?: string; cultivo_principal?: string } = { id: usuario.id, finca_id: usuario.finca_id }
+    if (finca?.nombre !== undefined) docUsuario.finca_nombre = finca.nombre
+    if (finca?.cultivo_principal != null) docUsuario.cultivo_principal = finca.cultivo_principal
+    await handleDocumento(
+      msg,
+      docUsuario,
+      mensajeId,
+      traceId,
+      _sender!,
+      _llm!,
+    )
     return
   }
 
@@ -391,6 +409,57 @@ async function handleEvento(
     : 'No hay lotes registrados'
 
   const session = await getOrCreateSession(msg.from, 'reporte')
+
+  // ── Confirmación pendiente de ubicación ──────────────────────────────────
+  if (session.status === 'pending_location_confirm') {
+    const respuesta = transcripcion.toLowerCase().trim()
+    const confirma = /^(sí|si|s|yes|ok|dale|confirmo|✅)/.test(respuesta)
+
+    if (confirma) {
+      const lat = session.contexto_parcial['lat'] as number
+      const lng = session.contexto_parcial['lng'] as number
+      await updateFincaCoordenadas(usuario.finca_id!, lat, lng)
+      langfuse.trace({ id: traceId }).event({
+        name: 'finca_coordenadas_actualizadas',
+        input: { finca_id: usuario.finca_id, lat, lng },
+      })
+      await _sender!.enviarTexto(msg.from, 'Guardé la ubicación de tu finca. ✅ Con esto puedo avisarte del clima y más. Cuando quieras, cuéntame lo que pasó en el campo.')
+    } else {
+      await _sender!.enviarTexto(msg.from, 'Listo, no guardé la ubicación. Cuando quieras, cuéntame lo que pasó en el campo.')
+    }
+
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  // ── Confirmación pendiente de Excel ──────────────────────────────────────
+  if (session.status === 'pending_excel_confirm') {
+    const respuesta = transcripcion.toLowerCase().trim()
+    const confirma = /^(sí|si|s|yes|ok|dale|listo|confirmo|✅|procesa|procésalo|adelante)/.test(respuesta)
+
+    if (!confirma) {
+      await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+      await _sender!.enviarTexto(msg.from, 'Listo, cancelé el procesamiento del archivo. Cuando quieras, cuéntame lo que pasó en la finca.')
+      await actualizarMensaje(mensajeId, { status: 'processed' })
+      return
+    }
+
+    const { insertados, errores } = await procesarFilasExcelConfirmadas(
+      session.contexto_parcial,
+      usuario.id,
+      usuario.finca_id!,
+      traceId,
+    )
+
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    const msj = errores > 0
+      ? `Procesé ${insertados} registros de tu archivo. ${errores} filas tuvieron errores y quedaron pendientes de revisión. ✅`
+      : `Procesé ${insertados} registros de tu archivo. Todos quedaron guardados para revisión. ✅`
+    await _sender!.enviarTexto(msg.from, msj)
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
 
   // ── Confirmación pendiente: el usuario responde al resumen ────────────────
   if (session.status === 'pending_confirmation') {

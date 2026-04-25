@@ -492,18 +492,60 @@ describe('procesarMensajeEntrante', () => {
   // ─── Tipo ubicacion ─────────────────────────────────────────────────────────
 
   describe('procesamiento de ubicación', () => {
-    it('tipo ubicacion con finca_id → llama updateFincaCoordenadas con las coordenadas correctas', async () => {
+    it('tipo ubicacion con finca_id → pide confirmación (P7), NO llama updateFincaCoordenadas todavía', async () => {
       const sender = crearSenderMock()
       const llm = crearLlmMock()
       inicializarPipeline(sender, llm)
-      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo) // finca_id: 'F001'
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
 
       const msgUbicacion: NormalizedMessage = { wamid: 'wamid.ub', from: '593987654321', timestamp: new Date(), tipo: 'ubicacion', latitud: -0.1234, longitud: -78.5678, rawPayload: {} }
       await procesarMensajeEntrante(msgUbicacion, 'trace-ub')
 
+      expect(queries.updateFincaCoordenadas).not.toHaveBeenCalled()
+      expect(queries.updateSession).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+        status: 'pending_location_confirm',
+        contexto_parcial: { lat: -0.1234, lng: -78.5678 },
+      }))
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('Confirmas'))
+      expect(llm.extraerEvento).not.toHaveBeenCalled()
+    })
+
+    it('pending_location_confirm + sí → guarda coordenadas', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue({
+        session_id: 'ses-loc',
+        status: 'pending_location_confirm',
+        clarification_count: 0,
+        contexto_parcial: { lat: -0.1234, lng: -78.5678 },
+      } as any)
+
+      const msgSi: NormalizedMessage = { wamid: 'wamid.si', from: '593987654321', timestamp: new Date(), tipo: 'texto', texto: 'sí', rawPayload: {} }
+      await procesarMensajeEntrante(msgSi, 'trace-ub-si')
+
       expect(queries.updateFincaCoordenadas).toHaveBeenCalledWith('F001', -0.1234, -78.5678)
       expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('ubicación'))
-      expect(llm.extraerEvento).not.toHaveBeenCalled()
+    })
+
+    it('pending_location_confirm + no → cancela sin guardar', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue({
+        session_id: 'ses-loc2',
+        status: 'pending_location_confirm',
+        clarification_count: 0,
+        contexto_parcial: { lat: -0.1234, lng: -78.5678 },
+      } as any)
+
+      const msgNo: NormalizedMessage = { wamid: 'wamid.no', from: '593987654321', timestamp: new Date(), tipo: 'texto', texto: 'no', rawPayload: {} }
+      await procesarMensajeEntrante(msgNo, 'trace-ub-no')
+
+      expect(queries.updateFincaCoordenadas).not.toHaveBeenCalled()
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('no guardé'))
     })
 
     it('tipo ubicacion sin finca_id → responde error, no llama updateFincaCoordenadas', async () => {

@@ -30,6 +30,11 @@ const EvolutionPayloadSchema = z.object({
         degreesLongitude: z.number(),
         name: z.string().optional(),
       }).optional(),
+      documentMessage: z.object({
+        url: z.string(),
+        mimetype: z.string().optional(),
+        fileName: z.string().optional(),
+      }).optional(),
     }),
     messageTimestamp: z.number(),
     pushName: z.string().optional(),
@@ -92,6 +97,19 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
         tipo: 'ubicacion',
         latitud: data.message.locationMessage.degreesLatitude,
         longitud: data.message.locationMessage.degreesLongitude,
+      } as NormalizedMessage
+    }
+    if (data.message.documentMessage) {
+      const mime = data.message.documentMessage.mimetype ?? ''
+      const nombre = data.message.documentMessage.fileName ?? ''
+      const esExcel = mime.includes('spreadsheet') || mime.includes('excel') || nombre.endsWith('.xlsx') || nombre.endsWith('.xls') || nombre.endsWith('.csv')
+      if (!esExcel) return { ...base, tipo: 'otro' } as NormalizedMessage
+      return {
+        ...base,
+        tipo: 'documento',
+        documentoUrl: data.message.documentMessage.url,
+        documentoNombre: nombre,
+        documentoMimetype: mime,
       } as NormalizedMessage
     }
     return { ...base, tipo: 'otro' } as NormalizedMessage
