@@ -78,12 +78,6 @@ export async function handleSDRSession(
     trace.event({ name: 'sdr_prospecto_created', input: { phone: msg.from, narrativa } })
   }
 
-  if (prospecto['status'] === 'qualified' && prospecto['founder_notified_at']) {
-    await sender.enviarTexto(msg.from, 'Estamos revisando tu caso internamente. Te contactamos pronto. ✅')
-    await actualizarMensaje(mensajeId, { status: 'processed' })
-    return
-  }
-
   // REQ-narr-005: sdr_session_started fires on new prospect
   if (isNuevoProspecto) {
     trace.event({
@@ -202,13 +196,22 @@ export async function handleSDRSession(
     nuevoStatus = 'unqualified'
     await sender.enviarTexto(msg.from, resultado.respuesta)
   } else if (resultado.action === 'propose_pilot' || resultado.requires_founder_approval) {
-    nuevoStatus = 'qualified'
+    nuevoStatus = 'piloto_propuesto'
     dealBriefParaGuardar = {
       ...((resultado.deal_brief as object) ?? {}),
       draft_message: resultado.respuesta,
     }
     founderNotifiedAt = new Date().toISOString()
 
+    // Send demo invitation directly to prospect — no founder gate (Option A)
+    await sender.enviarTexto(msg.from, resultado.respuesta)
+    const bookingUrl = process.env['DEMO_BOOKING_URL']
+    const followUp = bookingUrl
+      ? `📅 Puedes agendar aquí: ${bookingUrl}`
+      : '¿Cuándo tienes 20 minutos disponibles para una llamada rápida? Dime el día y la hora que mejor te quede. 📅'
+    await sender.enviarTexto(msg.from, followUp)
+
+    // Notify founder informatively only — no approval gate
     const founderPhone = process.env['FOUNDER_PHONE']
     if (founderPhone) {
       const brief = resultado.deal_brief as Record<string, unknown> | null
@@ -219,8 +222,7 @@ export async function handleSDRSession(
       ))
     }
 
-    await sender.enviarTexto(msg.from, 'Voy a prepararte una propuesta específica para tu operación. En cuanto la tengamos lista, te la comparto. ✅')
-    trace.event({ name: 'sdr_founder_notified', input: { prospecto_id: prospecto['id'], phone: prospecto['phone'] } })
+    trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'], phone: prospecto['phone'] } })
   } else {
     await sender.enviarTexto(msg.from, resultado.respuesta)
   }
@@ -478,14 +480,12 @@ function buildFounderNotification(
   lines.push(`Objeciones manejadas: ${objecionesStr}`)
   lines.push('')
   lines.push('─────────────────────────────')
-  lines.push('BORRADOR DE PROPUESTA:')
+  lines.push('MENSAJE ENVIADO AL PROSPECTO:')
   lines.push('')
   lines.push(draftMessage)
   lines.push('')
   lines.push('─────────────────────────────')
-  lines.push('Responde *SÍ* para enviar al prospecto.')
-  lines.push('Responde *NO* para descartar.')
-  lines.push('Escribe una corrección para ajustar y enviar.')
+  lines.push('Demo agendado automáticamente. ✅')
 
   return lines.join('\n')
 }

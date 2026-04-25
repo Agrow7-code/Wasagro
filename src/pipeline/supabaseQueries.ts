@@ -230,6 +230,20 @@ export async function getFincasActivas(client: SupabaseClient = defaultClient): 
   return (data ?? []) as FincaRow[]
 }
 
+export interface FincaConCoordenadasRow {
+  finca_id: string
+  nombre: string
+  cultivo_principal: string | null
+  lat: number
+  lng: number
+}
+
+export async function getFincasConCoordenadas(client: SupabaseClient = defaultClient): Promise<FincaConCoordenadasRow[]> {
+  const { data, error } = await client.rpc('get_fincas_con_coordenadas')
+  if (error) throw error
+  return (data ?? []) as FincaConCoordenadasRow[]
+}
+
 export interface EventoResumenRow {
   tipo_evento: string
   fecha_evento: string | null
@@ -313,7 +327,7 @@ export async function getNextFincaId(client: SupabaseClient = defaultClient): Pr
     .maybeSingle()
   if (error) throw error
   const match = (data as { finca_id: string } | null)?.finca_id?.match(/^F(\d+)$/)
-  const next = match ? parseInt(match[1], 10) + 1 : 1
+  const next = match?.[1] != null ? parseInt(match[1], 10) + 1 : 1
   return `F${String(next).padStart(3, '0')}`
 }
 
@@ -324,6 +338,20 @@ export interface FincaInsert {
   pais: string | null
   cultivo_principal?: string | null
   ubicacion?: string | null
+}
+
+export async function updateFincaCoordenadas(
+  fincaId: string,
+  lat: number,
+  lng: number,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client.rpc('update_finca_coordenadas', {
+    p_finca_id: fincaId,
+    p_lat: lat,
+    p_lng: lng,
+  })
+  if (error) throw error
 }
 
 export async function createFinca(data: FincaInsert, client: SupabaseClient = defaultClient): Promise<void> {

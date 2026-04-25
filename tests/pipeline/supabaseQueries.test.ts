@@ -15,6 +15,7 @@ import {
   createSDRProspecto,
   getSDRProspecto,
   getSDRProspectosPendingApproval,
+  updateFincaCoordenadas,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -256,6 +257,28 @@ describe('SDR supabaseQueries', () => {
       const result = await getSDRProspectosPendingApproval(mock as any)
 
       expect(result).toEqual([])
+    })
+  })
+
+  describe('updateFincaCoordenadas', () => {
+    it('llama rpc con los parámetros correctos', async () => {
+      const rpcMock = vi.fn().mockResolvedValue({ error: null })
+      const mock = { ...crearSupabaseMock(), rpc: rpcMock }
+
+      await updateFincaCoordenadas('F001', -1.2345, -79.5678, mock as any)
+
+      expect(rpcMock).toHaveBeenCalledWith('update_finca_coordenadas', {
+        p_finca_id: 'F001',
+        p_lat: -1.2345,
+        p_lng: -79.5678,
+      })
+    })
+
+    it('lanza error si rpc falla', async () => {
+      const rpcMock = vi.fn().mockResolvedValue({ error: { message: 'rpc error' } })
+      const mock = { ...crearSupabaseMock(), rpc: rpcMock }
+
+      await expect(updateFincaCoordenadas('F001', -1.2345, -79.5678, mock as any)).rejects.toThrow()
     })
   })
 })

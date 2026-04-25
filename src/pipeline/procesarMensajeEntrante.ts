@@ -23,6 +23,7 @@ import {
   getJefeByFinca,
   getPendingAgricultoresByFinca,
   approveAgricultor,
+  updateFincaCoordenadas,
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
 import { handleSDRSession, handleFounderApproval, handleMeetingConfirmation } from '../agents/sdrAgent.js'
@@ -153,9 +154,9 @@ async function handleOnboardingAdmin(
           ubicacion: datos.finca_ubicacion_texto ?? null,
         })
         const lotes = datos.lotes ?? []
-        for (let i = 0; i < lotes.length; i++) {
+        for (const [i, lote] of lotes.entries()) {
           const loteNum = String(i + 1).padStart(2, '0')
-          await createLote({ lote_id: `${fincaId}-L${loteNum}`, finca_id: fincaId, nombre_coloquial: lotes[i].nombre_coloquial, hectareas: lotes[i].hectareas ?? null })
+          await createLote({ lote_id: `${fincaId}-L${loteNum}`, finca_id: fincaId, nombre_coloquial: lote.nombre_coloquial, hectareas: lote.hectareas ?? null })
         }
         await updateUsuario(usuario.id, { finca_id: fincaId, onboarding_completo: true })
         langfuse.trace({ id: traceId }).event({ name: 'finca_creada', level: 'DEFAULT', output: { finca_id: fincaId, lotes: lotes.length } })
@@ -310,9 +311,29 @@ async function handleEvento(
   if (msg.tipo === 'texto' && ROLES_ADMIN.has(usuario.rol) && usuario.finca_id) {
     const approvalMatch = (msg.texto ?? '').toLowerCase().match(/^aprobar\s+(.+)/)
     if (approvalMatch) {
-      await handleAprobacion(msg, usuario, mensajeId, traceId, approvalMatch[1].trim())
+      await handleAprobacion(msg, usuario, mensajeId, traceId, approvalMatch[1]?.trim() ?? '')
       return
     }
+  }
+
+  // Ubicación — guardar coordenadas de la finca (una sola vez por agricultor)
+  if (msg.tipo === 'ubicacion') {
+    if (!usuario.finca_id) {
+      await _sender!.enviarTexto(msg.from, 'Para guardar tu ubicación primero necesitas registrar tu finca. ⚠️')
+      await actualizarMensaje(mensajeId, { status: 'processed' })
+      return
+    }
+    await updateFincaCoordenadas(usuario.finca_id, msg.latitud!, msg.longitud!)
+    langfuse.trace({ id: traceId }).event({
+      name: 'finca_coordenadas_actualizadas',
+      input: { finca_id: usuario.finca_id, lat: msg.latitud, lng: msg.longitud },
+    })
+    await _sender!.enviarTexto(
+      msg.from,
+      'Guardé la ubicación de tu finca. ✅ Con esto puedo avisarte del clima y más. Cuando quieras, cuéntame lo que pasó en el campo.',
+    )
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
   }
 
   // Determinar transcripción
@@ -398,7 +419,11 @@ async function handleEvento(
         status: evStatus,
         datos_evento: {
           ...ext.campos_extraidos,
-          ...(ext.lote_detectado_raw ? { lote_detectado_raw: ext.lote_detectado_raw } : {}),
+          ...(ext.lote_detectado_raw != null ? { lote_detectado_raw: ext.lote_detectado_raw } : {}),
+          _meta: {
+            confidence_por_campo: ext.confidence_por_campo,
+            campos_faltantes: ext.campos_faltantes,
+          },
         },
         descripcion_raw: descRaw,
         confidence_score: ext.confidence_score,

@@ -23,6 +23,7 @@ vi.mock('../../src/pipeline/supabaseQueries.js', () => ({
   getJefeByFinca: vi.fn().mockResolvedValue(null),
   getPendingAgricultoresByFinca: vi.fn().mockResolvedValue([]),
   approveAgricultor: vi.fn().mockResolvedValue(undefined),
+  updateFincaCoordenadas: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../src/pipeline/sttService.js', () => ({
@@ -54,6 +55,7 @@ import * as queries from '../../src/pipeline/supabaseQueries.js'
 import * as sttService from '../../src/pipeline/sttService.js'
 import * as gcal from '../../src/integrations/gcal.js'
 import * as sdrAgent from '../../src/agents/sdrAgent.js'
+import { langfuse } from '../../src/integrations/langfuse.js'
 
 const usuarioActivo = {
   id: 'usr-1', phone: '593987654321', nombre: 'Carlos', rol: 'agricultor',
@@ -449,6 +451,301 @@ describe('procesarMensajeEntrante', () => {
       await procesarMensajeEntrante(msgFounder, 'trace-founder-2')
 
       expect(queries.getUserByPhone).toHaveBeenCalledWith('593000000001')
+    })
+  })
+
+  // ─── Tipo imagen ────────────────────────────────────────────────────────────
+
+  describe('procesamiento de imagen', () => {
+    it('tipo imagen → guarda observacion con status requires_review, NO llama extraerEvento', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+
+      const msgImagen: NormalizedMessage = { wamid: 'wamid.img', from: '593987654321', timestamp: new Date(), tipo: 'imagen', imagenUrl: 'http://img.example.com/foto.jpg', rawPayload: {} }
+      await procesarMensajeEntrante(msgImagen, 'trace-img')
+
+      expect(llm.extraerEvento).not.toHaveBeenCalled()
+      expect(queries.saveEvento).toHaveBeenCalledWith(expect.objectContaining({
+        tipo_evento: 'observacion',
+        status: 'requires_review',
+        finca_id: 'F001',
+      }))
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('imagen'))
+    })
+
+    it('tipo imagen → actualizarMensaje con evento_id del saveEvento', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.saveEvento).mockResolvedValue('evt-img-001')
+
+      const msgImagen: NormalizedMessage = { wamid: 'wamid.img2', from: '593987654321', timestamp: new Date(), tipo: 'imagen', rawPayload: {} }
+      await procesarMensajeEntrante(msgImagen, 'trace-img2')
+
+      expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-uuid', expect.objectContaining({ evento_id: 'evt-img-001' }))
+    })
+  })
+
+  // ─── Tipo ubicacion ─────────────────────────────────────────────────────────
+
+  describe('procesamiento de ubicación', () => {
+    it('tipo ubicacion con finca_id → llama updateFincaCoordenadas con las coordenadas correctas', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo) // finca_id: 'F001'
+
+      const msgUbicacion: NormalizedMessage = { wamid: 'wamid.ub', from: '593987654321', timestamp: new Date(), tipo: 'ubicacion', latitud: -0.1234, longitud: -78.5678, rawPayload: {} }
+      await procesarMensajeEntrante(msgUbicacion, 'trace-ub')
+
+      expect(queries.updateFincaCoordenadas).toHaveBeenCalledWith('F001', -0.1234, -78.5678)
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('ubicación'))
+      expect(llm.extraerEvento).not.toHaveBeenCalled()
+    })
+
+    it('tipo ubicacion sin finca_id → responde error, no llama updateFincaCoordenadas', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue({ ...usuarioActivo, finca_id: null })
+
+      const msgUbicacion: NormalizedMessage = { wamid: 'wamid.ub2', from: '593987654321', timestamp: new Date(), tipo: 'ubicacion', latitud: -0.1, longitud: -78.5, rawPayload: {} }
+      await procesarMensajeEntrante(msgUbicacion, 'trace-ub2')
+
+      expect(queries.updateFincaCoordenadas).not.toHaveBeenCalled()
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('finca'))
+    })
+  })
+
+  // ─── STT errors ─────────────────────────────────────────────────────────────
+
+  describe('errores de STT', () => {
+    it('STT_NO_DISPONIBLE → envía aviso de texto requerido, no llama extraerEvento', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(sttService.transcribirAudio).mockRejectedValue(Object.assign(new Error('STT_NO_DISPONIBLE'), {}))
+
+      await procesarMensajeEntrante(msgAudio, 'trace-stt-nd')
+
+      expect(llm.extraerEvento).not.toHaveBeenCalled()
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('texto'))
+      expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-uuid', expect.objectContaining({ status: 'processed' }))
+    })
+
+    it('STT error genérico → se propaga al catch global y envía mensaje de error', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(sttService.transcribirAudio).mockRejectedValue(new Error('Whisper API timeout'))
+
+      await procesarMensajeEntrante(msgAudio, 'trace-stt-err')
+
+      expect(llm.extraerEvento).not.toHaveBeenCalled()
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('problema'))
+      expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-uuid', expect.objectContaining({ status: 'error' }))
+    })
+  })
+
+  // ─── alerta_urgente ─────────────────────────────────────────────────────────
+
+  describe('alerta_urgente (P4 — todo error se loggea)', () => {
+    it('alerta_urgente=true al confirmar → emite evento "alerta_plaga_urgente" en LangFuse', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        status: 'pending_confirmation',
+        contexto_parcial: {
+          extracted_data: { ...extractedEventoMock, alerta_urgente: true, requiere_clarificacion: false } as unknown as Record<string, unknown>,
+          transcripcion_original: 'Monilia severa en todo el lote',
+        },
+      }))
+
+      await procesarMensajeEntrante({ ...msgTexto, texto: 'sí' }, 'trace-alerta')
+
+      const traceReturnValue = vi.mocked(langfuse.trace).mock.results.find(r => r.value)?.value
+      expect(traceReturnValue?.event).toHaveBeenCalledWith(expect.objectContaining({ name: 'alerta_plaga_urgente' }))
+    })
+
+    it('alerta_urgente=false → NO emite "alerta_plaga_urgente"', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        status: 'pending_confirmation',
+        contexto_parcial: {
+          extracted_data: { ...extractedEventoMock, alerta_urgente: false, requiere_clarificacion: false } as unknown as Record<string, unknown>,
+          transcripcion_original: 'Apliqué mancozeb',
+        },
+      }))
+
+      await procesarMensajeEntrante({ ...msgTexto, texto: 'sí' }, 'trace-no-alerta')
+
+      const allEventCalls = vi.mocked(langfuse.trace).mock.results
+        .flatMap(r => r.value?.event?.mock?.calls ?? [])
+        .map((c: unknown[]) => (c[0] as { name?: string })?.name)
+      expect(allEventCalls).not.toContain('alerta_plaga_urgente')
+    })
+  })
+
+  // ─── Consentimiento ya guardado (P6) ────────────────────────────────────────
+
+  describe('consentimiento — guardar exactamente una vez (P6)', () => {
+    it('admin: consent_saved=true en session → saveUserConsent NO se vuelve a llamar', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioAdminOnboarding)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        tipo_sesion: 'onboarding',
+        contexto_parcial: { consent_saved: true },
+      }))
+      vi.mocked(llm.onboardarAdmin).mockResolvedValue({
+        ...onboardingAdminResponseMock,
+        datos_extraidos: { ...onboardingAdminResponseMock.datos_extraidos, consentimiento: true },
+      })
+
+      await procesarMensajeEntrante({ ...msgTexto, from: '593999111222', texto: 'Sí acepto' }, 'trace-consent-dup')
+
+      expect(queries.saveUserConsent).not.toHaveBeenCalled()
+    })
+
+    it('agricultor: consent_saved=true en session → saveUserConsent NO se vuelve a llamar', async () => {
+      const sender = crearSenderMock()
+      const llm = crearLlmMock()
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioPendienteOnboarding)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        tipo_sesion: 'onboarding',
+        contexto_parcial: { consent_saved: true },
+      }))
+      vi.mocked(llm.onboardarAgricultor).mockResolvedValue({
+        ...onboardingAgricultorResponseMock,
+        datos_extraidos: { ...onboardingAgricultorResponseMock.datos_extraidos, consentimiento: true },
+      })
+
+      await procesarMensajeEntrante(msgTexto, 'trace-consent-dup-agr')
+
+      expect(queries.saveUserConsent).not.toHaveBeenCalled()
+    })
+  })
+
+  // ─── Flujo de corrección (pending_confirmation) ──────────────────────────────
+
+  describe('flujo de corrección en pending_confirmation', () => {
+    it('corrección válida → re-extrae y muestra nuevo resumen para confirmar', async () => {
+      const sender = crearSenderMock()
+      const extractedCorreccion = { ...extractedEventoMock, campos_extraidos: { producto: 'fungicida', dosis_cantidad: 3 } }
+      const llm = crearLlmMock(extractedCorreccion)
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        status: 'pending_confirmation',
+        contexto_parcial: {
+          extracted_data: extractedEventoMock as unknown as Record<string, unknown>,
+          transcripcion_original: 'Apliqué mancozeb',
+        },
+      }))
+
+      await procesarMensajeEntrante({ ...msgTexto, texto: 'No, fue fungicida' }, 'trace-corr-1')
+
+      expect(llm.extraerEvento).toHaveBeenCalledOnce()
+      expect(queries.saveEvento).not.toHaveBeenCalled()
+      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'pending_confirmation' }))
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('fungicida'))
+    })
+
+    it('corrección resulta en sin_evento → reset limpio de session', async () => {
+      const sender = crearSenderMock()
+      const extracted = { ...extractedEventoMock, tipo_evento: 'sin_evento' as const }
+      const llm = crearLlmMock(extracted)
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        status: 'pending_confirmation',
+        contexto_parcial: {
+          extracted_data: extractedEventoMock as unknown as Record<string, unknown>,
+          transcripcion_original: 'Apliqué algo',
+        },
+      }))
+
+      await procesarMensajeEntrante({ ...msgTexto, texto: 'No, olvídalo' }, 'trace-corr-noevent')
+
+      expect(queries.saveEvento).not.toHaveBeenCalled()
+      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({
+        status: 'active',
+        clarification_count: 0,
+        contexto_parcial: {},
+      }))
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('registrar'))
+    })
+
+    it('corrección con lote inválido → pide corrección de lote (status: active)', async () => {
+      const sender = crearSenderMock()
+      const extracted = { ...extractedEventoMock, lote_id: null, lote_detectado_raw: 'lote inexistente' }
+      const llm = crearLlmMock(extracted)
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        status: 'pending_confirmation',
+        contexto_parcial: {
+          extracted_data: extractedEventoMock as unknown as Record<string, unknown>,
+          transcripcion_original: 'Apliqué mancozeb',
+        },
+      }))
+
+      await procesarMensajeEntrante({ ...msgTexto, texto: 'fue en lote inexistente' }, 'trace-corr-lote')
+
+      expect(queries.saveEvento).not.toHaveBeenCalled()
+      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'active' }))
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('no está registrado'))
+    })
+  })
+
+  // ─── clarification_count >= 2 ────────────────────────────────────────────────
+
+  describe('límite de clarificaciones (Regla 2 — máx 2 preguntas)', () => {
+    it('requiere_clarificacion=true con count=2 → pasa directo a pending_confirmation sin preguntar', async () => {
+      const sender = crearSenderMock()
+      const extracted = { ...extractedEventoMock, requiere_clarificacion: true, pregunta_sugerida: '¿Cuántas bombadas?' }
+      const llm = crearLlmMock(extracted)
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        clarification_count: 2,
+        contexto_parcial: { original_transcripcion: 'Apliqué algo en el lote' },
+      }))
+
+      await procesarMensajeEntrante(msgTexto, 'trace-max-clarit')
+
+      // No debe pedir más clarificaciones — debe ir a pending_confirmation
+      expect(sender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('Esto es lo que entendí'))
+      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'pending_confirmation' }))
+    })
+
+    it('lote inválido con count=2 → pasa a pending_confirmation (no más preguntas de lote)', async () => {
+      const sender = crearSenderMock()
+      const extracted = { ...extractedEventoMock, lote_id: null, lote_detectado_raw: 'lote fantasma' }
+      const llm = crearLlmMock(extracted)
+      inicializarPipeline(sender, llm)
+      vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivo)
+      vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionActiva({
+        clarification_count: 2,
+        contexto_parcial: { original_transcripcion: 'Apliqué algo' },
+      }))
+
+      await procesarMensajeEntrante(msgTexto, 'trace-max-lote')
+
+      // Con count>=2 no pregunta lote — va a pending_confirmation
+      expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'pending_confirmation' }))
     })
   })
 })

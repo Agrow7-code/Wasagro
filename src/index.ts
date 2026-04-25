@@ -6,6 +6,8 @@ import { crearAdapterWhatsApp, crearSenderWhatsApp } from './integrations/whatsa
 import { crearLLM } from './integrations/llm/index.js'
 import { inicializarPipeline } from './pipeline/procesarMensajeEntrante.js'
 import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
+import { enviarAlertasClima } from './pipeline/alertaClima.js'
+import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
 import { langfuse } from './integrations/langfuse.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
@@ -38,7 +40,7 @@ function validarEnvVars(): void {
     process.exit(1)
   }
 
-  const opcionales = [
+  const opcionales: [string, string][] = [
     ['DEMO_BOOKING_URL', 'sin esta variable no se podrán enviar links de demo'],
     ['REPORTE_SECRET', 'el endpoint /reportes/semanal no estará protegido'],
     ['LANGFUSE_SECRET_KEY', 'sin observabilidad LangFuse'],
@@ -90,6 +92,26 @@ app.post('/reportes/semanal', async (c) => {
   return c.json({ status: 'triggered' }, 202)
 })
 
+// POST /alertas/clima — trigger manual de alertas de clima (protegido por secret)
+app.post('/alertas/clima', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  if (!secret || secret !== process.env['REPORTE_SECRET']) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const trace = langfuse.trace({ name: 'alertas_clima_manual' })
+  void enviarAlertasClima(sender)
+    .then(({ enviadas, errores }) => {
+      trace.event({ name: 'completado', output: { enviadas, errores } })
+    })
+    .catch((err: unknown) => {
+      trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+      console.error('[alertas] Error en trigger manual:', err)
+    })
+
+  return c.json({ status: 'triggered' }, 202)
+})
+
 // Cron: lunes 8:00am hora Ecuador (UTC-5 = 13:00 UTC)
 // Expresión: minuto hora * * día_semana  →  0 13 * * 1
 cron.schedule('0 13 * * 1', () => {
@@ -103,6 +125,53 @@ cron.schedule('0 13 * * 1', () => {
     .catch((err: unknown) => {
       trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
       console.error('[cron] Error en reportes semanales:', err)
+    })
+}, { timezone: 'UTC' })
+
+// POST /alertas/precio — trigger manual de alerta de precio de banano
+app.post('/alertas/precio', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  if (!secret || secret !== process.env['REPORTE_SECRET']) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const trace = langfuse.trace({ name: 'alertas_precio_manual' })
+  void enviarAlertasPrecio(sender)
+    .then(({ enviadas, errores }) => {
+      trace.event({ name: 'completado', output: { enviadas, errores } })
+    })
+    .catch((err: unknown) => {
+      trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+      console.error('[alertas] Error en trigger manual precio:', err)
+    })
+  return c.json({ status: 'triggered' }, 202)
+})
+
+// Cron: alertas de clima diarias — 6am Ecuador (UTC-5) = 11:00 UTC
+// Expresión: 0 11 * * *
+cron.schedule('0 11 * * *', () => {
+  const trace = langfuse.trace({ name: 'alertas_clima_cron' })
+  enviarAlertasClima(sender)
+    .then(({ enviadas, errores }) => {
+      trace.event({ name: 'completado', output: { enviadas, errores } })
+      console.log(`[cron] Alertas clima: ${enviadas} enviadas, ${errores} errores`)
+    })
+    .catch((err: unknown) => {
+      trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+      console.error('[cron] Error en alertas de clima:', err)
+    })
+}, { timezone: 'UTC' })
+
+// Cron: alerta de precio de banano — lunes 6am Ecuador = 11:00 UTC (mismo slot que reportes)
+cron.schedule('30 11 * * 1', () => {
+  const trace = langfuse.trace({ name: 'alertas_precio_cron' })
+  enviarAlertasPrecio(sender)
+    .then(({ enviadas, errores }) => {
+      trace.event({ name: 'completado', output: { enviadas, errores } })
+      console.log(`[cron] Alertas precio: ${enviadas} enviadas, ${errores} errores`)
+    })
+    .catch((err: unknown) => {
+      trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+      console.error('[cron] Error en alertas de precio:', err)
     })
 }, { timezone: 'UTC' })
 

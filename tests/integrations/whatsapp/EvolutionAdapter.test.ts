@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { EvolutionAdapter } from '../../../src/integrations/whatsapp/EvolutionAdapter.js'
 import evoTexto from '../../fixtures/evolution-texto.json'
 import evoAudio from '../../fixtures/evolution-audio.json'
+import evoUbicacion from '../../fixtures/evolution-ubicacion.json'
 
 const SECRET = 'evo-secret'
 
@@ -56,6 +57,14 @@ describe('EvolutionAdapter', () => {
       expect(msg).not.toBeNull()
       expect(msg!.tipo).toBe('audio')
       expect(msg!.audioUrl).toBe('https://cdn.evolution-api.com/audio/abc123.opus')
+    })
+
+    it('parsea mensaje de ubicacion con lat/lng', () => {
+      const msg = adapter.parsearMensaje(evoUbicacion)
+      expect(msg).not.toBeNull()
+      expect(msg!.tipo).toBe('ubicacion')
+      expect(msg!.latitud).toBe(-1.2345)
+      expect(msg!.longitud).toBe(-79.5678)
     })
 
     it('retorna null para payload desconocido', () => {

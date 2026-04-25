@@ -1,0 +1,20 @@
+{
+  "event": "messages.upsert",
+  "instance": "wasagro-h0",
+  "data": {
+    "key": {
+      "remoteJid": "593987654321@s.whatsapp.net",
+      "fromMe": false,
+      "id": "wamid.evo_ubicacion_001"
+    },
+    "message": {
+      "locationMessage": {
+        "degreesLatitude": -1.2345,
+        "degreesLongitude": -79.5678,
+        "name": "Mi finca"
+      }
+    },
+    "messageTimestamp": 1714000000,
+    "pushName": "Juan Campo"
+  }
+}

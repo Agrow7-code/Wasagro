@@ -47,6 +47,15 @@ describe('NormalizedMessageSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('valida mensaje de ubicacion con latitud y longitud', () => {
+    const result = NormalizedMessageSchema.safeParse({ ...base, tipo: 'ubicacion', latitud: -1.2345, longitud: -79.5678 })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.latitud).toBe(-1.2345)
+      expect(result.data.longitud).toBe(-79.5678)
+    }
+  })
+
   it('tipo debe ser uno de los valores permitidos', () => {
     const result = NormalizedMessageSchema.safeParse({ ...base, tipo: 'video' })
     expect(result.success).toBe(false)

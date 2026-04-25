@@ -25,6 +25,11 @@ const EvolutionPayloadSchema = z.object({
         mimetype: z.string(),
         caption: z.string().optional(),
       }).optional(),
+      locationMessage: z.object({
+        degreesLatitude: z.number(),
+        degreesLongitude: z.number(),
+        name: z.string().optional(),
+      }).optional(),
     }),
     messageTimestamp: z.number(),
     pushName: z.string().optional(),
@@ -80,6 +85,14 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
     }
     if (data.message.imageMessage) {
       return { ...base, tipo: 'imagen', imagenUrl: data.message.imageMessage.url } as NormalizedMessage
+    }
+    if (data.message.locationMessage) {
+      return {
+        ...base,
+        tipo: 'ubicacion',
+        latitud: data.message.locationMessage.degreesLatitude,
+        longitud: data.message.locationMessage.degreesLongitude,
+      } as NormalizedMessage
     }
     return { ...base, tipo: 'otro' } as NormalizedMessage
   }

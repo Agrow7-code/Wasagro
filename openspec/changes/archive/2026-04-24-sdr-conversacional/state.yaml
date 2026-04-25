@@ -11,8 +11,8 @@ phases:
   design: completed
   tasks: completed
   apply: completed
-  verify: pending
-  archive: pending
+  verify: completed
+  archive: completed
 
 artifacts:
   - exploration.md

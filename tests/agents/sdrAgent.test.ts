@@ -305,7 +305,7 @@ describe('handleSDRSession', () => {
   })
 
   describe('action=propose_pilot', () => {
-    it('notifica al founder y envía holding message al prospecto', async () => {
+    it('envía demo invitation al prospecto y notifica al founder informativo', async () => {
       process.env['FOUNDER_PHONE'] = '593000000001'
       vi.mocked(queries.getSDRProspecto).mockResolvedValue({ ...prospectoBase, status: 'en_discovery', score_total: 50 })
       mockLLM.atenderSDR.mockResolvedValue({
@@ -319,11 +319,13 @@ describe('handleSDRSession', () => {
 
       await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
 
-      expect(mockSender.enviarTexto).toHaveBeenCalledWith('593000000001', expect.stringContaining('SÍ'))
-      expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('propuesta'))
+      // Prospect receives the demo message + booking follow-up (2 calls)
+      expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', 'Te propongo un piloto de Wasagro para tu finca.')
+      // Founder receives informational notification (no SÍ/NO gate)
+      expect(mockSender.enviarTexto).toHaveBeenCalledWith('593000000001', expect.stringContaining('Demo agendado automáticamente'))
       expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
         prospectoBase.id,
-        expect.objectContaining({ status: 'qualified' }),
+        expect.objectContaining({ status: 'piloto_propuesto' }),
         undefined,
       )
     })
@@ -356,7 +358,8 @@ describe('handleSDRSession', () => {
 
       await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
 
-      expect(mockSender.enviarTexto).toHaveBeenCalledTimes(1)
+      // Prospect receives 2 messages (demo + follow-up), founder receives nothing
+      expect(mockSender.enviarTexto).toHaveBeenCalledTimes(2)
       expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.any(String))
     })
   })
@@ -393,18 +396,20 @@ describe('handleSDRSession', () => {
     })
   })
 
-  describe('prospecto en espera de aprobación del founder', () => {
-    it('envía holding message sin llamar al LLM', async () => {
+  describe('prospecto en estado qualified (registro legacy)', () => {
+    it('continúa la conversación normalmente con el LLM', async () => {
+      // With Option A there is no qualified holding state — prospect goes directly
+      // to piloto_propuesto. A qualified record in DB is treated as en_discovery.
       vi.mocked(queries.getSDRProspecto).mockResolvedValue({
         ...prospectoBase,
         status: 'qualified',
         founder_notified_at: '2026-04-23T10:00:00Z',
       })
+      mockLLM.atenderSDR.mockResolvedValue(respuestaDiscovery)
 
       await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
 
-      expect(mockLLM.atenderSDR).not.toHaveBeenCalled()
-      expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.any(String))
+      expect(mockLLM.atenderSDR).toHaveBeenCalled()
     })
   })
 
@@ -669,7 +674,7 @@ describe('handoff trigger (REQ-hand-001)', () => {
 
     expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
       prospectoBase.id,
-      expect.objectContaining({ status: 'qualified' }),
+      expect.objectContaining({ status: 'piloto_propuesto' }),
       undefined,
     )
   })
@@ -684,7 +689,7 @@ describe('handoff trigger (REQ-hand-001)', () => {
 
     expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
       prospectoBase.id,
-      expect.objectContaining({ status: 'qualified' }),
+      expect.objectContaining({ status: 'piloto_propuesto' }),
       undefined,
     )
   })
@@ -762,9 +767,10 @@ describe('founder notification format (REQ-hand-003)', () => {
     expect(founderMsg).toContain('exportadora')
     expect(founderMsg).toContain('María García')
     expect(founderMsg).toContain('Exportadora ABC')
-    expect(founderMsg).toContain('BORRADOR DE PROPUESTA')
-    expect(founderMsg).toContain('Responde *SÍ*')
-    expect(founderMsg).toContain('Responde *NO*')
+    expect(founderMsg).toContain('MENSAJE ENVIADO AL PROSPECTO')
+    expect(founderMsg).toContain('Demo agendado automáticamente')
+    expect(founderMsg).not.toContain('Responde *SÍ*')
+    expect(founderMsg).not.toContain('Responde *NO*')
   })
 })
 
