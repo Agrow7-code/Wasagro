@@ -25,7 +25,7 @@ import {
   approveAgricultor,
 } from './supabaseQueries.js'
 import { transcribirAudio } from './sttService.js'
-import { handleSDRSession, handleFounderApproval } from '../agents/sdrAgent.js'
+import { handleSDRSession, handleFounderApproval, handleMeetingConfirmation } from '../agents/sdrAgent.js'
 
 const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -79,6 +79,9 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
 
     // Número desconocido → SDR conversacional
     if (!usuario) {
+      // Prospect in piloto_propuesto state — meeting confirmation takes priority
+      const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!)
+      if (meetingHandled) return
       await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!)
       return
     }

@@ -337,6 +337,9 @@ export async function handleFounderApproval(
         : 'Perfecto — ¿cuándo tienes 20 minutos disponibles?'
       await sender.enviarTexto(prospecto['phone'] as string, followUp)
     }
+
+    // REQ-narr-005: sdr_pilot_proposed fires when draft is sent to prospect
+    trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'], narrativa: prospecto['narrativa_asignada'] } })
   }
 
   await updateSDRProspecto(prospecto['id'] as string, { status: nuevoStatus }, client)
@@ -361,6 +364,72 @@ export async function handleFounderApproval(
   trace.event({ name: 'sdr_founder_approval', input: { prospecto_id: prospecto['id'], action: actionTaken } })
   await actualizarMensaje(mensajeId, { status: 'processed' })
 
+  return true
+}
+
+const MEETING_CONFIRMATION_PATTERNS: RegExp[] = [
+  /ya\s+agend[eé]/i,
+  /confirm[oó]\s*(la\s+)?reuni[oó]n/i,
+  /(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+a\s+las\s+\d/i,
+  /ma[nñ]ana\s+a\s+las\s+\d/i,
+  /(el\s+)?\d{1,2}\s+de\s+\w+\s+a\s+las/i,
+]
+
+export function detectarConfirmacionReunion(texto: string): boolean {
+  return MEETING_CONFIRMATION_PATTERNS.some(p => p.test(texto))
+}
+
+// REQ-hand-006: handles prospect messages when status = 'piloto_propuesto'
+export async function handleMeetingConfirmation(
+  msg: NormalizedMessage,
+  mensajeId: string,
+  traceId: string,
+  sender: IWhatsAppSender,
+  client?: SupabaseClient,
+): Promise<boolean> {
+  const prospecto = await getSDRProspecto(msg.from, client) as Record<string, unknown> | null
+  if (!prospecto || prospecto['status'] !== 'piloto_propuesto') return false
+
+  const trace = langfuse.trace({ id: traceId })
+  const texto = (msg.texto ?? '').trim()
+  const isMeetingConfirmed = detectarConfirmacionReunion(texto)
+
+  if (isMeetingConfirmed) {
+    const reunionAgendadaAt = new Date().toISOString()
+    await updateSDRProspecto(prospecto['id'] as string, {
+      status: 'reunion_agendada',
+      reunion_agendada_at: reunionAgendadaAt,
+    }, client)
+
+    trace.event({
+      name: 'sdr_meeting_scheduled',
+      input: {
+        prospecto_id: prospecto['id'],
+        narrativa: prospecto['narrativa_asignada'],
+        phone: prospecto['phone'],
+      },
+    })
+
+    await sender.enviarTexto(msg.from, '¡Perfecto! Quedamos confirmados. Te escribimos antes para recordarte. ✅')
+  } else {
+    const bookingUrl = process.env['DEMO_BOOKING_URL']
+    const followUp = bookingUrl
+      ? `Puedes elegir el horario aquí: ${bookingUrl} ⏰`
+      : '¿Cuándo tienes 20 minutos disponibles? Dime el día y la hora que mejor te quede.'
+    await sender.enviarTexto(msg.from, followUp)
+  }
+
+  await saveSDRInteraccion({
+    prospecto_id: prospecto['id'],
+    phone: msg.from,
+    turno: (prospecto['turns_total'] as number) + 1,
+    tipo: 'meeting_confirmation',
+    contenido: texto,
+    action_taken: isMeetingConfirmed ? 'meeting_confirmed' : 'meeting_pending',
+    langfuse_trace_id: traceId,
+  }, client)
+
+  await actualizarMensaje(mensajeId, { status: 'processed' })
   return true
 }
 

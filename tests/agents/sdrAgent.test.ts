@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { handleSDRSession, handleFounderApproval, detectarObjecion } from '../../src/agents/sdrAgent.js'
+import { handleSDRSession, handleFounderApproval, detectarObjecion, handleMeetingConfirmation, detectarConfirmacionReunion } from '../../src/agents/sdrAgent.js'
 import type { NormalizedMessage } from '../../src/integrations/whatsapp/NormalizedMessage.js'
 import { langfuse } from '../../src/integrations/langfuse.js'
 
@@ -95,6 +95,34 @@ describe('detectarObjecion', () => {
 
   it('retorna null si no hay objeción', () => {
     expect(detectarObjecion('tengo 50 hectáreas de cacao')).toBeNull()
+  })
+
+  it('detecta sin_interes', () => {
+    expect(detectarObjecion('no estoy interesado en esto')).toBe('sin_interes')
+  })
+
+  it('detecta posponer_decision', () => {
+    expect(detectarObjecion('necesito pensar un poco más')).toBe('posponer_decision')
+  })
+
+  it('detecta desconoce_eudr', () => {
+    expect(detectarObjecion('no conozco el EUDR, qué es eso')).toBe('desconoce_eudr')
+  })
+
+  it('detecta no_exporta', () => {
+    expect(detectarObjecion('nosotros no exportamos nada')).toBe('no_exporta')
+  })
+
+  it('detecta operacion_pequena', () => {
+    expect(detectarObjecion('solo son pocas hectáreas las que tengo')).toBe('operacion_pequena')
+  })
+
+  it('detecta prefiere_whatsapp_normal', () => {
+    expect(detectarObjecion('prefiero WhatsApp normal, no quiero otra cosa')).toBe('prefiere_whatsapp_normal')
+  })
+
+  it('detecta desconfianza', () => {
+    expect(detectarObjecion('soy desconfiado de estas apps')).toBe('desconfianza')
   })
 })
 
@@ -565,6 +593,17 @@ describe('handleFounderApproval', () => {
       expect(tieneDisponibilidad).toBe(true)
     })
   })
+
+  it('founder SÍ → emite sdr_pilot_proposed (REQ-narr-005)', async () => {
+    vi.mocked(queries.getSDRProspectosPendingApproval).mockResolvedValue([prospectoCalificado])
+
+    await handleFounderApproval(msgFounder, 'msg-1', 'trace-1', mockSender)
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'sdr_pilot_proposed' }),
+    )
+  })
 })
 
 // ─── Phase 2: Score evidence validation (REQ-qual-009) ─────────────────────────
@@ -819,5 +858,169 @@ describe('LangFuse A/B narrative events (REQ-narr-005)', () => {
     expect(traceInstance.event).toHaveBeenCalledWith(expect.objectContaining({
       name: 'sdr_unqualified',
     }))
+  })
+})
+
+// ─── Meeting confirmation (REQ-hand-006) ────────────────────────────────────
+
+describe('detectarConfirmacionReunion', () => {
+  it('retorna true cuando ya agendó', () => {
+    expect(detectarConfirmacionReunion('ya agendé la reunión')).toBe(true)
+  })
+
+  it('retorna true con día + hora', () => {
+    expect(detectarConfirmacionReunion('el martes a las 3 me viene perfecto')).toBe(true)
+  })
+
+  it('retorna true con confirmación explícita', () => {
+    expect(detectarConfirmacionReunion('confirmó la reunión para el miércoles')).toBe(true)
+  })
+
+  it('retorna true con mañana + hora', () => {
+    expect(detectarConfirmacionReunion('mañana a las 10 puedo')).toBe(true)
+  })
+
+  it('retorna true con fecha numérica', () => {
+    expect(detectarConfirmacionReunion('el 15 de mayo a las 9 quedo')).toBe(true)
+  })
+
+  it('retorna false para texto sin confirmación', () => {
+    expect(detectarConfirmacionReunion('tengo una finca en Ecuador')).toBe(false)
+  })
+
+  it('retorna false para "sí" genérico sin hora', () => {
+    expect(detectarConfirmacionReunion('sí, me parece bien')).toBe(false)
+  })
+})
+
+describe('handleMeetingConfirmation', () => {
+  const prospectoEnPiloto = {
+    ...prospectoBase,
+    status: 'piloto_propuesto',
+    turns_total: 6,
+  }
+
+  const msgProspecto: NormalizedMessage = {
+    ...mockMsg,
+    texto: 'hola, ¿cómo van con la propuesta?',
+  }
+
+  it('retorna false si el prospecto no existe', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(null)
+
+    const result = await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(result).toBe(false)
+    expect(mockSender.enviarTexto).not.toHaveBeenCalled()
+  })
+
+  it('retorna false si el status no es piloto_propuesto', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({ ...prospectoBase, status: 'en_discovery' })
+
+    const result = await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(result).toBe(false)
+    expect(mockSender.enviarTexto).not.toHaveBeenCalled()
+  })
+
+  it('retorna true para prospecto en piloto_propuesto aunque no confirme reunión', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+
+    const result = await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(result).toBe(true)
+  })
+
+  it('sin confirmación → envía booking URL cuando DEMO_BOOKING_URL está configurado', async () => {
+    process.env['DEMO_BOOKING_URL'] = 'https://calendly.com/wasagro/demo'
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+
+    await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(mockSender.enviarTexto).toHaveBeenCalledWith(
+      prospectoBase.phone,
+      expect.stringContaining('https://calendly.com/wasagro/demo'),
+    )
+  })
+
+  it('sin confirmación, sin DEMO_BOOKING_URL → envía pregunta de horario', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+
+    await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(mockSender.enviarTexto).toHaveBeenCalledWith(
+      prospectoBase.phone,
+      expect.stringContaining('20 minutos'),
+    )
+  })
+
+  it('prospecto confirma reunión → status reunion_agendada + reunion_agendada_at', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+    const msgConfirma = { ...mockMsg, texto: 'el jueves a las 10 me viene perfecto' }
+
+    await handleMeetingConfirmation(msgConfirma, 'msg-1', 'trace-1', mockSender)
+
+    expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
+      prospectoBase.id,
+      expect.objectContaining({
+        status: 'reunion_agendada',
+        reunion_agendada_at: expect.any(String),
+      }),
+      undefined,
+    )
+  })
+
+  it('prospecto confirma → emite sdr_meeting_scheduled (REQ-narr-005)', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+    const msgConfirma = { ...mockMsg, texto: 'ya agendé para el viernes a las 3' }
+
+    await handleMeetingConfirmation(msgConfirma, 'msg-1', 'trace-1', mockSender)
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'sdr_meeting_scheduled' }),
+    )
+  })
+
+  it('sin confirmación → no actualiza status', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+
+    await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(queries.updateSDRProspecto).not.toHaveBeenCalled()
+  })
+
+  it('guarda interaccion con tipo meeting_confirmation', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+
+    await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(queries.saveSDRInteraccion).toHaveBeenCalledWith(
+      expect.objectContaining({ tipo: 'meeting_confirmation' }),
+      undefined,
+    )
+  })
+
+  it('confirmación → action_taken=meeting_confirmed', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+    const msgConfirma = { ...mockMsg, texto: 'el lunes a las 9 puedo' }
+
+    await handleMeetingConfirmation(msgConfirma, 'msg-1', 'trace-1', mockSender)
+
+    expect(queries.saveSDRInteraccion).toHaveBeenCalledWith(
+      expect.objectContaining({ action_taken: 'meeting_confirmed' }),
+      undefined,
+    )
+  })
+
+  it('sin confirmación → action_taken=meeting_pending', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoEnPiloto)
+
+    await handleMeetingConfirmation(msgProspecto, 'msg-1', 'trace-1', mockSender)
+
+    expect(queries.saveSDRInteraccion).toHaveBeenCalledWith(
+      expect.objectContaining({ action_taken: 'meeting_pending' }),
+      undefined,
+    )
   })
 })

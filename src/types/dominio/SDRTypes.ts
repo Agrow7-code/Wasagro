@@ -104,6 +104,7 @@ export interface SDRProspectoRow {
   turns_total: number
   deal_brief: DealBrief | null
   founder_notified_at: string | null
+  reunion_agendada_at: string | null
 }
 
 export interface SDRProspectoInsert {
@@ -141,7 +142,7 @@ export interface SDRInteraccionInsert {
   prospecto_id: string
   phone: string
   turno: number
-  tipo: 'inbound' | 'outbound' | 'draft_approval' | 'founder_override'
+  tipo: 'inbound' | 'outbound' | 'draft_approval' | 'founder_override' | 'meeting_confirmation'
   contenido: string
   score_before?: number
   score_after?: number

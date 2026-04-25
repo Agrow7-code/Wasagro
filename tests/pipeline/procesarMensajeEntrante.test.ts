@@ -47,6 +47,7 @@ vi.mock('../../src/integrations/calendar.js', () => ({
 vi.mock('../../src/agents/sdrAgent.js', () => ({
   handleSDRSession: vi.fn().mockResolvedValue(undefined),
   handleFounderApproval: vi.fn().mockResolvedValue(false),
+  handleMeetingConfirmation: vi.fn().mockResolvedValue(false),
 }))
 
 import * as queries from '../../src/pipeline/supabaseQueries.js'
