@@ -23,8 +23,12 @@ authRouter.post('/request-otp', async (c) => {
     // 2. Generar y guardar OTP
     const code = await requestOTP(phone)
 
-    // 3. Enviar por WhatsApp
-    await sendOTPViaWhatsApp(phone, code)
+    // 3. Enviar por WhatsApp en background — no bloqueamos la respuesta al usuario.
+    // El OTP ya está guardado en DB; si WhatsApp llega tarde (cold start de Evolution)
+    // el usuario simplemente espera en la pantalla de código.
+    sendOTPViaWhatsApp(phone, code).catch(err =>
+      console.error('[auth] WhatsApp send failed:', err?.message ?? err)
+    )
 
     trace.event({ name: 'otp_sent' })
     return c.json({ status: 'sent' })

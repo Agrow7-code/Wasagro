@@ -11,6 +11,7 @@ import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
 import { langfuse } from './integrations/langfuse.js'
 import { initPgBoss } from './workers/pgBoss.js'
 
+import { cors } from 'hono/cors'
 import { authRouter } from './auth/router.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
@@ -114,6 +115,16 @@ if (!process.env['VERCEL']) {
 }
 
 const app = new Hono()
+
+app.use('/auth/*', cors({
+  origin: [
+    'https://wasagro.vercel.app',
+    'http://localhost:5173',
+    /https:\/\/wasagro-.*\.vercel\.app$/,
+  ],
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+}))
 
 app.get('/health', (c) => c.json({
   status: 'ok',
