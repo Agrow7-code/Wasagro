@@ -1,7 +1,12 @@
 import { Langfuse } from 'langfuse'
 
-const noop = { event: () => {} }
-const noopTrace = () => noop
+const noopEndable = { end: () => {} }
+const noopTrace = () => ({
+  event: () => noopEndable,
+  generation: () => noopEndable,
+  span: () => noopEndable,
+  score: () => {},
+})
 
 const configured = !!(process.env['LANGFUSE_SECRET_KEY'] && process.env['LANGFUSE_PUBLIC_KEY'])
 
