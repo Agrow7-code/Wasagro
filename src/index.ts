@@ -3,8 +3,11 @@ import { Hono } from 'hono'
 import cron from 'node-cron'
 import { webhookRouter, inicializarRouter } from './webhook/router.js'
 import { crearAdapterWhatsApp, crearSenderWhatsApp } from './integrations/whatsapp/index.js'
-import { crearLLM } from './integrations/llm/index.js'
+import { crearLLM, crearAdapterLLM } from './integrations/llm/index.js'
+import { crearEmbeddingService } from './integrations/llm/EmbeddingService.js'
+import { RAGRetriever } from './agents/rag/RAGRetriever.js'
 import { inicializarPipeline } from './pipeline/procesarMensajeEntrante.js'
+import { supabase } from './integrations/supabase.js'
 import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { enviarAlertasClima } from './pipeline/alertaClima.js'
 import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
@@ -61,10 +64,18 @@ validarEnvVars()
 
 const adapter = crearAdapterWhatsApp()
 const sender = crearSenderWhatsApp()
-const llm = crearLLM()
+const llmAdapter = crearAdapterLLM()
+const llm = crearLLM(llmAdapter)
+
+const embeddingService = crearEmbeddingService() ?? undefined
+const ragRetriever = embeddingService ? new RAGRetriever(embeddingService, supabase) : undefined
 
 inicializarRouter(adapter)
-inicializarPipeline(sender, llm)
+inicializarPipeline(sender, llm, {
+  adapter: llmAdapter,
+  ...(embeddingService ? { embeddingService } : {}),
+  ...(ragRetriever ? { ragRetriever } : {}),
+})
 
 // ── Startup background services (only for standalone server, not Vercel) ─────
 if (!process.env['VERCEL']) {

@@ -2,6 +2,10 @@ import { langfuse } from '../integrations/langfuse.js'
 import type { NormalizedMessage } from '../integrations/whatsapp/NormalizedMessage.js'
 import type { IWhatsAppSender } from '../integrations/whatsapp/IWhatsAppSender.js'
 import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
+import type { ILLMAdapter } from '../integrations/llm/ILLMAdapter.js'
+import type { IEmbeddingService } from '../integrations/llm/EmbeddingService.js'
+import { IntentDetector } from '../agents/orchestrator/IntentDetector.js'
+import { RAGRetriever } from '../agents/rag/RAGRetriever.js'
 import {
   getMensajeByWamid,
   registrarMensaje,
@@ -16,10 +20,22 @@ export const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'd
 
 export let _sender: IWhatsAppSender | null = null
 export let _llm: IWasagroLLM | null = null
+export let _intentDetector: IntentDetector | null = null
+export let _ragRetriever: RAGRetriever | null = null
+export let _embeddingService: IEmbeddingService | null = null
 
-export function inicializarPipeline(sender: IWhatsAppSender, llm: IWasagroLLM): void {
+export interface PipelineOptions {
+  adapter?: ILLMAdapter
+  embeddingService?: IEmbeddingService
+  ragRetriever?: RAGRetriever
+}
+
+export function inicializarPipeline(sender: IWhatsAppSender, llm: IWasagroLLM, options: PipelineOptions = {}): void {
   _sender = sender
   _llm = llm
+  _intentDetector = options.adapter ? new IntentDetector(options.adapter) : null
+  _embeddingService = options.embeddingService ?? null
+  _ragRetriever = options.ragRetriever ?? null
 }
 
 export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: string): Promise<void> {

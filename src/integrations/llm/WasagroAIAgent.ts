@@ -61,8 +61,10 @@ export class WasagroAIAgent implements IWasagroLLM {
   async extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido> {
     const trace = this.#lf.trace({ id: traceId })
 
-    // Paso 1 — clasificar
-    const clasificacion = await this.#clasificar(input, traceId)
+    // Paso 1 — clasificar (o usar tipo forzado si el orquestador ya lo resolvió)
+    const clasificacion = input.tipo_forzado
+      ? { tipo_evento: input.tipo_forzado as ResultadoClasificacion['tipo_evento'], confidence: 1, requiere_imagen_para_confirmar: false, motivo_ambiguo: null, mensaje_clarificacion: null }
+      : await this.#clasificar(input, traceId)
 
     // Paso 2 — manejar no-eventos
     if (clasificacion.tipo_evento === 'saludo') {
@@ -387,6 +389,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       PAIS: input.pais ?? 'EC',
       NOMBRE_USUARIO: input.nombre_usuario ?? '',
       MENSAJE: input.transcripcion,
+      CONTEXTO_HISTORICO: input.contexto_rag ?? '',
     })
 
     const trace = this.#lf.trace({ id: traceId })

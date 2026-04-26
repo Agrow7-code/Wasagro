@@ -477,3 +477,15 @@ export async function getSDRProspectosPendingApproval(client: SupabaseClient = d
   if (error) throw error
   return (data ?? []) as Array<Record<string, unknown>>
 }
+
+export async function guardarEmbeddingEnEvento(
+  eventoId: string,
+  embeddingVector: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('eventos_campo')
+    .update({ embedding: embeddingVector })
+    .eq('id', eventoId)
+  if (error) throw error
+}

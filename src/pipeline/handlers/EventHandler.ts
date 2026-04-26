@@ -1,6 +1,8 @@
 import { langfuse } from '../../integrations/langfuse.js'
 import type { NormalizedMessage } from '../../integrations/whatsapp/NormalizedMessage.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
+import type { IEmbeddingService } from '../../integrations/llm/EmbeddingService.js'
+import { guardarEmbeddingEnEvento } from '../supabaseQueries.js'
 import {
   getUserByPhone,
   getFincaById,
@@ -15,7 +17,7 @@ import {
 } from '../supabaseQueries.js'
 import { transcribirAudio } from '../sttService.js'
 import { handleDocumento, procesarFilasExcelConfirmadas } from '../procesarExcel.js'
-import { _sender, _llm, ROLES_ADMIN } from '../procesarMensajeEntrante.js'
+import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES_ADMIN } from '../procesarMensajeEntrante.js'
 
 // ─── Flujo de reporte de campo ─────────────────────────────────────────────
 
@@ -221,6 +223,19 @@ export async function handleEvento(
 
       await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
       await updateSession(session.session_id, { clarification_count: 0, status: 'completed' })
+
+      // Guardar embedding async — no bloqueamos la respuesta al usuario
+      if (_embeddingService && eventoId) {
+        guardarEmbeddingEvento(eventoId, descRaw, _embeddingService).catch((err: unknown) => {
+          console.error('[embedding] Error guardando embedding:', err)
+          langfuse.trace({ id: traceId }).event({
+            name: 'embedding_error',
+            level: 'ERROR',
+            output: { error: String(err), evento_id: eventoId },
+          })
+        })
+      }
+
       const loteName = ext.lote_id
         ? (lotes.find(l => l.lote_id === ext.lote_id)?.nombre_coloquial ?? undefined)
         : undefined
@@ -228,11 +243,19 @@ export async function handleEvento(
       return
     }
 
-    // El usuario quiere corregir → mergear corrección con lo ya extraído y re-extraer
+    // El usuario quiere corregir → detectar intención y re-extraer con tipo_forzado si aplica
     const stored = session.contexto_parcial as { extracted_data?: EventoCampoExtraido; transcripcion_original?: string }
     const transcripcionMerged = stored.transcripcion_original
       ? `Corrección del agricultor: ${transcripcion}. Contexto previo (puede estar incorrecto): ${stored.transcripcion_original}`
       : transcripcion
+
+    const tipoPrevio = (stored.extracted_data?.tipo_evento ?? 'nota_libre') as Parameters<NonNullable<typeof _intentDetector>['detectar']>[0]['tipo_previo']
+    const intencion = _intentDetector
+      ? await _intentDetector.detectar(
+          { mensaje_usuario: transcripcion, tipo_previo: tipoPrevio, transcripcion_previa: stored.transcripcion_original ?? '' },
+          traceId,
+        )
+      : { tipo: 'nuevo_evento' as const, confianza: 0 }
 
     const entradaCorreccion: EntradaEvento = {
       transcripcion: transcripcionMerged,
@@ -243,6 +266,9 @@ export async function handleEvento(
       cultivo_principal: finca?.cultivo_principal ?? undefined,
       pais: finca?.pais,
       lista_lotes,
+      ...(intencion.tipo === 'correccion_tipo' && intencion.tipo_forzado
+        ? { tipo_forzado: intencion.tipo_forzado }
+        : {}),
     }
 
     const extractedCorreccion = await _llm!.extraerEvento(entradaCorreccion, traceId)
@@ -289,6 +315,10 @@ export async function handleEvento(
     ? `${String(session.contexto_parcial['original_transcripcion'])} ${transcripcion}`
     : transcripcion
 
+  const contexto_rag = usuario.finca_id && _ragRetriever
+    ? await _ragRetriever.recuperarContexto(usuario.finca_id, transcripcionCombinada)
+    : undefined
+
   const entrada: EntradaEvento = {
     transcripcion: transcripcionCombinada,
     finca_id: usuario.finca_id ?? '',
@@ -298,6 +328,7 @@ export async function handleEvento(
     cultivo_principal: finca?.cultivo_principal ?? undefined,
     pais: finca?.pais,
     lista_lotes,
+    ...(contexto_rag ? { contexto_rag } : {}),
   }
 
   const extracted = await _llm!.extraerEvento(entrada, traceId)
@@ -416,6 +447,15 @@ function buildResumenParaConfirmar(
   }
 
   return `Esto es lo que entendí:\n\n${tipo}\n${loteLinea}${fechaLinea}${lineas.join('\n')}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
+}
+
+async function guardarEmbeddingEvento(
+  eventoId: string,
+  descripcion_raw: string,
+  svc: IEmbeddingService,
+): Promise<void> {
+  const embedding = await svc.generarEmbedding(descripcion_raw)
+  await guardarEmbeddingEnEvento(eventoId, `[${embedding.join(',')}]`)
 }
 
 function buildConfirmacion(extracted: EventoCampoExtraido, status: string, loteName?: string): string {

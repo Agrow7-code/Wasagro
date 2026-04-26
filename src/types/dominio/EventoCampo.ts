@@ -17,6 +17,11 @@ export const EventoCampoExtraidoSchema = z.object({
 
 export type EventoCampoExtraido = z.infer<typeof EventoCampoExtraidoSchema>
 
+const TipoEventoForzadoEnum = z.enum([
+  'labor', 'insumo', 'plaga', 'clima', 'cosecha', 'gasto',
+  'calidad', 'venta', 'inventario', 'infraestructura', 'observacion', 'nota_libre',
+])
+
 export const EntradaEventoSchema = z.object({
   transcripcion: z.string(),
   finca_id: z.string(),
@@ -26,6 +31,8 @@ export const EntradaEventoSchema = z.object({
   cultivo_principal: z.string().optional(),
   pais: z.string().optional(),
   lista_lotes: z.string().optional(),
+  tipo_forzado: TipoEventoForzadoEnum.optional(),
+  contexto_rag: z.string().optional(),
 })
 
 export type EntradaEvento = z.infer<typeof EntradaEventoSchema>
