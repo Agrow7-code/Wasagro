@@ -7,4 +7,10 @@ export default defineConfig({
     tailwindcss(),
     react(),
   ],
+  server: {
+    proxy: {
+      '/auth': 'http://localhost:3000',
+      '/webhook': 'http://localhost:3000',
+    },
+  },
 })
