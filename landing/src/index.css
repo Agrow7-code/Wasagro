@@ -73,6 +73,9 @@ body {
 .shadow-hard-verde {
   box-shadow: 4px 4px 0 0 #1B3D24;
 }
+.shadow-hard-alert {
+  box-shadow: 4px 4px 0 0 #D45828;
+}
 
 /* ── Selection ── */
 ::selection {

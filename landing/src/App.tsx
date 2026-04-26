@@ -1,3 +1,4 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'motion/react'
 import {
@@ -5,6 +6,11 @@ import {
   BarChart3, Leaf, Droplets, Cloud, DollarSign, Grid3x3,
   Zap, Menu, X, Phone, Video, MoreVertical,
 } from 'lucide-react'
+import { DashboardLayout } from './dashboard/layout/DashboardLayout'
+import { AdminFinca } from './dashboard/views/AdminFinca'
+import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
+import { Exportadora } from './dashboard/views/Exportadora'
+import { AgricultorIndividual } from './dashboard/views/AgricultorIndividual'
 
 const WA_LINK = 'https://wa.me/593999999999?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
 
@@ -1040,9 +1046,9 @@ function Footer() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// APP
+// LANDING PAGE
 // ─────────────────────────────────────────────────────────────
-export default function App() {
+function LandingPage() {
   return (
     <>
       <Nav />
@@ -1059,5 +1065,24 @@ export default function App() {
       </main>
       <Footer />
     </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// APP
+// ─────────────────────────────────────────────────────────────
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/dashboard" element={<DashboardLayout />}>
+          <Route index element={<AdminFinca />} />
+          <Route path="gerente" element={<GerenteAgricola />} />
+          <Route path="exportadora" element={<Exportadora />} />
+          <Route path="agricultor" element={<AgricultorIndividual />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
