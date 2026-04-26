@@ -9,6 +9,8 @@ export default defineConfig({
   ],
   server: {
     proxy: {
+      '/api/auth': 'http://localhost:3000/auth',
+      '/api/health': 'http://localhost:3000/health',
       '/auth': 'http://localhost:3000',
       '/webhook': 'http://localhost:3000',
     },

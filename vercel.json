@@ -1,19 +1,16 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.ts",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "landing/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60
     }
-  ],
+  },
+  "buildCommand": "cd landing && npm run build",
+  "outputDirectory": "landing/dist",
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index"
+    },
     {
       "source": "/auth/(.*)",
       "destination": "/api/auth/$1"
@@ -28,11 +25,7 @@
     },
     {
       "source": "/(login|dashboard|gerente|exportadora|agricultor)(.*)",
-      "destination": "/landing/index.html"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/landing/$1"
+      "destination": "/index.html"
     }
   ]
 }

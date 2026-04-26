@@ -8,7 +8,7 @@ import { StepOTP } from './StepOTP'
 import { DotGrid, Panel, DesignConfig } from './DesignComponents'
 
 // URL del backend (vacío para usar rutas relativas en Vercel)
-const API_URL = (import.meta as any).env?.VITE_API_URL || ''
+const API_URL = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.MODE === 'production' ? '/api' : ''
 
 export default function LoginPage() {
   const [step, setStep] = useState<'telefono' | 'otp'>('telefono')
