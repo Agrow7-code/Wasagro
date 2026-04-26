@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GeminiLLM } from '../../../src/integrations/llm/GeminiLLM.js'
+import { GeminiAdapter } from '../../../src/integrations/llm/GeminiAdapter.js'
+import { WasagroAIAgent } from '../../../src/integrations/llm/WasagroAIAgent.js'
 import { LLMError } from '../../../src/integrations/llm/LLMError.js'
 import type { EntradaEvento } from '../../../src/types/dominio/EventoCampo.js'
 
@@ -7,6 +8,12 @@ const entradaMock: EntradaEvento = {
   transcripcion: 'Apliqué 2 bombadas de mancozeb en lote 3',
   finca_id: 'F001',
   usuario_id: 'usr-123',
+}
+
+const respuestaClasificacion = {
+  tipo_evento: 'insumo',
+  confidence: 0.95,
+  requiere_imagen_para_confirmar: false
 }
 
 const respuestaEventoMock = {
@@ -25,13 +32,13 @@ const respuestaEventoMock = {
   pregunta_sugerida: null,
 }
 
-function crearSdkMock(responseText: string) {
+function crearSdkMock(responses: string[]) {
+  const generateContent = vi.fn()
+  responses.forEach(r => generateContent.mockResolvedValueOnce({ response: { text: () => r } }))
+  // Fallback a ultimo
+  generateContent.mockResolvedValue({ response: { text: () => responses[responses.length - 1] } })
   return {
-    getGenerativeModel: vi.fn().mockReturnValue({
-      generateContent: vi.fn().mockResolvedValue({
-        response: { text: () => responseText },
-      }),
-    }),
+    getGenerativeModel: vi.fn().mockReturnValue({ generateContent }),
   }
 }
 
@@ -44,9 +51,9 @@ function crearLangfuseMock() {
 describe('GeminiLLM', () => {
   describe('extraerEvento', () => {
     it('parsea respuesta JSON válida del SDK', async () => {
-      const sdk = crearSdkMock(JSON.stringify(respuestaEventoMock))
+      const sdk = crearSdkMock([JSON.stringify(respuestaClasificacion), JSON.stringify(respuestaEventoMock)])
       const lf = crearLangfuseMock()
-      const llm = new GeminiLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+      const llm = new WasagroAIAgent(new GeminiAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
       const resultado = await llm.extraerEvento(entradaMock, 'trace-001')
       expect(resultado.tipo_evento).toBe('insumo')
@@ -56,9 +63,9 @@ describe('GeminiLLM', () => {
     })
 
     it('llama a LangFuse con traceId (P4)', async () => {
-      const sdk = crearSdkMock(JSON.stringify(respuestaEventoMock))
+      const sdk = crearSdkMock([JSON.stringify(respuestaClasificacion), JSON.stringify(respuestaEventoMock)])
       const lf = crearLangfuseMock()
-      const llm = new GeminiLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+      const llm = new WasagroAIAgent(new GeminiAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
       await llm.extraerEvento(entradaMock, 'trace-001')
       expect(lf.trace).toHaveBeenCalledWith(expect.objectContaining({ id: 'trace-001' }))
@@ -71,19 +78,18 @@ describe('GeminiLLM', () => {
         }),
       }
       const lf = crearLangfuseMock()
-      const llm = new GeminiLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+      const llm = new WasagroAIAgent(new GeminiAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
       await expect(llm.extraerEvento(entradaMock, 'trace-001')).rejects.toThrow(LLMError)
       await expect(llm.extraerEvento(entradaMock, 'trace-001')).rejects.toMatchObject({ code: 'GEMINI_ERROR' })
     })
 
     it('lanza LLMError PARSE_ERROR si la respuesta no es JSON válido', async () => {
-      const sdk = crearSdkMock('esto no es json')
+      const sdk = crearSdkMock(['esto no es json'])
       const lf = crearLangfuseMock()
-      const llm = new GeminiLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+      const llm = new WasagroAIAgent(new GeminiAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
       await expect(llm.extraerEvento(entradaMock, 'trace-001')).rejects.toMatchObject({ code: 'PARSE_ERROR' })
     })
   })
-
 })

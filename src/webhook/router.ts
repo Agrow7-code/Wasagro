@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { langfuse } from '../integrations/langfuse.js'
-import { procesarMensajeEntrante } from '../pipeline/procesarMensajeEntrante.js'
+import { getBoss } from '../workers/pgBoss.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
 
 let adapter: IWhatsAppAdapter
@@ -40,12 +40,21 @@ webhookRouter.post('/whatsapp', async (c) => {
   const payload = await c.req.json() as unknown
   trace.event({ name: 'reception_ok', level: 'DEFAULT' })
 
-  // Parsear mensaje y despachar async (fire-and-forget) antes de retornar 200
+  // Parsear mensaje y encolar trabajo en pg-boss antes de retornar 200
   const msg = adapter.parsearMensaje(payload)
   if (msg) {
-    void procesarMensajeEntrante(msg, trace.id).catch((err: unknown) => {
-      trace.event({ name: 'pipeline_error', level: 'ERROR', output: { error: String(err) } })
-    })
+    try {
+      const boss = getBoss()
+      const jobId = await boss.send('procesar-mensaje', { msg, traceId: trace.id }, {
+        singletonKey: msg.wamid,
+        retryLimit: 3,
+        retryBackoff: true,
+      })
+      trace.event({ name: 'job_enqueued', output: { jobId, singletonKey: msg.wamid } })
+    } catch (err: unknown) {
+      trace.event({ name: 'enqueue_error', level: 'ERROR', output: { error: String(err) } })
+      return c.json({ error: 'Failed to enqueue message' }, 500)
+    }
   } else {
     trace.event({ name: 'message_ignored', level: 'DEFAULT', input: { reason: 'parsearMensaje returned null' } })
   }

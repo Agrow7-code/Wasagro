@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GroqLLM } from '../../../src/integrations/llm/GroqLLM.js'
+import { GroqAdapter } from '../../../src/integrations/llm/GroqAdapter.js'
+import { WasagroAIAgent } from '../../../src/integrations/llm/WasagroAIAgent.js'
 import type { ContextoConversacion, ContextoOnboardingAgricultor } from '../../../src/types/dominio/Onboarding.js'
 import type { EntradaResumenSemanal } from '../../../src/types/dominio/Resumen.js'
 
@@ -33,7 +34,7 @@ function crearLangfuse() {
 }
 
 function crearLlm(sdk: ReturnType<typeof crearSdk>, lf = crearLangfuse()) {
-  return new GroqLLM({ apiKey: 'test', sdkClient: sdk as any, langfuseClient: lf as any })
+  return new WasagroAIAgent(new GroqAdapter({ apiKey: 'test', sdkClient: sdk as any, }), lf as any )
 }
 
 // ─── fixtures ─────────────────────────────────────────────────────────────────

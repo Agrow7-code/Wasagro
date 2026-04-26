@@ -1,15 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { PromptManager } from '../../pipeline/promptManager.js'
 import { LLMError } from './LLMError.js'
 import type { EntradaSDR } from '../../types/dominio/SDRTypes.js'
-
-export function cargarSDRPrompt(nombre: string): string {
-  try {
-    return readFileSync(join(process.cwd(), 'sdr', 'prompts', nombre), 'utf-8')
-  } catch (err) {
-    throw new LLMError('PARSE_ERROR', `SDR prompt requerido no encontrado: sdr/prompts/${nombre}`, err)
-  }
-}
 
 export function buildSDRContexto(entrada: EntradaSDR): string {
   const p = entrada.prospecto

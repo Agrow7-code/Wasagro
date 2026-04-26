@@ -2,6 +2,7 @@ export type LLMErrorCode =
   | 'OLLAMA_UNAVAILABLE'
   | 'GEMINI_ERROR'
   | 'GROQ_ERROR'
+  | 'NVIDIA_ERROR'
   | 'PARSE_ERROR'
   | 'RATE_LIMIT'
   | 'INVALID_RESPONSE'

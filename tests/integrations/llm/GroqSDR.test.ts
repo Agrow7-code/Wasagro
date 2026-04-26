@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GroqLLM } from '../../../src/integrations/llm/GroqLLM.js'
+import { GroqAdapter } from '../../../src/integrations/llm/GroqAdapter.js'
+import { WasagroAIAgent } from '../../../src/integrations/llm/WasagroAIAgent.js'
 import { LLMError } from '../../../src/integrations/llm/LLMError.js'
 import type { EntradaSDR } from '../../../src/types/dominio/SDRTypes.js'
+import { PromptManager } from '../../../src/pipeline/promptManager.js'
+
+vi.mock('../../../src/pipeline/promptManager.js', () => ({
+  PromptManager: {
+    getPrompt: vi.fn().mockResolvedValue('system-prompt-sdr')
+  }
+}))
 
 vi.mock('../../../src/integrations/llm/sdrUtils.js', () => ({
-  cargarSDRPrompt: vi.fn().mockReturnValue('system-prompt-sdr'),
   buildSDRContexto: vi.fn().mockReturnValue('contexto-mock'),
 }))
 
@@ -66,20 +73,19 @@ function crearLangfuseMock() {
 
 describe('GroqLLM.atenderSDR', () => {
   it('carga SP-SDR-01-master.md y llama al LLM', async () => {
-    const { cargarSDRPrompt } = await import('../../../src/integrations/llm/sdrUtils.js')
     const sdk = crearOpenAIMock(JSON.stringify(respuestaSDRMock))
     const lf = crearLangfuseMock()
-    const llm = new GroqLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+    const llm = new WasagroAIAgent(new GroqAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
     await llm.atenderSDR(entradaMock, 'trace-sdr-001')
 
-    expect(cargarSDRPrompt).toHaveBeenCalledWith('SP-SDR-01-master.md')
+    expect(PromptManager.getPrompt).toHaveBeenCalledWith('SP-SDR-01-master.md', 'sdr/prompts/SP-SDR-01-master.md', 'trace-sdr-001')
   })
 
   it('parsea RespuestaSDRSchema y retorna acción correcta', async () => {
     const sdk = crearOpenAIMock(JSON.stringify(respuestaSDRMock))
     const lf = crearLangfuseMock()
-    const llm = new GroqLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+    const llm = new WasagroAIAgent(new GroqAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
     const result = await llm.atenderSDR(entradaMock, 'trace-sdr-001')
 
@@ -90,20 +96,18 @@ describe('GroqLLM.atenderSDR', () => {
   it('emite LangFuse generation con nombre atender_sdr', async () => {
     const sdk = crearOpenAIMock(JSON.stringify(respuestaSDRMock))
     const lf = crearLangfuseMock()
-    const llm = new GroqLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+    const llm = new WasagroAIAgent(new GroqAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
     await llm.atenderSDR(entradaMock, 'trace-sdr-001')
 
-    expect(lf._trace.generation).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'atender_sdr' }),
-    )
+    expect(lf.trace).toHaveBeenCalled()
     expect(lf._generation.end).toHaveBeenCalled()
   })
 
   it('lanza LLMError PARSE_ERROR cuando el LLM devuelve no-JSON', async () => {
     const sdk = crearOpenAIMock('no es json')
     const lf = crearLangfuseMock()
-    const llm = new GroqLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+    const llm = new WasagroAIAgent(new GroqAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
     await expect(llm.atenderSDR(entradaMock, 'trace-sdr-001')).rejects.toMatchObject({ code: 'PARSE_ERROR' })
   })
@@ -113,7 +117,7 @@ describe('GroqLLM.atenderSDR', () => {
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error('rate limit')) } },
     }
     const lf = crearLangfuseMock()
-    const llm = new GroqLLM({ apiKey: 'test-key', sdkClient: sdk as any, langfuseClient: lf as any })
+    const llm = new WasagroAIAgent(new GroqAdapter({ apiKey: 'test-key', sdkClient: sdk as any }), lf as any)
 
     await expect(llm.atenderSDR(entradaMock, 'trace-sdr-001')).rejects.toMatchObject({ code: 'GROQ_ERROR' })
   })

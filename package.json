@@ -15,11 +15,12 @@
     "@google/generative-ai": "^0.21.0",
     "@hono/node-server": "^2.0.0",
     "@supabase/supabase-js": "^2.49.4",
-"hono": "^4.7.7",
+    "hono": "^4.7.7",
     "langfuse": "^3.37.3",
     "node-cron": "^4.2.1",
     "ollama": "^0.5.0",
     "openai": "^4.98.0",
+    "pg-boss": "^12.18.0",
     "zod": "^3.24.3"
   },
   "devDependencies": {

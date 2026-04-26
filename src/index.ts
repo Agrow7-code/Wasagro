@@ -9,6 +9,7 @@ import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { enviarAlertasClima } from './pipeline/alertaClima.js'
 import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
 import { langfuse } from './integrations/langfuse.js'
+import { initPgBoss } from './workers/pgBoss.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
 function validarEnvVars(): void {
@@ -19,6 +20,7 @@ function validarEnvVars(): void {
 
   if (!process.env['SUPABASE_URL']) criticas.push('SUPABASE_URL')
   if (!process.env['SUPABASE_SERVICE_ROLE_KEY']) criticas.push('SUPABASE_SERVICE_ROLE_KEY')
+  if (!process.env['DATABASE_URL']) criticas.push('DATABASE_URL')
   if (!llmProvider) criticas.push('WASAGRO_LLM')
   if (!provider) criticas.push('WHATSAPP_PROVIDER')
 
@@ -60,6 +62,8 @@ const llm = crearLLM()
 
 inicializarRouter(adapter)
 inicializarPipeline(sender, llm)
+
+await initPgBoss()
 
 const app = new Hono()
 

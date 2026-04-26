@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import OpenAI from 'openai'
+import { PromptManager } from '../../pipeline/promptManager.js'
 import { z } from 'zod'
 import type { Langfuse } from 'langfuse'
 import { langfuse as langfuseDefault } from '../langfuse.js'
@@ -22,11 +20,9 @@ import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
-import { cargarSDRPrompt, buildSDRContexto } from './sdrUtils.js'
+import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 
-const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
 
 const EXTRACTOR_POR_TIPO: Record<string, string> = {
   insumo: 'sp-01a-extractor-insumo.md',
@@ -50,25 +46,16 @@ const ResultadoClasificacionSchema = z.object({
 
 type ResultadoClasificacion = z.infer<typeof ResultadoClasificacionSchema>
 
-interface GroqLLMConfig {
-  apiKey: string
-  model?: string
-  sdkClient?: OpenAI
-  langfuseClient?: Langfuse
-}
 
-export class GroqLLM implements IWasagroLLM {
-  readonly #client: OpenAI
-  readonly #model: string
+  import type { ILLMAdapter } from './ILLMAdapter.js'
+
+export class WasagroAIAgent implements IWasagroLLM {
+  readonly #adapter: ILLMAdapter
   readonly #lf: Langfuse
 
-  constructor(config: GroqLLMConfig) {
-    this.#model = config.model ?? process.env['GROQ_MODEL'] ?? DEFAULT_MODEL
-    this.#client = config.sdkClient ?? new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: GROQ_BASE_URL,
-    })
-    this.#lf = config.langfuseClient ?? langfuseDefault
+  constructor(adapter: ILLMAdapter, lf?: Langfuse) {
+    this.#adapter = adapter
+    this.#lf = lf ?? langfuseDefault
   }
 
   async extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido> {
@@ -112,10 +99,10 @@ export class GroqLLM implements IWasagroLLM {
 
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'corregir_transcripcion', model: this.#model, input: { raw } })
+    const generation = trace.generation({ name: 'corregir_transcripcion', model: 'wasagro-ai-agent', input: { raw } })
     try {
-      const prompt = cargarPrompt('sp-02-post-correccion-stt.md')
-      const corrected = await this.#llamarLibre(prompt, `Transcripción: ${raw}`)
+      const prompt = (await PromptManager.getPrompt('sp-02-post-correccion-stt.md', 'prompts/sp-02-post-correccion-stt.md', typeof traceId !== 'undefined' ? traceId : undefined))
+      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'llamarLibre' })
       generation.end({ output: corrected })
       return corrected.trim()
     } catch (err) {
@@ -126,10 +113,10 @@ export class GroqLLM implements IWasagroLLM {
 
   async analizarImagen(imageUrl: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'analizar_imagen', model: this.#model, input: { imageUrl } })
+    const generation = trace.generation({ name: 'analizar_imagen', model: 'wasagro-ai-agent', input: { imageUrl } })
     try {
-      const prompt = cargarPrompt('sp-03-analisis-imagen.md')
-      const analisis = await this.#llamarLibre(prompt, `URL imagen: ${imageUrl}`)
+      const prompt = (await PromptManager.getPrompt('sp-03-analisis-imagen.md', 'prompts/sp-03-analisis-imagen.md', typeof traceId !== 'undefined' ? traceId : undefined))
+      const analisis = await this.#adapter.generarTexto(`URL imagen: ${imageUrl}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'llamarLibre' })
       generation.end({ output: analisis })
       return analisis
     } catch (err) {
@@ -140,15 +127,15 @@ export class GroqLLM implements IWasagroLLM {
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'onboardar_admin', model: this.#model, input: { mensaje } })
+    const generation = trace.generation({ name: 'onboardar_admin', model: 'wasagro-ai-agent', input: { mensaje } })
     try {
-      const prompt = injectarVariables(cargarPrompt('sp-04a-onboarding-admin.md'), {
+      const prompt = injectarVariables((await PromptManager.getPrompt('sp-04a-onboarding-admin.md', 'prompts/sp-04a-onboarding-admin.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
         NOMBRE_USUARIO: (contexto.datos_recolectados['nombre'] as string | undefined) ?? '',
       })
       const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)
+      const texto = await this.#adapter.generarTexto(`Historial:\n${historial}\nUsuario: ${mensaje}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
 
       let json: unknown
       try { json = JSON.parse(texto) } catch {
@@ -172,16 +159,16 @@ export class GroqLLM implements IWasagroLLM {
 
   async onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'onboardar_agricultor', model: this.#model, input: { mensaje } })
+    const generation = trace.generation({ name: 'onboardar_agricultor', model: 'wasagro-ai-agent', input: { mensaje } })
     try {
-      const prompt = injectarVariables(cargarPrompt('sp-04b-onboarding-agricultor.md'), {
+      const prompt = injectarVariables((await PromptManager.getPrompt('sp-04b-onboarding-agricultor.md', 'prompts/sp-04b-onboarding-agricultor.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         PASO_ACTUAL: String(contexto.paso_actual),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
         FINCAS_DISPONIBLES: contexto.fincas_disponibles,
         NOMBRE_USUARIO: (contexto.datos_recolectados['nombre'] as string | undefined) ?? '',
       })
       const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)
+      const texto = await this.#adapter.generarTexto(`Historial:\n${historial}\nUsuario: ${mensaje}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
 
       let json: unknown
       try { json = JSON.parse(texto) } catch {
@@ -205,16 +192,16 @@ export class GroqLLM implements IWasagroLLM {
 
   async atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'atender_prospecto', model: this.#model, input: { mensaje } })
+    const generation = trace.generation({ name: 'atender_prospecto', model: 'wasagro-ai-agent', input: { mensaje } })
     try {
       const hoy = new Date().toISOString().slice(0, 10)
-      const prompt = injectarVariables(cargarPrompt('sp-00-prospecto.md'), {
+      const prompt = injectarVariables((await PromptManager.getPrompt('sp-00-prospecto.md', 'prompts/sp-00-prospecto.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         PASO_ACTUAL: String(contexto.paso_actual),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recopilados),
         FECHA_ACTUAL: hoy,
       })
       const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#llamar(prompt, `Historial:\n${historial}\nUsuario: ${mensaje}`)
+      const texto = await this.#adapter.generarTexto(`Historial:\n${historial}\nUsuario: ${mensaje}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
 
       let json: unknown
       try { json = JSON.parse(texto) } catch {
@@ -238,20 +225,20 @@ export class GroqLLM implements IWasagroLLM {
 
   async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'resumir_semana', model: this.#model, input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
+    const generation = trace.generation({ name: 'resumir_semana', model: 'wasagro-ai-agent', input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
     try {
-      const prompt = injectarVariables(cargarPrompt('sp-05-resumen-semanal.md'), {
+      const prompt = injectarVariables((await PromptManager.getPrompt('sp-05-resumen-semanal.md', 'prompts/sp-05-resumen-semanal.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         FINCA_NOMBRE: entrada.finca_nombre,
         CULTIVO_PRINCIPAL: entrada.cultivo_principal,
         FECHA_INICIO: entrada.fecha_inicio,
         FECHA_FIN: entrada.fecha_fin,
         EVENTOS_AGREGADOS: JSON.stringify(entrada.eventos, null, 2),
       })
-      const texto = await this.#llamar(prompt, `Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`)
+      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', 'Groq no devolvió JSON para resumen semanal')
+        throw new LLMError('PARSE_ERROR', 'Adapter no devolvió JSON para resumen semanal')
       }
       const parsed = ResumenSemanalSchema.safeParse(json)
       if (!parsed.success) {
@@ -268,20 +255,20 @@ export class GroqLLM implements IWasagroLLM {
   }
 
   async atenderSDR(entrada: EntradaSDR, traceId: string): Promise<RespuestaSDR> {
-    const promptBase = cargarSDRPrompt('SP-SDR-01-master.md')
+    const promptBase = await PromptManager.getPrompt('SP-SDR-01-master.md', 'sdr/prompts/SP-SDR-01-master.md', typeof traceId !== 'undefined' ? traceId : undefined)
     const contexto = buildSDRContexto(entrada)
     const userContent = `${contexto}\n\nMensaje del prospecto: ${entrada.mensaje}`
 
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'atender_sdr',
-      model: this.#model,
+      model: 'wasagro-ai-agent',
       input: { turno: entrada.turno, segmento: entrada.segmento_icp, narrativa: entrada.narrativa },
     })
 
     const inicio = Date.now()
     try {
-      const texto = await this.#llamar(promptBase, userContent)
+      const texto = await this.#adapter.generarTexto(userContent, { systemPrompt: promptBase, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       const latencia = Date.now() - inicio
 
       let json: unknown
@@ -289,7 +276,7 @@ export class GroqLLM implements IWasagroLLM {
         json = JSON.parse(texto)
       } catch {
         generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Groq SDR devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
+        throw new LLMError('PARSE_ERROR', `Adapter SDR devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
       }
 
       const parsed = RespuestaSDRSchema.safeParse(json)
@@ -312,11 +299,11 @@ export class GroqLLM implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'clasificar_excel',
-      model: this.#model,
+      model: 'wasagro-ai-agent',
       input: { nombre_archivo: entrada.nombre_archivo, total_filas: entrada.total_filas, columnas: entrada.columnas },
     })
     try {
-      const prompt = injectarVariables(cargarPrompt('sp-06-clasificar-excel.md'), {
+      const prompt = injectarVariables((await PromptManager.getPrompt('sp-06-clasificar-excel.md', 'prompts/sp-06-clasificar-excel.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         FINCA_NOMBRE: entrada.finca_nombre ?? 'No especificada',
         CULTIVO_PRINCIPAL: entrada.cultivo_principal ?? 'No especificado',
         NOMBRE_ARCHIVO: entrada.nombre_archivo,
@@ -325,7 +312,7 @@ export class GroqLLM implements IWasagroLLM {
         TOTAL_FILAS: String(entrada.total_filas),
       })
       const userContent = `Archivo: ${entrada.nombre_archivo}. Columnas: ${entrada.columnas.join(', ')}. Total filas: ${entrada.total_filas}.`
-      const texto = await this.#llamar(prompt, userContent)
+      const texto = await this.#adapter.generarTexto(userContent, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -348,7 +335,7 @@ export class GroqLLM implements IWasagroLLM {
   // ─── private ─────────────────────────────────────────────────────────────
 
   async #clasificar(input: EntradaEvento, traceId: string): Promise<ResultadoClasificacion> {
-    const prompt = injectarVariables(cargarPrompt('sp-00-clasificador.md'), {
+    const prompt = injectarVariables((await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
       FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
       CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
       NOMBRE_USUARIO: input.nombre_usuario ?? '',
@@ -358,13 +345,13 @@ export class GroqLLM implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'clasificar_mensaje',
-      model: this.#model,
+      model: 'wasagro-ai-agent',
       input: { transcripcion: input.transcripcion },
     })
 
     const inicio = Date.now()
     try {
-      const texto = await this.#llamar(prompt, input.transcripcion)
+      const texto = await this.#adapter.generarTexto(input.transcripcion, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -393,7 +380,7 @@ export class GroqLLM implements IWasagroLLM {
   ): Promise<EventoCampoExtraido> {
     const promptFile = EXTRACTOR_POR_TIPO[clasificacion.tipo_evento] ?? 'sp-01-extraccion-evento.md'
 
-    const prompt = injectarVariables(cargarPrompt(promptFile), {
+    const prompt = injectarVariables((await PromptManager.getPrompt(promptFile, `prompts/${promptFile}`, typeof traceId !== 'undefined' ? traceId : undefined)), {
       LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
       FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
       CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
@@ -405,13 +392,13 @@ export class GroqLLM implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: `extraer_${clasificacion.tipo_evento}`,
-      model: this.#model,
+      model: 'wasagro-ai-agent',
       input: { transcripcion: input.transcripcion, tipo: clasificacion.tipo_evento },
     })
 
     const inicio = Date.now()
     try {
-      const texto = await this.#llamar(prompt, `Transcripción: ${input.transcripcion}`)
+      const texto = await this.#adapter.generarTexto(`Transcripción: ${input.transcripcion}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       const latencia = Date.now() - inicio
 
       let json: unknown
@@ -435,39 +422,5 @@ export class GroqLLM implements IWasagroLLM {
     }
   }
 
-  async #llamar(systemPrompt: string, userContent: string): Promise<string> {
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
-    ]
-    if (userContent) {
-      messages.push({ role: 'user', content: userContent })
-    }
-    const res = await this.#client.chat.completions.create({
-      model: this.#model,
-      messages,
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
-    })
-    return res.choices[0]?.message.content ?? ''
-  }
-
-  async #llamarLibre(systemPrompt: string, userContent: string): Promise<string> {
-    const res = await this.#client.chat.completions.create({
-      model: this.#model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      temperature: 0.2,
-    })
-    return res.choices[0]?.message.content ?? ''
-  }
-}
-
-function cargarPrompt(nombre: string): string {
-  try {
-    return readFileSync(join(process.cwd(), 'prompts', nombre), 'utf-8')
-  } catch (err) {
-    throw new LLMError('PARSE_ERROR', `Prompt requerido no encontrado: prompts/${nombre}`, err)
-  }
+  
 }

@@ -5,6 +5,10 @@ vi.mock('../../../src/pipeline/procesarMensajeEntrante.js', () => ({
   inicializarPipeline: vi.fn(),
 }))
 
+vi.mock('../../../src/workers/pgBoss.js', () => ({
+  getBoss: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue('job-id-mock') })
+}))
+
 import { Hono } from 'hono'
 import { webhookRouter, inicializarRouter } from '../../../src/webhook/router.js'
 import type { IWhatsAppAdapter } from '../../../src/integrations/whatsapp/IWhatsAppAdapter.js'

@@ -1,23 +1,29 @@
 import { describe, expect, it, afterEach } from 'vitest'
 import { crearLLM } from '../../../src/integrations/llm/index.js'
-import { GeminiLLM } from '../../../src/integrations/llm/GeminiLLM.js'
-import { OllamaLLM } from '../../../src/integrations/llm/OllamaLLM.js'
+import { WasagroAIAgent } from '../../../src/integrations/llm/WasagroAIAgent.js'
 
 afterEach(() => {
   delete process.env['WASAGRO_LLM']
   delete process.env['GEMINI_API_KEY']
+  delete process.env['GROQ_API_KEY']
 })
 
 describe('crearLLM', () => {
-  it('retorna GeminiLLM con WASAGRO_LLM=gemini', () => {
+  it('retorna WasagroAIAgent con WASAGRO_LLM=gemini', () => {
     process.env['WASAGRO_LLM'] = 'gemini'
     process.env['GEMINI_API_KEY'] = 'test-key'
-    expect(crearLLM()).toBeInstanceOf(GeminiLLM)
+    expect(crearLLM()).toBeInstanceOf(WasagroAIAgent)
   })
 
-  it('retorna OllamaLLM con WASAGRO_LLM=ollama', () => {
+  it('retorna WasagroAIAgent con WASAGRO_LLM=ollama', () => {
     process.env['WASAGRO_LLM'] = 'ollama'
-    expect(crearLLM()).toBeInstanceOf(OllamaLLM)
+    expect(crearLLM()).toBeInstanceOf(WasagroAIAgent)
+  })
+
+  it('retorna WasagroAIAgent con WASAGRO_LLM=groq', () => {
+    process.env['WASAGRO_LLM'] = 'groq'
+    process.env['GROQ_API_KEY'] = 'test-key'
+    expect(crearLLM()).toBeInstanceOf(WasagroAIAgent)
   })
 
   it('lanza error descriptivo con provider inválido', () => {
