@@ -20,20 +20,33 @@ export class EvolutionSender implements IWhatsAppSender {
     this.#fetch = config.fetchClient ?? globalThis.fetch
   }
 
-  async enviarTexto(to: string, texto: string): Promise<void> {
+  async enviarTexto(to: string, texto: string, timeoutMs = 10_000): Promise<void> {
     const url = `${this.#apiUrl}/message/sendText/${this.#instance}`
-    const res = await this.#fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: this.#apiKey,
-      },
-      body: JSON.stringify({ number: to, text: texto }),
-    })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      throw new Error(`[EvolutionSender] HTTP ${res.status} al enviar mensaje: ${detail}`)
+    try {
+      const res = await this.#fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: this.#apiKey,
+        },
+        body: JSON.stringify({ number: to, text: texto }),
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(`[EvolutionSender] HTTP ${res.status} al enviar mensaje: ${detail}`)
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        throw new Error('[EvolutionSender] Timeout: Evolution API no respondió en 10s')
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
     }
   }
 }
