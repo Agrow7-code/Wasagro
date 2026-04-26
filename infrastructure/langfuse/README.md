@@ -70,17 +70,17 @@ En la UI de LangFuse:
    ```
 5. Reiniciar el servicio: `docker-compose restart`
 
-## Paso 5 — Configurar en n8n
+## Paso 5 — Configurar en el Backend (Hono)
 
-En n8n, agregar como variables de entorno o credentials:
+En el archivo `.env` de la raíz del proyecto Wasagro, agregar las claves generadas:
 
+```env
+LANGFUSE_PUBLIC_KEY="pk-lf-..."
+LANGFUSE_SECRET_KEY="sk-lf-..."
+LANGFUSE_HOST="http://localhost:3000" # O la URL de tu instancia
 ```
-LANGFUSE_PUBLIC_KEY = pk-lf-...
-LANGFUSE_SECRET_KEY = sk-lf-...
-LANGFUSE_HOST       = http://localhost:3000
-```
 
-O usar el nodo HTTP de n8n con base URL configurada.
+El SDK de Langfuse en TypeScript las cargará automáticamente.
 
 ## Paso 6 — Verificar funcionamiento
 
@@ -110,7 +110,7 @@ Verificar en la UI: **Traces → wasagro_test** debe aparecer.
 
 - [ ] LangFuse corre y es accesible
 - [ ] Proyecto `wasagro-h0` creado
-- [ ] API keys generadas y configuradas en n8n
+- [ ] API keys generadas y configuradas en el `.env` del backend
 - [ ] Traza de prueba visible en la UI
 - [ ] `v_pipeline_health` en Supabase muestra filas (cuando el pipeline corra)
 

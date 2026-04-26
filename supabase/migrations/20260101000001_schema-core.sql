@@ -164,5 +164,5 @@ CREATE POLICY "eventos_by_finca" ON eventos_campo
         )
     );
 
--- Nota: n8n usa service_role key, que bypassa RLS en Supabase por defecto.
+-- Nota: el backend usa service_role key, que bypassa RLS en Supabase por defecto.
 -- No se necesitan políticas adicionales para el pipeline.

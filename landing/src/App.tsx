@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'motion/react'
 import {
@@ -11,6 +11,14 @@ import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
 import { AgricultorIndividual } from './dashboard/views/AgricultorIndividual'
+import LoginPage from './auth/LoginPage'
+import { useAuth } from './auth/useAuth'
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth()
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
 
 const WA_LINK = 'https://wa.me/593999999999?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
 
@@ -1076,7 +1084,15 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/dashboard" element={<DashboardLayout />}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route index element={<AdminFinca />} />
           <Route path="gerente" element={<GerenteAgricola />} />
           <Route path="exportadora" element={<Exportadora />} />

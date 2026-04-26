@@ -24,7 +24,7 @@ services:
 
       # ── Auth (LangFuse keys generados en UI tras primer login) ──────────
       # Estos se configuran en la UI tras crear el proyecto.
-      # Las variables de entorno aquí son para el SDK cliente (n8n).
+      # Las variables de entorno aquí son para la conexión interna del servidor.
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
 

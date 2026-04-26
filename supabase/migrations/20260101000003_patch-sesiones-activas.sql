@@ -29,6 +29,6 @@ CREATE INDEX idx_sesiones_expires ON sesiones_activas(expires_at) WHERE status =
 
 ALTER TABLE sesiones_activas ENABLE ROW LEVEL SECURITY;
 
--- Las sesiones se gestionan exclusivamente por service_role (n8n).
+-- Las sesiones se gestionan exclusivamente por service_role (Backend Hono).
 -- No hay acceso directo del usuario autenticado a esta tabla.
 -- RLS habilitado pero sin política para auth.uid() — solo service_role opera esta tabla.

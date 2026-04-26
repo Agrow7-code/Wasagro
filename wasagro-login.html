@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>Wasagro · Login — Exploración</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F5F1E8; font-family: 'Space Grotesk', sans-serif; }
+
+  :root {
+    --pergamino: #F5F1E8;
+    --marfil: #FDFAF4;
+    --tierra: #0D0F0C;
+    --signal: #C9F03B;
+    --campo: #1B3D24;
+    --tierra-accent: #D45828;
+    --tierra-suave: rgba(13,15,12,0.45);
+    --tierra-faint: rgba(13,15,12,0.2);
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ── DOT GRID BACKGROUND ── */
+const DotGrid = () => (
+  <div style={{
+    position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
+    backgroundImage: 'radial-gradient(circle, rgba(13,15,12,0.12) 1px, transparent 1px)',
+    backgroundSize: '22px 22px',
+  }} />
+);
+
+/* ── LOGO MARK ── */
+const LogoMark = () => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 24 }}>
+    <div style={{
+      width: 32, height: 32, background: 'var(--signal)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 16, color: 'var(--campo)',
+      flexShrink: 0,
+    }}>W</div>
+    <span style={{ fontWeight: 700, fontSize: 20, color: 'var(--tierra)', letterSpacing: -0.4 }}>
+      Wasagro<span style={{ color: 'var(--signal)' }}>.</span>
+    </span>
+  </div>
+);
+
+const Divider = () => (
+  <div style={{ height: 1, background: '#EAE6DC', margin: '0 0 24px' }} />
+);
+
+/* ── CORNER TEXTS ── */
+const CornerTexts = () => (
+  <>
+    <div style={{
+      position: 'absolute', bottom: 20, left: 24,
+      fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(13,15,12,0.18)',
+      lineHeight: 1.6, letterSpacing: '0.04em', pointerEvents: 'none',
+    }}>
+      ACCESO SEGURO · WASAGRO v1.0<br />
+      CAMPO → DATO → DECISIÓN
+    </div>
+    <div style={{
+      position: 'absolute', bottom: 20, right: 24,
+      fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(13,15,12,0.18)',
+      lineHeight: 1.6, letterSpacing: '0.04em', textAlign: 'right', pointerEvents: 'none',
+    }}>
+      LATAM · 2026<br />
+      WhatsApp Business API
+    </div>
+  </>
+);
+
+/* ── PANEL WRAPPER ── */
+const Panel = ({ children }) => (
+  <div style={{
+    background: 'var(--marfil)',
+    border: '2px solid var(--tierra)',
+    borderRadius: 16,
+    boxShadow: '8px 8px 0 0 var(--tierra)',
+    padding: '40px 44px',
+    width: 440,
+    position: 'relative',
+    zIndex: 1,
+  }}>
+    {children}
+  </div>
+);
+
+/* ── SCREEN WRAPPER ── */
+const Screen = ({ children, label }) => (
+  <div style={{
+    width: 680, height: 520,
+    background: 'var(--pergamino)',
+    position: 'relative',
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  }} data-screen-label={label}>
+    <DotGrid />
+    {children}
+    <CornerTexts />
+    <div style={{
+      position: 'absolute', bottom: 20,
+      fontFamily: 'JetBrains Mono', fontSize: 11,
+      color: 'rgba(13,15,12,0.3)', letterSpacing: '0.04em',
+    }}>
+      Wasagro · Acceso seguro vía WhatsApp
+    </div>
+  </div>
+);
+
+/* ── STEP 1: NÚMERO ── */
+const Step1Normal = () => {
+  const [focused, setFocused] = useState(false);
+  return (
+    <Screen label="Paso 1 — Número">
+      <Panel>
+        <LogoMark />
+        <Divider />
+        <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 8, letterSpacing: -0.3, lineHeight: 1.25 }}>
+          Ingresa tu número de WhatsApp
+        </div>
+        <div style={{ fontSize: 14, color: 'var(--tierra-suave)', marginBottom: 24, lineHeight: 1.55 }}>
+          Te enviaremos un código de verificación por WhatsApp.
+        </div>
+
+        {/* Phone input */}
+        <div style={{ display: 'flex', marginBottom: 6 }}>
+          <div style={{
+            width: 116, height: 52, flexShrink: 0,
+            background: 'var(--marfil)',
+            border: `2px solid ${focused ? 'var(--signal)' : 'var(--tierra)'}`,
+            borderRight: 'none',
+            borderRadius: '8px 0 0 8px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            fontFamily: 'Space Grotesk', fontSize: 14, fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'border-color 0.15s',
+            boxShadow: focused ? '4px 4px 0 0 rgba(201,240,59,0.3)' : 'none',
+          }}>
+            🇪🇨 +593
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <input
+            type="tel"
+            placeholder="999 999 999"
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            style={{
+              flex: 1, height: 52, padding: '0 16px',
+              border: `2px solid ${focused ? 'var(--signal)' : 'var(--tierra)'}`,
+              borderLeft: 'none',
+              borderRadius: '0 8px 8px 0',
+              fontFamily: 'JetBrains Mono', fontSize: 16, letterSpacing: '0.05em',
+              background: 'var(--marfil)',
+              color: 'var(--tierra)',
+              outline: 'none',
+              transition: 'border-color 0.15s',
+              boxShadow: focused ? '4px 4px 0 0 rgba(201,240,59,0.3)' : 'none',
+            }}
+          />
+        </div>
+
+        <PrimaryBtn style={{ marginTop: 20 }}>Continuar →</PrimaryBtn>
+
+        <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--tierra-suave)', marginTop: 20 }}>
+          ¿No tienes acceso? Escríbenos a{' '}
+          <a href="mailto:wasagro@proton.me" style={{ fontFamily: 'JetBrains Mono', color: 'var(--campo)', fontSize: 12 }}>
+            wasagro@proton.me
+          </a>
+        </div>
+      </Panel>
+    </Screen>
+  );
+};
+
+/* ── STEP 1 ERROR ── */
+const Step1Error = () => (
+  <Screen label="Paso 1 — Error">
+    <Panel>
+      <LogoMark />
+      <Divider />
+      <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 8, letterSpacing: -0.3, lineHeight: 1.25 }}>
+        Ingresa tu número de WhatsApp
+      </div>
+      <div style={{ fontSize: 14, color: 'var(--tierra-suave)', marginBottom: 24, lineHeight: 1.55 }}>
+        Te enviaremos un código de verificación por WhatsApp.
+      </div>
+
+      <div style={{ display: 'flex', marginBottom: 0 }}>
+        <div style={{
+          width: 116, height: 52, flexShrink: 0,
+          background: 'var(--marfil)',
+          border: '2px solid var(--tierra-accent)',
+          borderRight: 'none',
+          borderRadius: '8px 0 0 8px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          fontFamily: 'Space Grotesk', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+        }}>
+          🇪🇨 +593
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <input
+          type="tel"
+          defaultValue="987 654 321"
+          style={{
+            flex: 1, height: 52, padding: '0 16px',
+            border: '2px solid var(--tierra-accent)',
+            borderLeft: 'none',
+            borderRadius: '0 8px 8px 0',
+            fontFamily: 'JetBrains Mono', fontSize: 16, letterSpacing: '0.05em',
+            background: '#FFF8F6',
+            color: 'var(--tierra-accent)',
+            outline: 'none',
+          }}
+          readOnly
+        />
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--tierra-accent)', marginTop: 8, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Número no registrado en Wasagro. Contacta a tu administrador.
+      </div>
+
+      <PrimaryBtn style={{ marginTop: 20, opacity: 0.5, cursor: 'not-allowed' }}>Continuar →</PrimaryBtn>
+
+      <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--tierra-suave)', marginTop: 20 }}>
+        ¿No tienes acceso? Escríbenos a{' '}
+        <a href="mailto:wasagro@proton.me" style={{ fontFamily: 'JetBrains Mono', color: 'var(--campo)', fontSize: 12 }}>
+          wasagro@proton.me
+        </a>
+      </div>
+    </Panel>
+  </Screen>
+);
+
+/* ── OTP BOXES ── */
+const OTPBoxes = ({ hasError }) => {
+  const values = ['3','7','1','','',''];
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+      {values.map((v, i) => {
+        const filled = v !== '';
+        const active = i === 3;
+        const border = hasError
+          ? 'var(--tierra-accent)'
+          : active ? 'var(--signal)'
+          : filled ? 'var(--campo)'
+          : 'var(--tierra)';
+        const shadow = active && !hasError ? '4px 4px 0 0 rgba(201,240,59,0.3)' : hasError ? 'none' : 'none';
+        const bg = hasError ? '#FFF8F6' : 'var(--marfil)';
+        return (
+          <React.Fragment key={i}>
+            {i === 3 && (
+              <div style={{ width: 14, height: 2, background: 'rgba(13,15,12,0.25)', flexShrink: 0 }} />
+            )}
+            <div style={{
+              width: 52, height: 64,
+              border: `2px solid ${border}`,
+              borderRadius: 8,
+              background: bg,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 28,
+              color: hasError ? 'var(--tierra-accent)' : filled ? 'var(--tierra)' : 'transparent',
+              boxShadow: shadow,
+              position: 'relative',
+              transition: 'border-color 0.15s',
+            }}>
+              {v}
+              {active && !hasError && (
+                <div style={{
+                  position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
+                  width: 2, height: 24, background: 'var(--signal)',
+                  animation: 'blink 1s step-end infinite',
+                }} />
+              )}
+            </div>
+          </React.Fragment>
+        );
+      })}
+      <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
+    </div>
+  );
+};
+
+/* ── STEP 2: OTP ── */
+const Step2Normal = () => (
+  <Screen label="Paso 2 — OTP">
+    <Panel>
+      <LogoMark />
+      <Divider />
+      <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 8, letterSpacing: -0.3, lineHeight: 1.25 }}>
+        Revisa tu WhatsApp
+      </div>
+      <div style={{ fontSize: 14, color: 'var(--tierra-suave)', marginBottom: 4, lineHeight: 1.55 }}>
+        Enviamos un código de 6 dígitos al
+      </div>
+      <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 15, color: 'var(--tierra)', marginBottom: 6 }}>
+        +593 *** *** 847
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--tierra-suave)', marginBottom: 24 }}>
+        <a href="#" style={{ color: 'var(--tierra-suave)', textDecoration: 'underline' }}>¿No es tu número? Volver</a>
+      </div>
+
+      <OTPBoxes hasError={false} />
+
+      <PrimaryBtn style={{ marginTop: 20 }}>Verificar y entrar →</PrimaryBtn>
+
+      <div style={{ textAlign: 'center', fontSize: 13, marginTop: 16, fontFamily: 'JetBrains Mono', color: 'var(--tierra-suave)' }}>
+        Reenviar código en <strong style={{ color: 'var(--tierra)' }}>0:42</strong>
+      </div>
+    </Panel>
+  </Screen>
+);
+
+/* ── STEP 2 ERROR ── */
+const Step2Error = () => (
+  <Screen label="Paso 2 — Error OTP">
+    <Panel>
+      <LogoMark />
+      <Divider />
+      <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 8, letterSpacing: -0.3, lineHeight: 1.25 }}>
+        Revisa tu WhatsApp
+      </div>
+      <div style={{ fontSize: 14, color: 'var(--tierra-suave)', marginBottom: 4, lineHeight: 1.55 }}>
+        Enviamos un código de 6 dígitos al
+      </div>
+      <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 15, color: 'var(--tierra)', marginBottom: 6 }}>
+        +593 *** *** 847
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--tierra-suave)', marginBottom: 24 }}>
+        <a href="#" style={{ color: 'var(--tierra-suave)', textDecoration: 'underline' }}>¿No es tu número? Volver</a>
+      </div>
+
+      <OTPBoxes hasError={true} />
+      <div style={{ fontSize: 13, color: 'var(--tierra-accent)', marginTop: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Código incorrecto. Te quedan <strong>2 intentos</strong>.
+      </div>
+
+      <PrimaryBtn style={{ marginTop: 20 }}>Verificar y entrar →</PrimaryBtn>
+
+      <div style={{ textAlign: 'center', fontSize: 13, marginTop: 16, fontFamily: 'JetBrains Mono', color: 'var(--tierra-suave)' }}>
+        Reenviar código en <strong style={{ color: 'var(--tierra)' }}>0:28</strong>
+      </div>
+    </Panel>
+  </Screen>
+);
+
+/* ── PRIMARY BUTTON ── */
+const PrimaryBtn = ({ children, style = {} }) => {
+  const [hover, setHover] = useState(false);
+  const [active, setActive] = useState(false);
+  return (
+    <button
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => { setHover(false); setActive(false); }}
+      onMouseDown={() => setActive(true)}
+      onMouseUp={() => setActive(false)}
+      style={{
+        width: '100%',
+        padding: '14px 24px',
+        background: 'var(--signal)',
+        border: '2px solid var(--tierra)',
+        borderRadius: 8,
+        fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 16,
+        color: 'var(--tierra)',
+        cursor: 'pointer',
+        boxShadow: active ? 'none' : hover ? '6px 6px 0 0 var(--tierra)' : '4px 4px 0 0 var(--tierra)',
+        transform: active ? 'translate(0,0)' : hover ? 'translate(-1px,-1px)' : 'none',
+        transition: 'transform 0.1s, box-shadow 0.1s',
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+};
+
+/* ── INTERACTIVE DEMO ── */
+const InteractiveDemo = () => {
+  const [step, setStep] = useState(1);
+  const [phone, setPhone] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [phoneError, setPhoneError] = useState(false);
+  const [otp, setOtp] = useState(['3','7','1','','','']);
+  const [otpError, setOtpError] = useState(false);
+  const [timer, setTimer] = useState(42);
+  const inputsRef = useRef([]);
+
+  useEffect(() => {
+    let t;
+    if (step === 2 && timer > 0) {
+      t = setTimeout(() => setTimer(s => s - 1), 1000);
+    }
+    return () => clearTimeout(t);
+  }, [step, timer]);
+
+  const handleOtpChange = (i, val) => {
+    if (!/^\d*$/.test(val)) return;
+    const next = [...otp];
+    next[i] = val.slice(-1);
+    setOtp(next);
+    setOtpError(false);
+    if (val && i < 5) {
+      const nextIdx = i === 2 ? 3 : i + 1;
+      inputsRef.current[nextIdx]?.focus();
+    }
+  };
+
+  const handleOtpKey = (i, e) => {
+    if (e.key === 'Backspace' && !otp[i] && i > 0) {
+      const prevIdx = i === 3 ? 2 : i - 1;
+      inputsRef.current[prevIdx]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    const text = e.clipboardData.getData('text').replace(/\D/g,'').slice(0,6);
+    if (text.length === 6) {
+      setOtp(text.split(''));
+      e.preventDefault();
+    }
+  };
+
+  const handleContinue = () => {
+    if (phone.replace(/\D/g,'').length < 7) { setPhoneError(true); return; }
+    setPhoneError(false);
+    setStep(2);
+    setTimer(42);
+  };
+
+  const handleVerify = () => {
+    const code = otp.join('');
+    if (code !== '371000') { setOtpError(true); return; }
+    alert('✓ Acceso concedido — redirigiendo al dashboard');
+  };
+
+  return (
+    <Screen label="Demo interactiva">
+      <Panel>
+        <LogoMark />
+        <Divider />
+
+        {step === 1 ? (
+          <>
+            <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 8, letterSpacing: -0.3, lineHeight: 1.25 }}>
+              Ingresa tu número de WhatsApp
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--tierra-suave)', marginBottom: 24, lineHeight: 1.55 }}>
+              Te enviaremos un código de verificación por WhatsApp.
+            </div>
+
+            <div style={{ display: 'flex' }}>
+              <div style={{
+                width: 116, height: 52, flexShrink: 0,
+                background: 'var(--marfil)',
+                border: `2px solid ${phoneError ? 'var(--tierra-accent)' : focused ? 'var(--signal)' : 'var(--tierra)'}`,
+                borderRight: 'none',
+                borderRadius: '8px 0 0 8px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                fontFamily: 'Space Grotesk', fontSize: 14, fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: focused && !phoneError ? '4px 4px 0 0 rgba(201,240,59,0.25)' : 'none',
+              }}>
+                🇪🇨 +593
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              <input
+                type="tel"
+                value={phone}
+                onChange={e => { setPhone(e.target.value); setPhoneError(false); }}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                placeholder="999 999 999"
+                style={{
+                  flex: 1, height: 52, padding: '0 16px',
+                  border: `2px solid ${phoneError ? 'var(--tierra-accent)' : focused ? 'var(--signal)' : 'var(--tierra)'}`,
+                  borderLeft: 'none',
+                  borderRadius: '0 8px 8px 0',
+                  fontFamily: 'JetBrains Mono', fontSize: 16, letterSpacing: '0.05em',
+                  background: phoneError ? '#FFF8F6' : 'var(--marfil)',
+                  color: phoneError ? 'var(--tierra-accent)' : 'var(--tierra)',
+                  outline: 'none',
+                  boxShadow: focused && !phoneError ? '4px 4px 0 0 rgba(201,240,59,0.25)' : 'none',
+                }}
+              />
+            </div>
+            {phoneError && (
+              <div style={{ fontSize: 13, color: 'var(--tierra-accent)', marginTop: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Número no registrado en Wasagro. Contacta a tu administrador.
+              </div>
+            )}
+
+            <div onClick={handleContinue}>
+              <PrimaryBtn style={{ marginTop: 20 }}>Continuar →</PrimaryBtn>
+            </div>
+
+            <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--tierra-suave)', marginTop: 20 }}>
+              ¿No tienes acceso? Escríbenos a{' '}
+              <a href="mailto:wasagro@proton.me" style={{ fontFamily: 'JetBrains Mono', color: 'var(--campo)', fontSize: 12 }}>
+                wasagro@proton.me
+              </a>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 8, letterSpacing: -0.3, lineHeight: 1.25 }}>
+              Revisa tu WhatsApp
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--tierra-suave)', marginBottom: 4, lineHeight: 1.55 }}>
+              Enviamos un código de 6 dígitos al
+            </div>
+            <div style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 15, color: 'var(--tierra)', marginBottom: 6 }}>
+              +593 {phone ? `*** *** ${phone.replace(/\D/g,'').slice(-3)}` : '*** *** 847'}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--tierra-suave)', marginBottom: 24 }}>
+              <span onClick={() => { setStep(1); setOtp(['','','','','','']); setOtpError(false); }} style={{ cursor: 'pointer', textDecoration: 'underline' }}>¿No es tu número? Volver</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+              {otp.map((v, i) => {
+                const filled = v !== '';
+                const isActive = !filled && otp.slice(0, i).every(x => x !== '');
+                const border = otpError ? 'var(--tierra-accent)' : isActive ? 'var(--signal)' : filled ? 'var(--campo)' : 'var(--tierra)';
+                return (
+                  <React.Fragment key={i}>
+                    {i === 3 && <div style={{ width: 14, height: 2, background: 'rgba(13,15,12,0.25)', flexShrink: 0 }} />}
+                    <input
+                      ref={el => inputsRef.current[i] = el}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={v}
+                      onChange={e => handleOtpChange(i, e.target.value)}
+                      onKeyDown={e => handleOtpKey(i, e)}
+                      onPaste={handleOtpPaste}
+                      style={{
+                        width: 52, height: 64,
+                        border: `2px solid ${border}`,
+                        borderRadius: 8,
+                        background: otpError ? '#FFF8F6' : 'var(--marfil)',
+                        fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 28,
+                        textAlign: 'center',
+                        color: otpError ? 'var(--tierra-accent)' : 'var(--tierra)',
+                        outline: 'none',
+                        boxShadow: isActive && !otpError ? '4px 4px 0 0 rgba(201,240,59,0.3)' : 'none',
+                        cursor: 'text',
+                      }}
+                    />
+                  </React.Fragment>
+                );
+              })}
+            </div>
+
+            {otpError && (
+              <div style={{ fontSize: 13, color: 'var(--tierra-accent)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Código incorrecto. Te quedan <strong style={{ marginLeft: 3 }}>2 intentos</strong>.
+              </div>
+            )}
+
+            <div style={{ height: otpError ? 8 : 0 }} />
+            <div onClick={handleVerify}>
+              <PrimaryBtn style={{ marginTop: otpError ? 8 : 20 }}>Verificar y entrar →</PrimaryBtn>
+            </div>
+
+            <div style={{ textAlign: 'center', fontSize: 13, marginTop: 16, fontFamily: 'JetBrains Mono', color: 'var(--tierra-suave)' }}>
+              {timer > 0
+                ? <>Reenviar código en <strong style={{ color: 'var(--tierra)' }}>0:{String(timer).padStart(2,'0')}</strong></>
+                : <span style={{ color: 'var(--campo)', cursor: 'pointer', fontWeight: 700 }} onClick={() => setTimer(60)}>Reenviar código →</span>
+              }
+            </div>
+          </>
+        )}
+      </Panel>
+    </Screen>
+  );
+};
+
+/* ── APP ── */
+const App = () => (
+  <DesignCanvas>
+    <DCSection id="states" title="Estados de la pantalla">
+      <DCArtboard id="paso1" label="Paso 1 — Número" width={680} height={520}>
+        <Step1Normal />
+      </DCArtboard>
+      <DCArtboard id="paso1-error" label="Paso 1 — Error" width={680} height={520}>
+        <Step1Error />
+      </DCArtboard>
+      <DCArtboard id="paso2" label="Paso 2 — OTP" width={680} height={520}>
+        <Step2Normal />
+      </DCArtboard>
+      <DCArtboard id="paso2-error" label="Paso 2 — Error OTP" width={680} height={520}>
+        <Step2Error />
+      </DCArtboard>
+    </DCSection>
+    <DCSection id="interactive" title="Prototipo interactivo">
+      <DCArtboard id="demo" label="Demo completa — interactiva" width={680} height={520}>
+        <InteractiveDemo />
+      </DCArtboard>
+    </DCSection>
+  </DesignCanvas>
+);
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
