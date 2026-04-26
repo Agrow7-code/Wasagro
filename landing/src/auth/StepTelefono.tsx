@@ -23,15 +23,19 @@ export function StepTelefono({ selectedCountry, setSelectedCountry, onContinue }
     c.code.includes(search)
   )
 
+  // phone almacena SOLO dígitos (sin espacios ni formato)
+  const digits = phone.replace(/\D/g, '')
+  const isValid = digits.length === selectedCountry.maxLength
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
-    if (!phone || loading) return
+    if (!isValid || loading) return
 
     setError(null)
     setLoading(true)
 
     try {
-      const fullPhone = `${selectedCountry.code}${phone.replace(/\D/g, '')}`
+      const fullPhone = `${selectedCountry.code}${digits}`
       await onContinue(fullPhone)
     } catch (err: any) {
       setError(err.message || 'Número no registrado en Wasagro. Contacta a tu administrador.')
@@ -76,11 +80,18 @@ export function StepTelefono({ selectedCountry, setSelectedCountry, onContinue }
           {/* Input */}
           <input
             type="tel"
+            inputMode="numeric"
             value={phone}
-            onChange={(e) => { setPhone(e.target.value); setError(null); }}
+            onChange={(e) => {
+              // Solo dígitos, máximo maxLength del país seleccionado
+              const raw = e.target.value.replace(/\D/g, '').slice(0, selectedCountry.maxLength)
+              setPhone(raw)
+              setError(null)
+            }}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder="999 999 999"
+            placeholder={selectedCountry.placeholder}
+            maxLength={selectedCountry.maxLength}
             className="flex-1 h-[52px] px-4 font-mono text-base tracking-[0.05em] outline-none transition-all"
             style={{
               background: error ? '#FFF8F6' : DesignConfig.colors.marfil,
@@ -93,6 +104,13 @@ export function StepTelefono({ selectedCountry, setSelectedCountry, onContinue }
             disabled={loading}
           />
         </div>
+
+        {/* Hint dígitos */}
+        {!error && focused && digits.length > 0 && digits.length < selectedCountry.maxLength && (
+          <div className="mt-1.5 text-[11px] font-mono" style={{ color: 'rgba(13,15,12,0.4)' }}>
+            {digits.length}/{selectedCountry.maxLength} dígitos
+          </div>
+        )}
 
         {/* Error Message */}
         {error && (
@@ -154,11 +172,11 @@ export function StepTelefono({ selectedCountry, setSelectedCountry, onContinue }
         </AnimatePresence>
       </div>
 
-      <PrimaryBtn 
-        loading={loading} 
-        disabled={!phone}
+      <PrimaryBtn
+        loading={loading}
+        disabled={!isValid}
         onClick={handleSubmit}
-        style={{ marginTop: 20, opacity: !phone ? 0.5 : 1 }}
+        style={{ marginTop: 20, opacity: !isValid ? 0.5 : 1 }}
       >
         Continuar →
       </PrimaryBtn>
