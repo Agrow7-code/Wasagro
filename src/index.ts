@@ -116,12 +116,13 @@ if (!process.env['VERCEL']) {
 
 const app = new Hono()
 
+const previewOriginRe = /^https:\/\/wasagro-.*\.vercel\.app$/
+
 app.use('/auth/*', cors({
-  origin: [
-    'https://wasagro.vercel.app',
-    'http://localhost:5173',
-    /https:\/\/wasagro-.*\.vercel\.app$/,
-  ],
+  origin: (origin, _c) => {
+    if (origin === 'https://wasagro.vercel.app' || origin === 'http://localhost:5173' || previewOriginRe.test(origin)) return origin
+    return null
+  },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
 }))
