@@ -24,7 +24,12 @@ export default function LoginPage() {
       body: JSON.stringify({ phone: fullPhone }),
     })
 
-    const data = await res.json()
+    let data: any
+    try {
+      data = await res.json()
+    } catch {
+      throw new Error('Error de conexión. Intenta de nuevo.')
+    }
     if (!res.ok) throw new Error(data.error || 'Error al solicitar código')
 
     setPhone(fullPhone)
@@ -38,7 +43,12 @@ export default function LoginPage() {
       body: JSON.stringify({ phone, code }),
     })
 
-    const data = await res.json()
+    let data: any
+    try {
+      data = await res.json()
+    } catch {
+      throw new Error('Error de conexión. Intenta de nuevo.')
+    }
     if (!res.ok) throw new Error(data.error || 'Error al verificar código')
 
     const user = data.user as User
@@ -98,12 +108,13 @@ export default function LoginPage() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <StepOTP
-                phone={phone}
-                onVerify={handleVerifyOTP}
-                onResend={() => handleRequestOTP(phone)}
-                onBack={() => setStep('telefono')}
-              />
+        <StepOTP
+          phone={phone}
+          countryCode={selectedCountry.code}
+          onVerify={handleVerifyOTP}
+          onResend={() => handleRequestOTP(phone)}
+          onBack={() => setStep('telefono')}
+        />
             </motion.div>
           )}
         </AnimatePresence>

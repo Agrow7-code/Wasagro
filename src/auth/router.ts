@@ -22,17 +22,32 @@ authRouter.post('/request-otp', async (c) => {
 
     const code = await requestOTP(phone)
 
+    // Responder al frontend INMEDIATAMENTE.
+    // El envío por WhatsApp se hace en background (pg-boss si está disponible,
+    // o fire-and-forget en serverless donde no hay proceso persistente).
+    // Si el envío falla, el usuario puede pedir reenvío desde el step OTP.
     if (isPgBossReady()) {
-      await getBoss().send('enviar-otp-whatsapp', { phone, code, traceId: trace.id }, {
+      getBoss().send('enviar-otp-whatsapp', { phone, code, traceId: trace.id }, {
         retryLimit: 3,
         retryDelay: 5,
         retryBackoff: true,
         expireInSeconds: 300,
+      }).then(() => {
+        trace.event({ name: 'otp_queued', output: { via: 'pg-boss' } })
+      }).catch((err: unknown) => {
+        console.error('[auth] Error enqueuing OTP job:', err)
+        trace.event({ name: 'otp_queue_failed', level: 'ERROR', output: { error: String(err) } })
       })
-      trace.event({ name: 'otp_queued', output: { via: 'pg-boss' } })
     } else {
-      await sendOTPViaWhatsApp(phone, code)
-      trace.event({ name: 'otp_sent_direct', output: { via: 'direct' } })
+      sendOTPViaWhatsApp(phone, code)
+        .then(() => {
+          trace.event({ name: 'otp_sent_direct', output: { via: 'direct' } })
+          console.log(`[auth] OTP enviado a ${phone.slice(-4)}***`)
+        })
+        .catch((err: unknown) => {
+          console.error(`[auth] Error enviando OTP a ${phone.slice(-4)}***:`, err)
+          trace.event({ name: 'otp_send_failed', level: 'ERROR', output: { error: String(err) } })
+        })
     }
 
     return c.json({ status: 'sent' })

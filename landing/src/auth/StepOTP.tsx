@@ -5,12 +5,13 @@ import { LogoMark, Divider, PrimaryBtn, DesignConfig } from './DesignComponents'
 
 interface StepOTPProps {
   phone: string
+  countryCode: string
   onVerify: (code: string) => Promise<void>
   onResend: () => Promise<void>
   onBack: () => void
 }
 
-export function StepOTP({ phone, onVerify, onResend, onBack }: StepOTPProps) {
+export function StepOTP({ phone, countryCode, onVerify, onResend, onBack }: StepOTPProps) {
   const [code, setCode] = useState(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -83,7 +84,7 @@ export function StepOTP({ phone, onVerify, onResend, onBack }: StepOTPProps) {
         Enviamos un código de 6 dígitos al
       </div>
       <div className="font-mono font-bold text-[15px] mb-1.5" style={{ color: DesignConfig.colors.tierra }}>
-        +{phone.slice(0, 3)} *** *** {phone.slice(-3)}
+        +{countryCode} *** *** {phone.slice(-3)}
       </div>
       <div className="text-xs mb-6 underline cursor-pointer" style={{ color: DesignConfig.colors.tierraSuave }} onClick={onBack}>
         ¿No es tu número? Volver

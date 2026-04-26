@@ -8,7 +8,8 @@ app.get('/health', (c) => c.json({ status: 'ok' }))
 app.route('/auth', authRouter)
 
 export const config = {
-  runtime: 'nodejs'
+  runtime: 'nodejs',
+  maxDuration: 60,
 }
 
 export default handle(app)
