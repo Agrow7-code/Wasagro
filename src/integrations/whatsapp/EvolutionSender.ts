@@ -42,7 +42,7 @@ export class EvolutionSender implements IWhatsAppSender {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        throw new Error('[EvolutionSender] Timeout: Evolution API no respondió en 10s')
+        throw new Error(`[EvolutionSender] Timeout: Evolution API no respondió en ${timeoutMs / 1000}s`)
       }
       throw err
     } finally {
