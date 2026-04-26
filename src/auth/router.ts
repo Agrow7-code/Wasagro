@@ -3,6 +3,7 @@ import { requestOTP, verifyOTP } from './otpService.js'
 import { sendOTPViaWhatsApp } from './whatsappAuthService.js'
 import { getUserByPhone } from '../pipeline/supabaseQueries.js'
 import { langfuse } from '../integrations/langfuse.js'
+import { isPgBossReady, getBoss } from '../workers/pgBoss.js'
 
 export const authRouter = new Hono()
 
@@ -13,24 +14,27 @@ authRouter.post('/request-otp', async (c) => {
   const trace = langfuse.trace({ name: 'auth_request_otp', input: { phone } })
 
   try {
-    // 1. Verificar que el usuario existe
     const usuario = await getUserByPhone(phone)
     if (!usuario) {
       trace.event({ name: 'user_not_found', level: 'WARNING' })
       return c.json({ error: 'Número no registrado en Wasagro. Contacta a tu administrador.' }, 404)
     }
 
-    // 2. Generar y guardar OTP
     const code = await requestOTP(phone)
 
-    // 3. Enviar por WhatsApp en background — no bloqueamos la respuesta al usuario.
-    // El OTP ya está guardado en DB; si WhatsApp llega tarde (cold start de Evolution)
-    // el usuario simplemente espera en la pantalla de código.
-    sendOTPViaWhatsApp(phone, code).catch(err =>
-      console.error('[auth] WhatsApp send failed:', err?.message ?? err)
-    )
+    if (isPgBossReady()) {
+      await getBoss().send('enviar-otp-whatsapp', { phone, code, traceId: trace.id }, {
+        retryLimit: 3,
+        retryDelay: 5,
+        retryBackoff: true,
+        expireInSeconds: 300,
+      })
+      trace.event({ name: 'otp_queued', output: { via: 'pg-boss' } })
+    } else {
+      await sendOTPViaWhatsApp(phone, code)
+      trace.event({ name: 'otp_sent_direct', output: { via: 'direct' } })
+    }
 
-    trace.event({ name: 'otp_sent' })
     return c.json({ status: 'sent' })
   } catch (err: any) {
     trace.event({ name: 'error', level: 'ERROR', output: { error: err.message } })
