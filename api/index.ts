@@ -19,7 +19,7 @@ const readBody = (req: Request): Promise<unknown> =>
   ])
 
 export default async function handler(req: Request): Promise<Response> {
-  const url = new URL(req.url)
+  const url = new URL(req.url, 'http://localhost')
   const path = url.pathname
   const origin = req.headers.get('Origin') ?? '*'
 
