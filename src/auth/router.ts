@@ -5,66 +5,62 @@ import { getUserByPhone } from '../pipeline/supabaseQueries.js'
 
 export const authRouter = new Hono()
 
-authRouter.get('/ping', (c) => c.json({ status: 'pong' }))
+// Helper de timeout para que nada tarde más de 4 segundos
+const callWithTimeout = async (promise: Promise<any>, timeoutMs: number) => {
+  let timer: any;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('TIMEOUT_LIMIT')), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
 
 authRouter.post('/request-otp', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '')
+  const body = await c.req.json().catch(() => ({}));
+  const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '');
   
-  if (!phone) return c.json({ error: 'Número de teléfono requerido' }, 400)
+  if (!phone) return c.json({ error: 'Falta teléfono' }, 400);
 
   try {
-    const usuario = await getUserByPhone(phone)
-    if (!usuario) return c.json({ error: 'Número no registrado' }, 404)
+    console.log(`[auth] Solicitando para ${phone}`);
 
-    const code = await requestOTP(phone)
+    // 1. Buscar usuario con timeout de 4s
+    const usuario = await callWithTimeout(getUserByPhone(phone), 4000)
+      .catch(err => { if (err.message === 'TIMEOUT_LIMIT') throw new Error('DB_LENTA'); throw err; });
 
-    // Envío de WhatsApp en background
-    // No usamos await para que la respuesta HTTP salga de inmediato
-    const sendWhatsApp = async () => {
-      try {
-        await sendOTPViaWhatsApp(phone, code)
-      } catch (e) {
-        console.error('[WhatsApp Background Error]:', e)
-      }
-    }
+    if (!usuario) return c.json({ error: 'Número no registrado' }, 404);
 
-    // Le decimos a Hono/Vercel que no mate el proceso hasta que esto termine
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(sendWhatsApp())
-    } else {
-      sendWhatsApp()
-    }
+    // 2. Generar OTP con timeout de 4s
+    const code = await callWithTimeout(requestOTP(phone), 4000)
+      .catch(err => { if (err.message === 'TIMEOUT_LIMIT') throw new Error('DB_LENTA'); throw err; });
 
-    return c.json({ status: 'sent' })
+    // 3. Envío de WhatsApp (Totalmente asíncrono, sin await)
+    // No usamos waitUntil ni nada raro, solo fire-and-forget
+    sendOTPViaWhatsApp(phone, code).catch(e => console.error('[WhatsApp Error]:', e.message));
+
+    // 4. Responder inmediatamente
+    return c.json({ status: 'sent' });
 
   } catch (err: any) {
-    console.error(`[auth] Error:`, err.message)
-    return c.json({ error: 'Error al procesar solicitud' }, 500)
+    console.error(`[auth] Error crítico:`, err.message);
+    const msg = err.message === 'DB_LENTA' 
+      ? 'La base de datos no responde a tiempo. Reintenta.' 
+      : 'Error en el servidor';
+    return c.json({ error: msg }, 500);
   }
-})
+});
 
 authRouter.post('/verify-otp', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '')
-  const { code } = body
-
-  if (!phone || !code) return c.json({ error: 'Faltan datos' }, 400)
+  const body = await c.req.json().catch(() => ({}));
+  const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '');
+  const { code } = body;
 
   try {
-    const result = await verifyOTP(phone, code)
-    if (!result.success) return c.json({ error: result.error }, 401)
+    const result = await callWithTimeout(verifyOTP(phone, code), 4000);
+    if (!result.success) return c.json({ error: result.error }, 401);
 
-    const usuario = await getUserByPhone(phone)
-    return c.json({ 
-      user: {
-        id: usuario?.id,
-        phone: usuario?.phone,
-        rol: usuario?.rol,
-        nombre: usuario?.nombre
-      }
-    })
-  } catch (err: any) {
-    return c.json({ error: 'Error al verificar' }, 500)
+    const usuario = await getUserByPhone(phone);
+    return c.json({ user: { id: usuario?.id, phone: usuario?.phone, rol: usuario?.rol, nombre: usuario?.nombre } });
+  } catch (err) {
+    return c.json({ error: 'Error de verificación' }, 500);
   }
-})
+});

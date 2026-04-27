@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
-import { handle } from 'hono/vercel'
 import { authRouter } from '../src/auth/router.js'
 
-const app = new Hono().basePath('/api')
+const app = new Hono()
 
-// Montamos las rutas
+// Montamos las rutas con ambos prefijos para que Vercel no se pierda
+app.route('/api/auth', authRouter)
 app.route('/auth', authRouter)
 
-// Fallback de 404 para que no devuelva HTML
-app.notFound((c) => c.json({ error: 'Not Found' }, 404))
+// Fallback de seguridad
+app.notFound((c) => c.json({ error: 'Ruta no encontrada en el backend' }, 404))
 
-export default handle(app)
+export default async function handler(req: Request) {
+  return app.fetch(req)
+}
