@@ -2,7 +2,6 @@ import { Hono } from 'hono'
 import { requestOTP, verifyOTP } from './otpService.js'
 import { sendOTPViaWhatsApp } from './whatsappAuthService.js'
 import { getUserByPhone } from '../pipeline/supabaseQueries.js'
-import { isPgBossReady, getBoss } from '../workers/pgBoss.js'
 
 export const authRouter = new Hono()
 
@@ -15,46 +14,33 @@ authRouter.post('/request-otp', async (c) => {
   if (!phone) return c.json({ error: 'Número de teléfono requerido' }, 400)
 
   try {
-    // 1. DB Lookup con timeout forzado de 5s para evitar el 504 de Vercel
-    const usuarioPromise = getUserByPhone(phone)
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('TIMEOUT_DB')), 5000)
-    )
-    
-    const usuario = await Promise.race([usuarioPromise, timeoutPromise]) as any
+    const usuario = await getUserByPhone(phone)
     if (!usuario) return c.json({ error: 'Número no registrado' }, 404)
 
-    // 2. Generar OTP
     const code = await requestOTP(phone)
 
-    // 3. Envío de WhatsApp (DESACOPLADO TOTALMENTE vía waitUntil)
-    // Esto le dice a Vercel: "Responde al cliente YA, pero deja este proceso vivo para enviar el mensaje"
-    const taskEnvio = (async () => {
+    // Envío de WhatsApp en background
+    // No usamos await para que la respuesta HTTP salga de inmediato
+    const sendWhatsApp = async () => {
       try {
-        if (isPgBossReady()) {
-          await getBoss().send('enviar-otp-whatsapp', { phone, code, traceId: 'no-trace' })
-        } else {
-          await sendOTPViaWhatsApp(phone, code)
-        }
+        await sendOTPViaWhatsApp(phone, code)
       } catch (e) {
-        console.error('[auth] Error diferido WhatsApp:', e)
+        console.error('[WhatsApp Background Error]:', e)
       }
-    })()
-
-    // Si estamos en Vercel, usamos su mecanismo oficial de background tasks
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(taskEnvio)
     }
 
-    // 4. Responder inmediatamente
+    // Le decimos a Hono/Vercel que no mate el proceso hasta que esto termine
+    if (c.executionCtx) {
+      c.executionCtx.waitUntil(sendWhatsApp())
+    } else {
+      sendWhatsApp()
+    }
+
     return c.json({ status: 'sent' })
 
   } catch (err: any) {
-    console.error(`[auth] Error en request-otp:`, err.message)
-    const msg = err.message === 'TIMEOUT_DB' 
-      ? 'La base de datos está lenta, intenta de nuevo.' 
-      : 'Error interno del servidor'
-    return c.json({ error: msg }, 500)
+    console.error(`[auth] Error:`, err.message)
+    return c.json({ error: 'Error al procesar solicitud' }, 500)
   }
 })
 
