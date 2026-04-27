@@ -25,10 +25,33 @@ Semana: {{FECHA_INICIO}} al {{FECHA_FIN}}
 ## Eventos de la semana
 {{EVENTOS_AGREGADOS}}
 
-## Formato del resumen
+## Formato del resumen (JSON Obligatorio)
 
-Máximo 10 líneas. Estructura:
+Devuelve **UNICAMENTE** un objeto JSON con esta estructura exacta:
 
+```json
+{
+  "semana": "{{FECHA_INICIO}} al {{FECHA_FIN}}",
+  "finca_id": "{{FINCA_NOMBRE}}",
+  "total_eventos": 0,
+  "eventos_por_tipo": {
+    "insumo": 0,
+    "labor": 0
+  },
+  "alertas": [
+    {
+      "tipo": "plaga",
+      "descripcion": "Descripción factual de la alerta",
+      "severidad": "baja|media|alta"
+    }
+  ],
+  "resumen_narrativo": "Resumen semanal de [finca] — [fecha_inicio] al [fecha_fin]...",
+  "requiere_atencion": false,
+  "es_solo_informativo": true
+}
+```
+
+El `resumen_narrativo` debe tener máximo 10 líneas. Estructura:
 1. **Línea de apertura**: "Resumen semanal de [finca] — [fecha_inicio] al [fecha_fin]"
 2. **Actividades principales**: Las 2-3 actividades más relevantes de la semana
 3. **Alertas** (si aplica): Plagas reportadas, observaciones pendientes de revisión ⚠️
