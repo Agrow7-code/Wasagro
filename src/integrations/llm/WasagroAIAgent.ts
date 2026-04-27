@@ -395,7 +395,8 @@ export class WasagroAIAgent implements IWasagroLLM {
         responseFormat: 'json_object', 
         traceId, 
         generationName: 'llamar',
-        modelClass: 'fast' // Enrutamiento ultra-rápido (Flash)
+        modelClass: 'fast', // Enrutamiento ultra-rápido (Flash)
+        temperature: 0 // CRÍTICO: 0 para clasificación determinista
       })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
