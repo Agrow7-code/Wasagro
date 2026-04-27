@@ -1,5 +1,7 @@
 import type { LangfuseTraceClient } from 'langfuse'
 
+export type ModelClass = 'fast' | 'reasoning'
+
 export interface LLMGeneracionOpciones {
   systemPrompt?: string
   temperature?: number
@@ -8,6 +10,7 @@ export interface LLMGeneracionOpciones {
   traceId: string
   generationName: string
   generationInput?: unknown
+  modelClass?: ModelClass
 }
 
 export interface ILLMAdapter {

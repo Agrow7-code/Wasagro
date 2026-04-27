@@ -57,6 +57,7 @@ export class IntentDetector {
         traceId,
         generationName: 'intent-detector',
         generationInput: input,
+        modelClass: 'fast', // Forzar modelo rápido para el Router
       })
 
       const parsed = RespuestaLLMSchema.safeParse(JSON.parse(raw))
