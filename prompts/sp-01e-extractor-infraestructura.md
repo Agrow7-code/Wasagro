@@ -62,35 +62,29 @@ Busca el lote en `{{LISTA_LOTES}}` si el agricultor lo menciona:
 
 ```json
 {
-  "tipo_evento": "infraestructura",
-  "lote_id": null,
-  "lote_detectado_raw": null,
-  "fecha_evento": null,
-  "confidence_score": 0.0,
-  "requiere_validacion": false,
-  "campos_extraidos": {
-    "infra_tipo": "riel|bomba|riego|cerca|camino|bodega|empacadora|otro",
-    "descripcion_dano": null,
-    "estado": "dañado|reparado|en_reparacion|null",
-    "requiere_accion": true,
-    "urgencia": "inmediata|esta_semana|puede_esperar|null"
-  },
-  "confidence_por_campo": {
-    "lote_id": 0.0,
-    "infra_tipo": 0.0,
-    "estado": 0.0,
-    "urgencia": 0.0
-  },
-  "campos_faltantes": [],
-  "requiere_clarificacion": false,
-  "pregunta_sugerida": null
+"tipo_evento": "infraestructura",
+"lote_id": null,
+"lote_detectado_raw": null,
+"fecha_evento": null,
+"confidence_score": 0.0,
+"requiere_validacion": false,
+"campos_extraidos": {
+"infra_tipo": "riel|bomba|riego|cerca|camino|bodega|empacadora|otro",
+"descripcion_dano": null,
+"estado": "dañado|reparado|en_reparacion|null"
+},
+"confidence_por_campo": {
+"lote_id": 0.0,
+"infra_tipo": 0.0,
+"estado": 0.0
+},
+"campos_faltantes": [],
+"requiere_clarificacion": false,
+"pregunta_sugerida": null
 }
 ```
 
-### `urgencia: "inmediata"` cuando
-
-- El daño está paralizando operaciones (riel roto que detiene despacho de cajas)
-- Hay riesgo de pérdida de cosecha inminente
+**NO incluyas `requiere_accion` ni `urgencia` en la salida.** Esos campos los deriva el backend automáticamente a partir de `estado` e `infra_tipo`. Tu trabajo es solo extraer lo que el agricultor dijo.
 
 ### Si necesita clarificación
 

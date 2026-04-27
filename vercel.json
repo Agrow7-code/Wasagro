@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "outputDirectory": "public",
+  "outputDirectory": "landing/dist",
   "functions": {
     "api/index.ts": {
       "maxDuration": 30
@@ -25,11 +25,11 @@
     },
     {
       "source": "/(login|dashboard|gerente|exportadora|agricultor)(.*)",
-      "destination": "/landing/index.html"
+      "destination": "/index.html"
     },
     {
       "source": "/(.*)",
-      "destination": "/landing/$1"
+      "destination": "/$1"
     }
   ]
 }
