@@ -7,8 +7,8 @@ import { StepTelefono } from './StepTelefono'
 import { StepOTP } from './StepOTP'
 import { DotGrid, Panel, DesignConfig } from './DesignComponents'
 
-// URL del backend (vacío para usar rutas relativas en Vercel)
-const API_URL = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.MODE === 'production' ? '/api' : ''
+// URL del backend (Usamos /api como prefijo consistente para proxy en dev y Vercel en prod)
+const API_URL = '/api'
 
 export default function LoginPage() {
   const [step, setStep] = useState<'telefono' | 'otp'>('telefono')
@@ -18,63 +18,84 @@ export default function LoginPage() {
   const navigate = useNavigate()
 
   const handleRequestOTP = async (fullPhone: string) => {
-    const res = await fetch(`${API_URL}/auth/request-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: fullPhone }),
-    })
-
-    let data: any
     try {
-      data = await res.json()
-    } catch {
-      throw new Error('Error de conexión. Intenta de nuevo.')
-    }
-    if (!res.ok) throw new Error(data.error || 'Error al solicitar código')
+      console.log(`[Login] Solicitando OTP para ${fullPhone}...`)
+      
+      const res = await fetch(`${API_URL}/auth/request-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: fullPhone }),
+      })
 
-    setPhone(fullPhone)
-    setStep('otp')
+      const data = await res.json().catch(() => ({ error: 'Error de formato en respuesta del servidor' }))
+
+      if (!res.ok) {
+        // Mensajes amigables basados en el status o el error del backend
+        if (res.status === 404) {
+          throw new Error('Número no registrado en Wasagro. Contacta a tu administrador.')
+        }
+        throw new Error(data.error || `Error ${res.status}: No se pudo solicitar el código`)
+      }
+
+      console.log('[Login] OTP solicitado con éxito')
+      setPhone(fullPhone)
+      setStep('otp')
+    } catch (err: any) {
+      console.error('[Login] Error en handleRequestOTP:', err)
+      
+      // Manejar errores de red (cuando fetch falla antes de recibir respuesta)
+      if (err instanceof TypeError || err.message?.includes('fetch')) {
+        throw new Error('No se pudo conectar con el servidor. Verifica tu internet.')
+      }
+      throw err
+    }
   }
 
   const handleVerifyOTP = async (code: string) => {
-    const res = await fetch(`${API_URL}/auth/verify-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, code }),
-    })
-
-    let data: any
     try {
-      data = await res.json()
-    } catch {
-      throw new Error('Error de conexión. Intenta de nuevo.')
-    }
-    if (!res.ok) throw new Error(data.error || 'Error al verificar código')
+      console.log('[Login] Verificando código...')
+      
+      const res = await fetch(`${API_URL}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code }),
+      })
 
-    const user = data.user as User
-    login(user)
+      const data = await res.json().catch(() => ({ error: 'Error de formato en respuesta del servidor' }))
 
-    // Redirección por rol
-    switch (user.rol) {
-      case 'administrador':
-      case 'propietario':
-      case 'admin_org':
-        navigate('/dashboard')
-        break
-      case 'gerente':
-      case 'director':
-        navigate('/dashboard/gerente')
-        break
-      case 'analista':
-        navigate('/dashboard/exportadora')
-        break
-      case 'agricultor':
-      case 'tecnico':
-      case 'jefe_finca':
-        navigate('/dashboard/agricultor')
-        break
-      default:
-        navigate('/dashboard')
+      if (!res.ok) {
+        throw new Error(data.error || 'Código incorrecto o expirado')
+      }
+
+      const user = data.user as User
+      login(user)
+      console.log('[Login] Verificación exitosa, redirigiendo...', user.rol)
+
+      // Redirección por rol
+      switch (user.rol) {
+        case 'administrador':
+        case 'propietario':
+        case 'admin_org':
+          navigate('/dashboard')
+          break
+        case 'gerente':
+        case 'director':
+          navigate('/dashboard/gerente')
+          break
+        case 'analista':
+          navigate('/dashboard/exportadora')
+          break
+        case 'agricultor':
+        case 'tecnico':
+        case 'jefe_finca':
+          navigate('/dashboard/agricultor')
+          break
+        default:
+          navigate('/dashboard')
+      }
+    } catch (err: any) {
+      console.error('[Login] Error en handleVerifyOTP:', err)
+      throw err
     }
   }
 
@@ -108,13 +129,13 @@ export default function LoginPage() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
             >
-        <StepOTP
-          phone={phone}
-          countryCode={selectedCountry.code}
-          onVerify={handleVerifyOTP}
-          onResend={() => handleRequestOTP(phone)}
-          onBack={() => setStep('telefono')}
-        />
+              <StepOTP
+                phone={phone}
+                countryCode={selectedCountry.code}
+                onVerify={handleVerifyOTP}
+                onResend={() => handleRequestOTP(phone)}
+                onBack={() => setStep('telefono')}
+              />
             </motion.div>
           )}
         </AnimatePresence>

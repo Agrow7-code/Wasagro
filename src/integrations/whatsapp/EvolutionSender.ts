@@ -20,7 +20,7 @@ export class EvolutionSender implements IWhatsAppSender {
     this.#fetch = config.fetchClient ?? globalThis.fetch
   }
 
-  async enviarTexto(to: string, texto: string, timeoutMs = 60_000): Promise<void> {
+  async enviarTexto(to: string, texto: string, timeoutMs = 15_000): Promise<void> {
     const url = `${this.#apiUrl}/message/sendText/${this.#instance}`
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
