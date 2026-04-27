@@ -1,11 +1,6 @@
 {
   "version": 2,
   "outputDirectory": "landing/dist",
-  "functions": {
-    "api/index.ts": {
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
