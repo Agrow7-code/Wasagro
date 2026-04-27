@@ -3,14 +3,6 @@
   "outputDirectory": "landing/dist",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/auth/(.*)",
-      "destination": "/api"
-    },
-    {
       "source": "/(login|dashboard|gerente|exportadora|agricultor)(.*)",
       "destination": "/index.html"
     }
