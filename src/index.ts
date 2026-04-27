@@ -79,7 +79,7 @@ inicializarPipeline(sender, llm, {
 
 // ── Startup background services (only for standalone server, not Vercel) ─────
 if (!process.env['VERCEL']) {
-  await initPgBoss()
+  await initPgBoss().catch(err => console.error('[pg-boss] Error init:', err))
 
   // Cron: lunes 8:00am hora Ecuador (UTC-5 = 13:00 UTC)
   cron.schedule('0 13 * * 1', () => {
@@ -124,6 +124,7 @@ if (!process.env['VERCEL']) {
       })
   }, { timezone: 'UTC' })
 }
+
 const app = new Hono()
 
 // Logger para depuración en Vercel
@@ -137,9 +138,9 @@ app.use('*', async (c, next) => {
 const previewOriginRe = /^https:\/\/wasagro-.*\.vercel\.app$/
 
 app.use('*', cors({
-  origin: (origin, _c) => {
-    if (origin === 'https://wasagro.vercel.app' || origin === 'http://localhost:5173' || previewOriginRe.test(origin)) return origin
-    return origin // En dev/preview permitir todo para evitar bloqueos de CORS ahora
+  origin: (origin) => {
+    if (!origin || origin === 'https://wasagro.vercel.app' || origin === 'http://localhost:5173' || previewOriginRe.test(origin)) return origin
+    return origin 
   },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
@@ -152,14 +153,51 @@ app.get('/health', (c) => c.json({
 
 app.route('/webhook', webhookRouter)
 app.route('/auth', authRouter)
-// Soporte explícito para el prefijo /api que envía el frontend
 app.route('/api/auth', authRouter) 
 app.route('/api/webhook', webhookRouter)
 
-export { app, llm }
-
 // POST /reportes/semanal — trigger manual de reportes (protegido por secret)
 app.post('/reportes/semanal', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  if (!secret || secret !== process.env['REPORTE_SECRET']) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const trace = langfuse.trace({ name: 'reporte_semanal_manual' })
+
+  void generarYEnviarReportes(llm, sender)
+    .then(({ procesadas, errores }) => {
+      trace.event({ name: 'completado', output: { procesadas, errores } })
+    })
+    .catch((err: unknown) => {
+      trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+      console.error('[reportes] Error en trigger manual:', err)
+    })
+
+  return c.json({ status: 'triggered' }, 202)
+})
+
+// POST /alertas/clima — trigger manual de alertas de clima (protegido por secret)
+app.post('/alertas/clima', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  if (!secret || secret !== process.env['REPORTE_SECRET']) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const trace = langfuse.trace({ name: 'alertas_clima_manual' })
+  void enviarAlertasClima(sender)
+    .then(({ enviadas, errores }) => {
+      trace.event({ name: 'completado', output: { enviadas, errores } })
+    })
+    .catch((err: unknown) => {
+      trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+      console.error('[alertas] Error en trigger manual:', err)
+    })
+
+  return c.json({ status: 'triggered' }, 202)
+})
+
+export { app, llm }
 
 if (process.env['NODE_ENV'] !== 'test') {
   serve({ fetch: app.fetch, port: Number(process.env['PORT'] ?? 3000) })
