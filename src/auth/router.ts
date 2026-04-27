@@ -33,11 +33,14 @@ authRouter.post('/request-otp', async (c) => {
     const code = await callWithTimeout(requestOTP(phone), 4000)
       .catch(err => { if (err.message === 'TIMEOUT_LIMIT') throw new Error('DB_LENTA'); throw err; });
 
-    // 3. Envío de WhatsApp (Totalmente asíncrono, sin await)
-    // No usamos waitUntil ni nada raro, solo fire-and-forget
-    sendOTPViaWhatsApp(phone, code).catch(e => console.error('[WhatsApp Error]:', e.message));
+    // 3. Envío de WhatsApp (Esperado para que Vercel no mate el proceso, pero con timeout de 6s)
+    // Esto asegura que el mensaje se intente enviar y que Vercel luego cierre la conexión HTTP sin 504.
+    await callWithTimeout(sendOTPViaWhatsApp(phone, code), 6000).catch(e => {
+      console.error('[WhatsApp Error Diferido]:', e.message);
+      // No fallamos la request si WhatsApp falla o se demora más de 6s. El OTP ya está en la DB.
+    });
 
-    // 4. Responder inmediatamente
+    // 4. Responder inmediatamente al frontend
     return c.json({ status: 'sent' });
 
   } catch (err: any) {
