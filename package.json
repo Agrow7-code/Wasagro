@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc",
+    "build": "tsc && cd landing && npm install && npm run build && cd .. && mkdir -p public/landing && cp -r landing/dist/* public/landing/",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

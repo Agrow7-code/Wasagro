@@ -37,6 +37,41 @@ responde EXACTAMENTE esto y nada más:
 
 ---
 
+## Reglas de decisión — evalúa en este orden
+
+Antes de mirar la tabla de tipos, evalúa estas reglas en orden. La primera que coincida define el tipo. NO sigas leyendo si una regla ya resolvió el tipo.
+
+### REGLA 1 — Señal monetaria = `gasto` (PRIORIDAD ABSOLUTA)
+
+Si el mensaje menciona un monto de dinero ("gasté", "compré", "pagué", "costó", "$", número + moneda), clasifica como `gasto`. **No importa qué se compró.** Un motor, una bomba, una cerca, una herramienta, una reparación — si hay dinero de por medio, es `gasto`.
+
+- "Gasté 200 en un motor" → `gasto`
+- "Compré una bomba por $150" → `gasto`
+- "Pagué 50 de flete" → `gasto`
+- "La bomba se dañó" → `infraestructura` (no hay monto)
+- "Se cayó la cerca del lote 3" → `infraestructura` (no hay monto)
+
+### REGLA 2 — Aplicar producto en campo = `insumo`
+
+Si el mensaje es sobre aplicar un producto en el campo → `insumo`. Si es sobre comprarlo o pagar por él → `gasto` (Regla 1).
+
+- "Apliqué mancozeb" → `insumo`
+- "Compré mancozeb por $30" → `gasto` (Regla 1)
+
+### REGLA 3 — Cosecha vs calidad vs venta
+
+- Solo cantidad cosechada → `cosecha`
+- Brix, rechazo, calibre, fermentación → `calidad`
+- Cantidad Y precio/comprador → `venta`
+
+### REGLA 4 — "Helada" en cacao = `plaga`
+
+Cuando un agricultor de cacao dice "helada" se refiere a un brote severo de moniliasis, NO a temperatura baja. Clasifica como `plaga`.
+
+### REGLA 5 — Si ninguna regla anterior coincide, usa la tabla
+
+Solo si las Reglas 1-4 no resolvieron el tipo, consulta la tabla abajo.
+
 ## Tipos de evento
 
 | Tipo | Cuándo aplica |
@@ -46,21 +81,13 @@ responde EXACTAMENTE esto y nada más:
 | `cosecha` | Cortó, pesó, recogió producto: cajas, quintales, racimos, mazorcas |
 | `calidad` | Midió o evaluó calidad: brix, rechazo, calibre, fermentación, humedad del grano |
 | `venta` | Vendió o despachó producto a un comprador: precio, factura, despacho, ingreso |
-| `gasto` | Compró algo o pagó un servicio: insumos, jornales, flete, reparaciones |
+| `gasto` | Compró algo o pagó un servicio: insumos, jornales, flete, reparaciones, equipos |
 | `plaga` | Vio o reporta enfermedad/plaga: Sigatoka, moniliasis, escoba, roya, cochinilla, mazorca negra |
 | `clima` | Evento del tiempo que afectó la finca: lluvia fuerte, viento, inundación, sequía |
-| `infraestructura` | Daño o trabajo en instalaciones: riel roto, bomba dañada, pozo, cerca |
+| `infraestructura` | Daño o trabajo en instalaciones SIN monto de dinero: riel roto, bomba dañada, pozo, cerca |
 | `consulta` | Pregunta o duda que no es un reporte de campo |
 | `saludo` | Saludo puro, sin información de campo |
 | `ambiguo` | No puedes determinar el tipo con confianza |
-
-**Nota sobre calidad vs cosecha:** Si el mensaje menciona solo cantidad cosechada → `cosecha`. Si menciona brix, rechazo, calibre, fermentación → `calidad`. Si menciona cantidad Y precio/comprador → probablemente `venta`.
-
-**Nota sobre gasto vs insumo:** Si el mensaje es sobre aplicar un producto en el campo → `insumo`. Si es sobre comprarlo o pagar por él → `gasto`.
-
-**Nota sobre gasto vs infraestructura — MUY IMPORTANTE:** Si el mensaje menciona un monto de dinero ("gasté", "compré", "pagué", "costó", "$", número + moneda) junto con una compra o pago, clasifica como `gasto` SIN IMPORTAR qué se compró. Comprar un motor, una bomba, una cerca o una herramienta → `gasto`. Reportar que un motor se dañó, que una cerca se cayó, o hacer una reparación sin mención de compra → `infraestructura`. La señal monetaria tiene PRIORIDAD absoluta sobre el objeto mencionado.
-
-**Nota sobre "helada":** Cuando un agricultor de cacao dice "helada" se refiere a un brote severo de moniliasis, NO a temperatura baja. Clasifica como `plaga`.
 
 ## Formato de salida
 
