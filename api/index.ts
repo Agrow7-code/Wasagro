@@ -2,7 +2,7 @@ import { requestOTP, verifyOTP } from '../src/auth/otpService.js'
 import { sendOTPViaWhatsApp } from '../src/auth/whatsappAuthService.js'
 import { getUserByPhone } from '../src/pipeline/supabaseQueries.js'
 
-export const config = { maxDuration: 30 }
+export const config = { runtime: 'edge' }
 
 const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
