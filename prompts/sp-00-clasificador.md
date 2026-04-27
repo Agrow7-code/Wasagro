@@ -37,40 +37,35 @@ responde EXACTAMENTE esto y nada más:
 
 ---
 
-## Reglas de decisión — evalúa en este orden
+## Reglas Multi-Evento y Prioridades
 
-Antes de mirar la tabla de tipos, evalúa estas reglas en orden. La primera que coincida define el tipo. NO sigas leyendo si una regla ya resolvió el tipo.
+El agricultor puede reportar **varias cosas en un solo mensaje**. Evalúa el mensaje completo y selecciona **TODOS** los tipos que apliquen.
 
-### REGLA 1 — Señal monetaria = `gasto` (PRIORIDAD ABSOLUTA)
+### REGLA 1 — Compras y Gastos (Señal Monetaria)
+Si el mensaje menciona un monto de dinero ("gasté", "compré", "pagué", "costó", "$", número + moneda), el array de resultados **DEBE incluir `gasto`**. 
+Si el gasto es sobre una infraestructura o máquina, **incluye AMBOS**.
+- "Gasté 200 en un motor" → `["gasto", "infraestructura"]`
+- "Compré una bomba por $150" → `["gasto", "infraestructura"]`
+- "Pagué 50 de flete" → `["gasto"]`
+- "La bomba se dañó" → `["infraestructura"]` (no hay monto)
 
-Si el mensaje menciona un monto de dinero ("gasté", "compré", "pagué", "costó", "$", número + moneda), clasifica como `gasto`. **No importa qué se compró.** Un motor, una bomba, una cerca, una herramienta, una reparación — si hay dinero de por medio, es `gasto`.
+### REGLA 2 — Insumos vs Compras
+Si el mensaje habla de aplicar producto Y de comprarlo, incluye ambos.
+- "Apliqué mancozeb" → `["insumo"]`
+- "Compré mancozeb por $30" → `["gasto"]`
+- "Compré urea por $100 y la apliqué hoy" → `["gasto", "insumo"]`
 
-- "Gasté 200 en un motor" → `gasto`
-- "Compré una bomba por $150" → `gasto`
-- "Pagué 50 de flete" → `gasto`
-- "La bomba se dañó" → `infraestructura` (no hay monto)
-- "Se cayó la cerca del lote 3" → `infraestructura` (no hay monto)
-
-### REGLA 2 — Aplicar producto en campo = `insumo`
-
-Si el mensaje es sobre aplicar un producto en el campo → `insumo`. Si es sobre comprarlo o pagar por él → `gasto` (Regla 1).
-
-- "Apliqué mancozeb" → `insumo`
-- "Compré mancozeb por $30" → `gasto` (Regla 1)
-
-### REGLA 3 — Cosecha vs calidad vs venta
-
-- Solo cantidad cosechada → `cosecha`
-- Brix, rechazo, calibre, fermentación → `calidad`
-- Cantidad Y precio/comprador → `venta`
+### REGLA 3 — Cosecha vs Venta vs Calidad
+- Solo cantidad cosechada → `["cosecha"]`
+- Brix, rechazo, calibre → `["calidad"]`
+- Vendió producto a un comprador → `["venta"]`
+- Cosechó y vendió → `["cosecha", "venta"]`
 
 ### REGLA 4 — "Helada" en cacao = `plaga`
+Cuando un agricultor de cacao dice "helada" se refiere a moniliasis. Clasifica como `["plaga"]`.
 
-Cuando un agricultor de cacao dice "helada" se refiere a un brote severo de moniliasis, NO a temperatura baja. Clasifica como `plaga`.
-
-### REGLA 5 — Si ninguna regla anterior coincide, usa la tabla
-
-Solo si las Reglas 1-4 no resolvieron el tipo, consulta la tabla abajo.
+### REGLA 5 — Múltiples eventos disjuntos
+- "Apliqué urea en lote 2 y el techo de la bodega se cayó" → `["insumo", "infraestructura"]`
 
 ## Tipos de evento
 

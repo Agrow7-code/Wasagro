@@ -49,14 +49,17 @@ Busca el lote en `{{LISTA_LOTES}}` si el agricultor lo menciona:
 
 | Tipo | Ejemplos |
 |------|----------|
+| `motor_equipo` | Motores, generadores, motoguadañas, tractores, maquinaria |
+| `bomba` | Bombas de fumigación, bombas de agua (específico para bombas) |
 | `riel` | Cable aéreo de empacadora roto, doblado, tensión baja |
-| `bomba` | Bomba de fumigación dañada, motoguadaña, motor |
 | `riego` | Gotero tapado, tubo roto, aspersor, canal |
 | `cerca` | Cerco dañado, poste caído |
 | `camino` | Camino bloqueado, zanja, derrumbe de acceso |
 | `bodega` | Daño en bodega, techo, puerta |
 | `empacadora` | Daño en área de empaque o clasificación |
 | `otro` | Infraestructura no listada |
+
+*Nota: Si el usuario menciona un motor, clasifícalo como `motor_equipo`, no lo fuerces a `bomba`.*
 
 ## Formato de salida
 
@@ -69,7 +72,7 @@ Busca el lote en `{{LISTA_LOTES}}` si el agricultor lo menciona:
 "confidence_score": 0.0,
 "requiere_validacion": false,
 "campos_extraidos": {
-"infra_tipo": "riel|bomba|riego|cerca|camino|bodega|empacadora|otro",
+"infra_tipo": "motor_equipo|riel|bomba|riego|cerca|camino|bodega|empacadora|otro",
 "descripcion_dano": null,
 "estado": "dañado|reparado|en_reparacion|null"
 },
@@ -84,7 +87,7 @@ Busca el lote en `{{LISTA_LOTES}}` si el agricultor lo menciona:
 }
 ```
 
-**NO incluyas `requiere_accion` ni `urgencia` en la salida.** Esos campos los deriva el backend automáticamente a partir de `estado` e `infra_tipo`. Tu trabajo es solo extraer lo que el agricultor dijo.
+**NO incluyas `requiere_accion` ni `urgencia` en la salida.** Esos campos los deriva el backend automáticamente a partir de `estado` e `infra_tipo`. Tu trabajo es solo extraer lo que el agricultor dijo en `campos_extraidos`.
 
 ### Si necesita clarificación
 

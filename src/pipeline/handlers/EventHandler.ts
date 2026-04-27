@@ -469,7 +469,8 @@ function buildResumenParaConfirmar(
     if (SKIP.has(k) || v === null || v === undefined) continue
     if (typeof v === 'object' && !Array.isArray(v)) {
       for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
-        if (v2 !== null && v2 !== undefined) lineas.push(`• ${k2}: ${v2}`)
+        if (SKIP.has(k2) || v2 === null || v2 === undefined) continue
+        lineas.push(`• ${k2}: ${v2}`)
       }
     } else {
       lineas.push(`• ${k}: ${v}`)
