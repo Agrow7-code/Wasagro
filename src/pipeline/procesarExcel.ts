@@ -9,6 +9,7 @@ import {
   actualizarMensaje,
   saveEvento,
 } from './supabaseQueries.js'
+import { enriquecerDatosEventoInfraestructura } from './derivadorInfraestructura.js'
 
 const MAX_MUESTRA_FILAS = 5
 const MAX_FILAS_BATCH = 500
@@ -175,7 +176,7 @@ export async function procesarFilasExcelConfirmadas(
         lote_id: null,
         tipo_evento: tipo === 'mixto' ? 'nota_libre' : tipo,
         status: 'requires_review',
-        datos_evento: fila as Record<string, unknown>,
+        datos_evento: enriquecerDatosEventoInfraestructura(fila as Record<string, unknown>),
         descripcion_raw: descripcionRaw,
         confidence_score: 0.5,
         requiere_validacion: true,

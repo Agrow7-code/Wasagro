@@ -9,19 +9,19 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/auth/(.*)",
-      "destination": "/api/auth/$1"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/webhook/(.*)",
-      "destination": "/api/webhook/$1"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/health",
-      "destination": "/api/health"
+      "destination": "/api/index.ts"
     },
     {
       "source": "/(login|dashboard|gerente|exportadora|agricultor)(.*)",

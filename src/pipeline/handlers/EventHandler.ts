@@ -3,6 +3,7 @@ import type { NormalizedMessage } from '../../integrations/whatsapp/NormalizedMe
 import type { EntradaEvento, EventoCampoExtraido } from '../../types/dominio/EventoCampo.js'
 import type { IEmbeddingService } from '../../integrations/llm/EmbeddingService.js'
 import { guardarEmbeddingEnEvento } from '../supabaseQueries.js'
+import { enriquecerDatosEventoInfraestructura } from '../derivadorInfraestructura.js'
 import {
   getUserByPhone,
   getFincaById,
@@ -200,19 +201,19 @@ export async function handleEvento(
         })
       }
 
-      const eventoId = await saveEvento({
-        finca_id: usuario.finca_id!,
-        lote_id: ext.lote_id,
-        tipo_evento,
-        status: evStatus,
-        datos_evento: {
-          ...ext.campos_extraidos,
-          ...(ext.lote_detectado_raw != null ? { lote_detectado_raw: ext.lote_detectado_raw } : {}),
-          _meta: {
-            confidence_por_campo: ext.confidence_por_campo,
-            campos_faltantes: ext.campos_faltantes,
-          },
-        },
+  const eventoId = await saveEvento({
+    finca_id: usuario.finca_id!,
+    lote_id: ext.lote_id,
+    tipo_evento,
+    status: evStatus,
+    datos_evento: enriquecerDatosEventoInfraestructura({
+      ...ext.campos_extraidos,
+      ...(ext.lote_detectado_raw != null ? { lote_detectado_raw: ext.lote_detectado_raw } : {}),
+      _meta: {
+        confidence_por_campo: ext.confidence_por_campo,
+        campos_faltantes: ext.campos_faltantes,
+      },
+    }),
         descripcion_raw: descRaw,
         confidence_score: ext.confidence_score,
         requiere_validacion: ext.requiere_validacion || ext.confidence_score < 0.5,
@@ -433,7 +434,7 @@ function buildResumenParaConfirmar(
   const loteLinea = loteNombre ? `• Lote: ${loteNombre}\n` : ''
   const fechaLinea = extracted.fecha_evento ? `• Fecha: ${extracted.fecha_evento}\n` : ''
 
-  const SKIP = new Set(['lote_detectado_raw'])
+  const SKIP = new Set(['lote_detectado_raw', '_meta', 'requiere_accion', 'urgencia'])
   const lineas: string[] = []
   for (const [k, v] of Object.entries(extracted.campos_extraidos)) {
     if (SKIP.has(k) || v === null || v === undefined) continue
