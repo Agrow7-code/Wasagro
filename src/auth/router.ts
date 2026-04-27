@@ -2,7 +2,6 @@ import { Hono } from 'hono'
 import { requestOTP, verifyOTP } from './otpService.js'
 import { sendOTPViaWhatsApp } from './whatsappAuthService.js'
 import { getUserByPhone } from '../pipeline/supabaseQueries.js'
-import { isPgBossReady, getBoss } from '../workers/pgBoss.js'
 
 export const authRouter = new Hono()
 
@@ -35,18 +34,13 @@ authRouter.post('/request-otp', async (c) => {
     const code = await requestOTP(phone)
     console.log(`[auth] OTP generado con éxito: ${code.slice(0, 2)}****`)
 
-    // Background send
+    // Fire-and-forget: no bloqueamos la respuesta al cliente
     const enviarWhatsApp = async () => {
       try {
-        console.log('[auth] Iniciando envío WhatsApp background...')
-        if (isPgBossReady()) {
-          await getBoss().send('enviar-otp-whatsapp', { phone, code, traceId: 'no-trace' })
-        } else {
-          await sendOTPViaWhatsApp(phone, code)
-        }
-        console.log('[auth] Envío WhatsApp background completado')
+        await sendOTPViaWhatsApp(phone, code)
+        console.log('[auth] OTP enviado por WhatsApp')
       } catch (err: any) {
-        console.error('[auth] Error en envío background:', err.message)
+        console.error('[auth] Error enviando OTP por WhatsApp:', err.message)
       }
     }
 
