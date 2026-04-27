@@ -12,10 +12,17 @@ export const EventoCampoExtraidoSchema = z.object({
   confidence_por_campo: z.record(z.number()),
   campos_faltantes: z.array(z.string()),
   requiere_clarificacion: z.boolean(),
-  pregunta_sugerida: z.string().nullable(),
+  pregunta_sugerida: z.string().nullable().optional(),
 })
 
 export type EventoCampoExtraido = z.infer<typeof EventoCampoExtraidoSchema>
+
+export const ExtraccionMultiEventoSchema = z.object({
+  eventos: z.array(EventoCampoExtraidoSchema),
+  pregunta_sugerida: z.string().nullable().optional(),
+})
+
+export type ExtraccionMultiEvento = z.infer<typeof ExtraccionMultiEventoSchema>
 
 const TipoEventoForzadoEnum = z.enum([
   'labor', 'insumo', 'plaga', 'clima', 'cosecha', 'gasto',
@@ -32,24 +39,28 @@ export const EntradaEventoSchema = z.object({
   pais: z.string().optional(),
   lista_lotes: z.string().optional(),
   tipo_forzado: TipoEventoForzadoEnum.optional(),
+  tipos_forzados: z.array(TipoEventoForzadoEnum).optional(), // Añadido para forzar múltiples tipos
   contexto_rag: z.string().optional(),
 })
 
 export type EntradaEvento = z.infer<typeof EntradaEventoSchema>
 
-export function sinEvento(mensaje: string): EventoCampoExtraido {
+export function sinEvento(mensaje: string): ExtraccionMultiEvento {
   return {
-    tipo_evento: 'sin_evento',
-    lote_id: null,
-    lote_detectado_raw: null,
-    fecha_evento: null,
-    confidence_score: 1.0,
-    requiere_validacion: false,
-    alerta_urgente: false,
-    campos_extraidos: {},
-    confidence_por_campo: {},
-    campos_faltantes: [],
-    requiere_clarificacion: false,
+    eventos: [{
+      tipo_evento: 'sin_evento',
+      lote_id: null,
+      lote_detectado_raw: null,
+      fecha_evento: null,
+      confidence_score: 1.0,
+      requiere_validacion: false,
+      alerta_urgente: false,
+      campos_extraidos: {},
+      confidence_por_campo: {},
+      campos_faltantes: [],
+      requiere_clarificacion: false,
+    }],
     pregunta_sugerida: mensaje,
   }
 }
+

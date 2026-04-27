@@ -5,9 +5,11 @@ import { langfuse as langfuseDefault } from '../langfuse.js'
 import type { IWasagroLLM } from './IWasagroLLM.js'
 import { LLMError } from './LLMError.js'
 import {
+  ExtraccionMultiEventoSchema,
   EventoCampoExtraidoSchema,
   sinEvento,
   type EntradaEvento,
+  type ExtraccionMultiEvento,
   type EventoCampoExtraido,
 } from '../../types/dominio/EventoCampo.js'
 import {
@@ -37,7 +39,7 @@ const EXTRACTOR_POR_TIPO: Record<string, string> = {
 }
 
 const ResultadoClasificacionSchema = z.object({
-  tipo_evento: z.enum(['insumo', 'labor', 'cosecha', 'calidad', 'venta', 'gasto', 'plaga', 'clima', 'infraestructura', 'consulta', 'saludo', 'ambiguo']),
+  tipos_evento: z.array(z.enum(['insumo', 'labor', 'cosecha', 'calidad', 'venta', 'gasto', 'plaga', 'clima', 'infraestructura', 'consulta', 'saludo', 'ambiguo'])),
   confidence: z.number().min(0).max(1),
   requiere_imagen_para_confirmar: z.boolean().default(false),
   motivo_ambiguo: z.string().nullable().default(null),
@@ -45,7 +47,6 @@ const ResultadoClasificacionSchema = z.object({
 })
 
 type ResultadoClasificacion = z.infer<typeof ResultadoClasificacionSchema>
-
 
   import type { ILLMAdapter } from './ILLMAdapter.js'
 
@@ -58,45 +59,81 @@ export class WasagroAIAgent implements IWasagroLLM {
     this.#lf = lf ?? langfuseDefault
   }
 
-  async extraerEvento(input: EntradaEvento, traceId: string): Promise<EventoCampoExtraido> {
+  async extraerEventos(input: EntradaEvento, traceId: string): Promise<ExtraccionMultiEvento> {
     const trace = this.#lf.trace({ id: traceId })
 
-    // Paso 1 — clasificar (o usar tipo forzado si el orquestador ya lo resolvió)
-    const clasificacion = input.tipo_forzado
-      ? { tipo_evento: input.tipo_forzado as ResultadoClasificacion['tipo_evento'], confidence: 1, requiere_imagen_para_confirmar: false, motivo_ambiguo: null, mensaje_clarificacion: null }
-      : await this.#clasificar(input, traceId)
-
-    // Paso 2 — manejar no-eventos
-    if (clasificacion.tipo_evento === 'saludo') {
-      trace.event({ name: 'mensaje_saludo', input: { transcripcion: input.transcripcion } })
-      return sinEvento('¡Hola! ¿Qué pasó hoy en la finca?')
+    // Paso 1 — clasificar (o usar tipos forzados si el orquestador ya lo resolvió)
+    let clasificacion: ResultadoClasificacion;
+    
+    if (input.tipos_forzados && input.tipos_forzados.length > 0) {
+      clasificacion = { tipos_evento: input.tipos_forzados as any, confidence: 1, requiere_imagen_para_confirmar: false, motivo_ambiguo: null, mensaje_clarificacion: null }
+    } else if (input.tipo_forzado) {
+      clasificacion = { tipos_evento: [input.tipo_forzado as any], confidence: 1, requiere_imagen_para_confirmar: false, motivo_ambiguo: null, mensaje_clarificacion: null }
+    } else {
+      clasificacion = await this.#clasificar(input, traceId)
     }
 
-    if (clasificacion.tipo_evento === 'consulta') {
-      trace.event({ name: 'mensaje_consulta', input: { transcripcion: input.transcripcion } })
-      return sinEvento('Claro, ¿qué necesitas? Si tienes algo que reportar de la finca, mándame el mensaje.')
-    }
-
-    if (clasificacion.tipo_evento === 'ambiguo') {
-      const pregunta = clasificacion.mensaje_clarificacion ?? '¿Puedes contarme más sobre lo que pasó en la finca?'
-      return {
-        tipo_evento: 'observacion',
-        lote_id: null,
-        lote_detectado_raw: null,
-        fecha_evento: null,
-        confidence_score: clasificacion.confidence,
-        requiere_validacion: false,
-        alerta_urgente: false,
-        campos_extraidos: {},
-        confidence_por_campo: {},
-        campos_faltantes: [],
-        requiere_clarificacion: true,
-        pregunta_sugerida: pregunta,
+    // Paso 2 — manejar no-eventos puros (si solo es saludo o consulta)
+    if (clasificacion.tipos_evento.length === 1) {
+      const tipoUnico = clasificacion.tipos_evento[0];
+      if (tipoUnico === 'saludo') {
+        trace.event({ name: 'mensaje_saludo', input: { transcripcion: input.transcripcion } })
+        return sinEvento('¡Hola! ¿Qué pasó hoy en la finca?')
+      }
+      if (tipoUnico === 'consulta') {
+        trace.event({ name: 'mensaje_consulta', input: { transcripcion: input.transcripcion } })
+        return sinEvento('Claro, ¿qué necesitas? Si tienes algo que reportar de la finca, mándame el mensaje.')
+      }
+      if (tipoUnico === 'ambiguo') {
+        const pregunta = clasificacion.mensaje_clarificacion ?? '¿Puedes contarme más sobre lo que pasó en la finca?'
+        return {
+          eventos: [{
+            tipo_evento: 'observacion',
+            lote_id: null,
+            lote_detectado_raw: null,
+            fecha_evento: null,
+            confidence_score: clasificacion.confidence,
+            requiere_validacion: false,
+            alerta_urgente: false,
+            campos_extraidos: {},
+            confidence_por_campo: {},
+            campos_faltantes: [],
+            requiere_clarificacion: true,
+          }],
+          pregunta_sugerida: pregunta,
+        }
       }
     }
 
-    // Paso 3 — extraer con prompt especializado
-    return await this.#extraerEspecializado(clasificacion, input, traceId)
+    // Paso 3 — Filtrar tipos válidos para extracción y ejecutar agentes en paralelo
+    const tiposValidos = clasificacion.tipos_evento.filter(t => !['saludo', 'consulta', 'ambiguo'].includes(t));
+    
+    if (tiposValidos.length === 0) {
+      return sinEvento('No pude identificar qué evento reportas. ¿Me lo explicas de otra forma?');
+    }
+
+    const promesasExtraccion = tiposValidos.map(tipo => {
+      // Creamos una pseudo-clasificación para cada agente especialista
+      const pseudoClasif: ResultadoClasificacion = {
+        ...clasificacion,
+        tipos_evento: [tipo] // el agente especialista solo se enfoca en su tipo
+      };
+      return this.#extraerEspecializado(pseudoClasif, tipo, input, traceId);
+    });
+
+    const eventosExtraidos = await Promise.all(promesasExtraccion);
+
+    // Determinar si hay alguna pregunta sugerida (tomamos la primera válida para no abrumar al usuario)
+    const eventoConPregunta = eventosExtraidos.find(e => e.requiere_clarificacion && e.pregunta_sugerida);
+
+    return {
+      eventos: eventosExtraidos.map(e => {
+        // Limpiamos la pregunta sugerida individual para cumplir con ExtraccionMultiEventoSchema
+        const { pregunta_sugerida, ...resto } = e;
+        return resto as any;
+      }),
+      pregunta_sugerida: eventoConPregunta?.pregunta_sugerida
+    }
   }
 
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
@@ -353,7 +390,13 @@ export class WasagroAIAgent implements IWasagroLLM {
 
     const inicio = Date.now()
     try {
-      const texto = await this.#adapter.generarTexto(input.transcripcion, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
+      const texto = await this.#adapter.generarTexto(input.transcripcion, { 
+        systemPrompt: prompt, 
+        responseFormat: 'json_object', 
+        traceId, 
+        generationName: 'llamar',
+        modelClass: 'fast' // Enrutamiento ultra-rápido (Flash)
+      })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -377,10 +420,11 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async #extraerEspecializado(
     clasificacion: ResultadoClasificacion,
+    tipo_evento: string,
     input: EntradaEvento,
     traceId: string,
   ): Promise<EventoCampoExtraido> {
-    const promptFile = EXTRACTOR_POR_TIPO[clasificacion.tipo_evento] ?? 'sp-01-extraccion-evento.md'
+    const promptFile = EXTRACTOR_POR_TIPO[tipo_evento] ?? 'sp-01-extraccion-evento.md'
 
     const prompt = injectarVariables((await PromptManager.getPrompt(promptFile, `prompts/${promptFile}`, typeof traceId !== 'undefined' ? traceId : undefined)), {
       LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
@@ -394,14 +438,20 @@ export class WasagroAIAgent implements IWasagroLLM {
 
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
-      name: `extraer_${clasificacion.tipo_evento}`,
+      name: `extraer_${tipo_evento}`,
       model: 'wasagro-ai-agent',
-      input: { transcripcion: input.transcripcion, tipo: clasificacion.tipo_evento },
+      input: { transcripcion: input.transcripcion, tipo: tipo_evento },
     })
 
     const inicio = Date.now()
     try {
-      const texto = await this.#adapter.generarTexto(`Transcripción: ${input.transcripcion}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
+      const texto = await this.#adapter.generarTexto(`Transcripción: ${input.transcripcion}`, { 
+        systemPrompt: prompt, 
+        responseFormat: 'json_object', 
+        traceId, 
+        generationName: 'llamar',
+        modelClass: 'reasoning' // Extracción profunda y validación cruzada (Pro)
+      })
       const latencia = Date.now() - inicio
 
       let json: unknown
@@ -421,7 +471,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     } catch (err) {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error extrayendo ${clasificacion.tipo_evento}: ${String(err)}`, err)
+      throw new LLMError('GROQ_ERROR', `Error extrayendo ${tipo_evento}: ${String(err)}`, err)
     }
   }
 

@@ -93,13 +93,18 @@ Solo si las Reglas 1-4 no resolvieron el tipo, consulta la tabla abajo.
 
 ```json
 {
-  "tipo_evento": "insumo|labor|cosecha|calidad|venta|gasto|plaga|clima|infraestructura|consulta|saludo|ambiguo",
+  "tipos_evento": ["insumo", "labor", "cosecha", "calidad", "venta", "gasto", "plaga", "clima", "infraestructura", "consulta", "saludo", "ambiguo"],
   "confidence": 0.0,
   "requiere_imagen_para_confirmar": false,
   "motivo_ambiguo": null,
   "mensaje_clarificacion": null
 }
 ```
+
+### Reglas para tipos_evento (Multi-Evento)
+- **Puedes seleccionar más de un tipo** si el mensaje contiene múltiples acciones. Ejemplo: "Gasté $200 en un motor y apliqué urea en lote 2" → `["gasto", "insumo"]`.
+- Si solo hay un evento, el array tendrá un solo elemento. Ejemplo: `["labor"]`.
+- Si no encaja en ningún lado, usa `["ambiguo"]`.
 
 ### Reglas de confidence
 
