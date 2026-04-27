@@ -16,10 +16,6 @@
       "destination": "/api"
     },
     {
-      "source": "/webhook/(.*)",
-      "destination": "/api"
-    },
-    {
       "source": "/health",
       "destination": "/api"
     },
