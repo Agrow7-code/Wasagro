@@ -2,7 +2,7 @@ import { requestOTP, verifyOTP } from '../src/auth/otpService.js'
 import { sendOTPViaWhatsApp } from '../src/auth/whatsappAuthService.js'
 import { getUserByPhone } from '../src/pipeline/supabaseQueries.js'
 
-export const config = { runtime: 'edge' }
+export const config = { maxDuration: 30 }
 
 const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
@@ -10,18 +10,33 @@ const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =
     headers: { 'Content-Type': 'application/json', ...extra },
   })
 
-const readBody = (req: Request): Promise<unknown> =>
-  Promise.race([
-    req.json(),
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getHeader = (req: any, name: string): string | null => {
+  const h = req.headers
+  if (!h) return null
+  if (typeof h.get === 'function') return h.get(name) as string | null
+  return (h as Record<string, string | undefined>)[name.toLowerCase()] ?? null
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const readBody = (req: any): Promise<unknown> => {
+  // Vercel Node.js runtime pre-parses the body as req.body
+  if (req.body !== undefined && req.body !== null) return Promise.resolve(req.body)
+  // Web Request API path
+  return Promise.race([
+    req.json() as Promise<unknown>,
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Body read timeout (5s)')), 5000)
     ),
   ])
+}
 
-export default async function handler(req: Request): Promise<Response> {
-  const url = new URL(req.url, 'http://localhost')
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export default async function handler(req: any): Promise<Response> {
+  const rawUrl: string = req.url ?? '/'
+  const url = new URL(rawUrl.startsWith('http') ? rawUrl : `http://localhost${rawUrl}`)
   const path = url.pathname
-  const origin = req.headers.get('Origin') ?? '*'
+  const origin = getHeader(req, 'origin') ?? '*'
 
   const cors: Record<string, string> = {
     'Access-Control-Allow-Origin': origin,
