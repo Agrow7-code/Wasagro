@@ -7,12 +7,13 @@ export function useGeolocacion() {
   useEffect(() => {
     async function detect() {
       try {
-        const res = await fetch('https://ip-api.com/json')
+        // Usar ipapi.co que es un poco más amigable en planes gratuitos
+        const res = await fetch('https://ipapi.co/json/')
         const data = await res.json()
-        const detected = findByISO(data.countryCode as string)
+        const detected = findByISO(data.country_code as string)
         if (detected) setSelectedCountry(detected)
       } catch {
-        // fallback silencioso: queda Ecuador
+        // Fallback silencioso: queda Ecuador por defecto
       }
     }
     detect()

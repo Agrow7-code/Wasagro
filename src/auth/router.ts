@@ -6,6 +6,10 @@ import { isPgBossReady, getBoss } from '../workers/pgBoss.js'
 
 export const authRouter = new Hono()
 
+authRouter.get('/ping', (c) => {
+  return c.json({ status: 'pong', time: new Date().toISOString() })
+})
+
 authRouter.post('/request-otp', async (c) => {
   console.log('[auth] --- NUEVA SOLICITUD OTP ---')
   const body = await c.req.json().catch(() => ({}))
