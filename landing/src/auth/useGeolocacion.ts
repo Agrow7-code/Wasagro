@@ -1,22 +1,12 @@
 import { useState, useEffect } from 'react'
-import { countries, findByISO, type Country } from './countries'
+import { countries, type Country } from './countries'
 
 export function useGeolocacion() {
-  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]!) // Default Ecuador
+  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]!) // Default Ecuador (index 0)
 
   useEffect(() => {
-    async function detect() {
-      try {
-        // Usar ipapi.co que es un poco más amigable en planes gratuitos
-        const res = await fetch('https://ipapi.co/json/')
-        const data = await res.json()
-        const detected = findByISO(data.country_code as string)
-        if (detected) setSelectedCountry(detected)
-      } catch {
-        // Fallback silencioso: queda Ecuador por defecto
-      }
-    }
-    detect()
+    // Detección de IP desactivada temporalmente para evitar errores 403/504 en el frontend
+    // El sistema usará Ecuador como país predeterminado
   }, [])
 
   return { selectedCountry, setSelectedCountry }
