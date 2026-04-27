@@ -2,93 +2,83 @@ import { Hono } from 'hono'
 import { requestOTP, verifyOTP } from './otpService.js'
 import { sendOTPViaWhatsApp } from './whatsappAuthService.js'
 import { getUserByPhone } from '../pipeline/supabaseQueries.js'
+import { isPgBossReady, getBoss } from '../workers/pgBoss.js'
 
 export const authRouter = new Hono()
 
-authRouter.get('/ping', (c) => {
-  return c.json({ status: 'pong', time: new Date().toISOString() })
-})
+authRouter.get('/ping', (c) => c.json({ status: 'pong' }))
 
 authRouter.post('/request-otp', async (c) => {
-  console.log('[auth] --- NUEVA SOLICITUD OTP ---')
   const body = await c.req.json().catch(() => ({}))
-  console.log('[auth] Body recibido:', JSON.stringify(body))
-  
   const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '')
-  if (!phone) {
-    console.log('[auth] Error: Falta teléfono')
-    return c.json({ error: 'Número de teléfono requerido' }, 400)
-  }
+  
+  if (!phone) return c.json({ error: 'Número de teléfono requerido' }, 400)
 
-  console.log(`[auth] Buscando usuario: ${phone}`)
   try {
-    const startDb = Date.now()
-    const usuario = await getUserByPhone(phone)
-    console.log(`[auth] DB lookup usuario: ${usuario ? 'Encontrado' : 'No encontrado'} (${Date.now() - startDb}ms)`)
+    // 1. DB Lookup con timeout forzado de 5s para evitar el 504 de Vercel
+    const usuarioPromise = getUserByPhone(phone)
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('TIMEOUT_DB')), 5000)
+    )
+    
+    const usuario = await Promise.race([usuarioPromise, timeoutPromise]) as any
+    if (!usuario) return c.json({ error: 'Número no registrado' }, 404)
 
-    if (!usuario) {
-      return c.json({ error: 'Número no registrado en Wasagro. Contacta a tu administrador.' }, 404)
-    }
-
-    console.log('[auth] Generando código OTP...')
+    // 2. Generar OTP
     const code = await requestOTP(phone)
-    console.log(`[auth] OTP generado con éxito: ${code.slice(0, 2)}****`)
 
-    // Fire-and-forget: no bloqueamos la respuesta al cliente
-    const enviarWhatsApp = async () => {
+    // 3. Envío de WhatsApp (DESACOPLADO TOTALMENTE vía waitUntil)
+    // Esto le dice a Vercel: "Responde al cliente YA, pero deja este proceso vivo para enviar el mensaje"
+    const taskEnvio = (async () => {
       try {
-        await sendOTPViaWhatsApp(phone, code)
-        console.log('[auth] OTP enviado por WhatsApp')
-      } catch (err: any) {
-        console.error('[auth] Error enviando OTP por WhatsApp:', err.message)
+        if (isPgBossReady()) {
+          await getBoss().send('enviar-otp-whatsapp', { phone, code, traceId: 'no-trace' })
+        } else {
+          await sendOTPViaWhatsApp(phone, code)
+        }
+      } catch (e) {
+        console.error('[auth] Error diferido WhatsApp:', e)
       }
+    })()
+
+    // Si estamos en Vercel, usamos su mecanismo oficial de background tasks
+    if (c.executionCtx) {
+      c.executionCtx.waitUntil(taskEnvio)
     }
 
-    enviarWhatsApp()
-    console.log('[auth] Respondiendo al cliente...')
+    // 4. Responder inmediatamente
     return c.json({ status: 'sent' })
+
   } catch (err: any) {
-    console.error(`[auth] Error crítico en request-otp:`, err)
-    return c.json({ error: err.message || 'Error interno del servidor' }, 500)
+    console.error(`[auth] Error en request-otp:`, err.message)
+    const msg = err.message === 'TIMEOUT_DB' 
+      ? 'La base de datos está lenta, intenta de nuevo.' 
+      : 'Error interno del servidor'
+    return c.json({ error: msg }, 500)
   }
 })
 
 authRouter.post('/verify-otp', async (c) => {
-  console.log('[auth] --- VERIFICACIÓN OTP ---')
   const body = await c.req.json().catch(() => ({}))
   const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '')
   const { code } = body
 
-  if (!phone || !code) {
-    console.log('[auth] Error: Falta teléfono o código')
-    return c.json({ error: 'Teléfono y código requeridos' }, 400)
-  }
+  if (!phone || !code) return c.json({ error: 'Faltan datos' }, 400)
 
-  console.log(`[auth] Verificando código para ${phone}: ${code}`)
   try {
     const result = await verifyOTP(phone, code)
-    if (!result.success) {
-      console.log('[auth] Verificación fallida:', result.error)
-      return c.json({ error: result.error }, 401)
-    }
+    if (!result.success) return c.json({ error: result.error }, 401)
 
     const usuario = await getUserByPhone(phone)
-    if (!usuario) {
-      console.log('[auth] Usuario no encontrado tras verificación')
-      return c.json({ error: 'Usuario no encontrado tras verificación' }, 404)
-    }
-
-    console.log('[auth] Verificación exitosa para:', usuario.rol)
     return c.json({ 
       user: {
-        id: usuario.id,
-        phone: usuario.phone,
-        rol: usuario.rol,
-        nombre: usuario.nombre
+        id: usuario?.id,
+        phone: usuario?.phone,
+        rol: usuario?.rol,
+        nombre: usuario?.nombre
       }
     })
   } catch (err: any) {
-    console.error(`[auth] Error en verify-otp:`, err)
-    return c.json({ error: err.message || 'Error interno del servidor' }, 500)
+    return c.json({ error: 'Error al verificar' }, 500)
   }
 })

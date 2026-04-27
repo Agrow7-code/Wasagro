@@ -1,16 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { handle } from 'hono/vercel'
 import { authRouter } from '../src/auth/router.js'
 
 const app = new Hono()
-
-// Middleware de Logs para Vercel
-app.use('*', async (c, next) => {
-  console.log(`[VERCEL_DEBUG] ${c.req.method} ${c.req.url}`)
-  await next()
-  console.log(`[VERCEL_DEBUG] Status: ${c.res.status}`)
-})
 
 app.use('*', cors({
   origin: (origin) => origin || '*',
@@ -18,17 +10,13 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Authorization'],
 }))
 
-// Rutas
+// Montamos las rutas con ambos prefijos
 app.route('/api/auth', authRouter)
 app.route('/auth', authRouter)
 
-app.get('/api/health', (c) => c.json({ status: 'ok', environment: 'vercel' }))
-app.get('/health', (c) => c.json({ status: 'ok', environment: 'vercel' }))
+app.get('/api/health', (c) => c.json({ status: 'ok' }))
 
-// EL FIX MAESTRO: Usamos el adaptador oficial de Hono para Vercel Node.js
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 30,
+export default async function handler(req: Request, event: any) {
+  // Pasamos el evento de Vercel a Hono para que funcione c.executionCtx.waitUntil
+  return app.fetch(req, {}, event)
 }
-
-export default handle(app)
