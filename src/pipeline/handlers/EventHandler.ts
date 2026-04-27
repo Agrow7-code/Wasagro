@@ -350,6 +350,7 @@ export async function handleEvento(
     pais: finca?.pais,
     lista_lotes,
     ...(contexto_rag ? { contexto_rag } : {}),
+    ...(session.contexto_parcial['extracted_data'] ? { estado_parcial: session.contexto_parcial['extracted_data'] as EventoCampoExtraido[] } : {}),
   }
 
   const multiExtraction = await _llm!.extraerEventos(entrada, traceId)
@@ -369,7 +370,7 @@ export async function handleEvento(
     const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
     await updateSession(session.session_id, {
       clarification_count: session.clarification_count + 1,
-      contexto_parcial: { original_transcripcion: transcripcionCombinada },
+      contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[] },
     })
     await _sender!.enviarTexto(
       msg.from,
@@ -384,7 +385,7 @@ export async function handleEvento(
   if (requiereClarificacion && session.clarification_count < 2) {
     await updateSession(session.session_id, {
       clarification_count: session.clarification_count + 1,
-      contexto_parcial: { original_transcripcion: transcripcionCombinada },
+      contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[] },
     })
     const pregunta = multiExtraction.pregunta_sugerida ?? '¿Puedes contarme más detalles sobre esto?'
     await _sender!.enviarTexto(msg.from, pregunta)

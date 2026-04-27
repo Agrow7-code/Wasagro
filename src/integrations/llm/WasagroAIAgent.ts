@@ -426,6 +426,8 @@ export class WasagroAIAgent implements IWasagroLLM {
   ): Promise<EventoCampoExtraido> {
     const promptFile = EXTRACTOR_POR_TIPO[tipo_evento] ?? 'sp-01-extraccion-evento.md'
 
+    const estadoParcialJSON = input.estado_parcial ? JSON.stringify(input.estado_parcial, null, 2) : 'No hay borrador previo'
+
     const prompt = injectarVariables((await PromptManager.getPrompt(promptFile, `prompts/${promptFile}`, typeof traceId !== 'undefined' ? traceId : undefined)), {
       LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
       FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
@@ -434,6 +436,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       NOMBRE_USUARIO: input.nombre_usuario ?? '',
       MENSAJE: input.transcripcion,
       CONTEXTO_HISTORICO: input.contexto_rag ?? '',
+      ESTADO_PARCIAL: estadoParcialJSON,
     })
 
     const trace = this.#lf.trace({ id: traceId })

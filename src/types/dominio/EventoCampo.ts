@@ -41,6 +41,7 @@ export const EntradaEventoSchema = z.object({
   tipo_forzado: TipoEventoForzadoEnum.optional(),
   tipos_forzados: z.array(TipoEventoForzadoEnum).optional(), // Añadido para forzar múltiples tipos
   contexto_rag: z.string().optional(),
+  estado_parcial: z.array(EventoCampoExtraidoSchema).optional(), // Workspace JSON con los eventos en borrador
 })
 
 export type EntradaEvento = z.infer<typeof EntradaEventoSchema>
