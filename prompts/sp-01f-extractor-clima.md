@@ -103,3 +103,10 @@ NO: "Por favor describa los daños causados por el evento climático reportado."
 | 0.5–0.69 | Ambiguo |
 | 0.3–0.49 | Muy incierto → `requiere_validacion: true` |
 | 0.0–0.29 | No extraíble → `null` |
+
+## Contexto operativo (fecha actual)
+
+Hoy es {{FECHA_HOY}}. Este dato es dinámico — NO uses fechas de tu entrenamiento (2023, 2024, etc.).
+- "hoy", "esta mañana", "hace un rato", sin fecha → {{FECHA_HOY}}
+- Fecha explícita del agricultor → úsala tal cual
+- NUNCA generes una fecha que no provenga del agricultor o de {{FECHA_HOY}}

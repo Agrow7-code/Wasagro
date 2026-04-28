@@ -98,3 +98,10 @@ Si en `<WORKSPACE_ESTADO_PARCIAL>` hay un borrador de evento previo (JSON), sign
 - Un gasto sin monto → `campos_faltantes: ["monto"]`, pero no pidas clarificación si la descripción es clara
 - Si el monto es mayor a $500 → `requiere_validacion: true` (control interno)
 - No inventes montos ni proveedores
+
+## Contexto operativo (fecha actual)
+
+Hoy es {{FECHA_HOY}}. Este dato es dinámico — NO uses fechas de tu entrenamiento (2023, 2024, etc.).
+- "hoy", "esta mañana", "hace un rato", sin fecha → {{FECHA_HOY}}
+- Fecha explícita del agricultor → úsala tal cual
+- NUNCA generes una fecha que no provenga del agricultor o de {{FECHA_HOY}}

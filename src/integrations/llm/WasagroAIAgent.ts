@@ -390,7 +390,7 @@ export class WasagroAIAgent implements IWasagroLLM {
 
     const inicio = Date.now()
     try {
-      const texto = await this.#adapter.generarTexto(input.transcripcion, { 
+      const textoRaw = await this.#adapter.generarTexto(input.transcripcion, { 
         systemPrompt: prompt, 
         responseFormat: 'json_object', 
         traceId, 
@@ -398,6 +398,10 @@ export class WasagroAIAgent implements IWasagroLLM {
         modelClass: 'fast', // Enrutamiento ultra-rápido (Flash)
         temperature: 0 // CRÍTICO: 0 para clasificación determinista
       })
+      
+      // Limpiar Markdown si existe
+      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+      
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -428,6 +432,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     const promptFile = EXTRACTOR_POR_TIPO[tipo_evento] ?? 'sp-01-extraccion-evento.md'
 
     const estadoParcialJSON = input.estado_parcial ? JSON.stringify(input.estado_parcial, null, 2) : 'No hay borrador previo'
+    const fechaHoy = new Date().toISOString().slice(0, 10)
 
     const prompt = injectarVariables((await PromptManager.getPrompt(promptFile, `prompts/${promptFile}`, typeof traceId !== 'undefined' ? traceId : undefined)), {
       LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
@@ -438,6 +443,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       MENSAJE: input.transcripcion,
       CONTEXTO_HISTORICO: input.contexto_rag ?? '',
       ESTADO_PARCIAL: estadoParcialJSON,
+      FECHA_HOY: fechaHoy,
     })
 
     const trace = this.#lf.trace({ id: traceId })

@@ -345,6 +345,15 @@ export async function handleEvento(
     ? await _ragRetriever.recuperarContexto(usuario.finca_id, transcripcionCombinada)
     : undefined
 
+  // En modo clarificación los tipos de evento ya fueron determinados en el turno anterior.
+  // Forzarlos evita que el clasificador re-interprete el mensaje combinado y añada eventos
+  // adicionales (p.ej. un insumo por "planteo aplicar X" dentro de una respuesta de plaga).
+  const tiposPrevios = session.clarification_count > 0 && session.contexto_parcial['extracted_data']
+    ? (session.contexto_parcial['extracted_data'] as EventoCampoExtraido[])
+        .map(e => e.tipo_evento)
+        .filter((t): t is NonNullable<EventoCampoExtraido['tipo_evento']> => !!t && t !== 'sin_evento' && t !== 'observacion')
+    : undefined
+
   const entrada: EntradaEvento = {
     transcripcion: transcripcionCombinada,
     finca_id: usuario.finca_id ?? '',
@@ -355,6 +364,7 @@ export async function handleEvento(
     pais: finca?.pais,
     lista_lotes,
     ...(contexto_rag ? { contexto_rag } : {}),
+    ...(tiposPrevios?.length ? { tipos_forzados: tiposPrevios as any } : {}),
     ...(session.contexto_parcial['extracted_data'] ? { estado_parcial: session.contexto_parcial['extracted_data'] as EventoCampoExtraido[] } : {}),
   }
 
@@ -499,7 +509,15 @@ function buildResumenParaConfirmar(
   const loteLinea = loteNombre ? `• Lote: ${loteNombre}\n` : ''
   const fechaLinea = extracted.fecha_evento ? `• Fecha: ${extracted.fecha_evento}\n` : ''
 
-  const SKIP = new Set(['lote_detectado_raw', '_meta', 'requiere_accion', 'urgencia'])
+  // Campos técnicos/internos que no tienen valor para el agricultor en la confirmación
+  const SKIP = new Set([
+    'lote_detectado_raw', '_meta', 'requiere_accion', 'urgencia',
+    'nombre_cientifico',       // agronómico, no conversacional
+    'pct_afectado',            // porcentaje técnico raramente mencionado por el agricultor
+    'dosis_litros_equivalente', // conversión interna, el agricultor habla en bombadas/sacos
+    'kg_equivalente',          // ídem
+    'clasificacion_sugerida',  // metadato del extractor, no dato del campo
+  ])
   const lineas: string[] = []
   for (const [k, v] of Object.entries(extracted.campos_extraidos)) {
     if (SKIP.has(k) || v === null || v === undefined) continue

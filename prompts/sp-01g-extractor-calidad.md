@@ -92,3 +92,10 @@ Si en `<WORKSPACE_ESTADO_PARCIAL>` hay un borrador de evento previo (JSON), esta
 - Si no se puede identificar el lote, deja `lote_id: null` y escribe lo que dijo el usuario en `lote_detectado_raw`
 - Marca `requiere_clarificacion: true` solo si faltan datos críticos para el tipo de cultivo
 - `notas_calidad`: cualquier observación adicional sobre la calidad que no encaja en los campos anteriores
+
+## Contexto operativo (fecha actual)
+
+Hoy es {{FECHA_HOY}}. Este dato es dinámico — NO uses fechas de tu entrenamiento (2023, 2024, etc.).
+- "hoy", "esta mañana", "hace un rato", sin fecha → {{FECHA_HOY}}
+- Fecha explícita del agricultor → úsala tal cual
+- NUNCA generes una fecha que no provenga del agricultor o de {{FECHA_HOY}}
