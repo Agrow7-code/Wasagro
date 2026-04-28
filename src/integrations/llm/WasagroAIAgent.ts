@@ -20,6 +20,7 @@ import {
 } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
+import { DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { buildSDRContexto } from './sdrUtils.js'
@@ -150,17 +151,66 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async analizarImagen(imageUrl: string, traceId: string): Promise<string> {
+  async describirImagenVisual(imageUrl: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'analizar_imagen', model: 'wasagro-ai-agent', input: { imageUrl } })
+    const generation = trace.generation({ name: 'describir_imagen', model: 'wasagro-ai-agent' })
     try {
-      const prompt = (await PromptManager.getPrompt('sp-03-analisis-imagen.md', 'prompts/sp-03-analisis-imagen.md', typeof traceId !== 'undefined' ? traceId : undefined))
-      const analisis = await this.#adapter.generarTexto(`URL imagen: ${imageUrl}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'llamarLibre' })
+      const prompt = (await PromptManager.getPrompt('sp-03a-vision-describe.md', 'prompts/sp-03a-vision-describe.md', typeof traceId !== 'undefined' ? traceId : undefined))
+      const analisis = await this.#adapter.generarTexto('Analiza esta imagen y descríbela detalladamente según tus instrucciones.', { 
+        systemPrompt: prompt, 
+        responseFormat: 'text', 
+        imageUrl, 
+        traceId, 
+        generationName: 'llamarLibre', 
+        modelClass: 'ultra' // Requiere modelo multimodal potente
+      })
       generation.end({ output: analisis })
       return analisis
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error analizando imagen: ${String(err)}`, err)
+      throw new LLMError('GROQ_ERROR', `Error describiendo imagen: ${String(err)}`, err)
+    }
+  }
+
+  async diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string): Promise<DiagnosticoV2VK> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({ name: 'diagnosticar_v2vk', model: 'wasagro-ai-agent', input: { descripcionVisual } })
+    try {
+      const prompt = injectarVariables((await PromptManager.getPrompt('sp-03b-diagnostico-v2vk.md', 'prompts/sp-03b-diagnostico-v2vk.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
+        FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
+        CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
+        PAIS: input.pais ?? 'EC',
+        DESCRIPCION_VISUAL: descripcionVisual,
+        CONTEXTO_RAG: contextoRAG || 'Sin contexto agronómico disponible.',
+      })
+      
+      const textoRaw = await this.#adapter.generarTexto(descripcionVisual, { 
+        systemPrompt: prompt, 
+        responseFormat: 'json_object', 
+        traceId, 
+        generationName: 'llamarLibre', 
+        modelClass: 'reasoning' // Modelo analítico cruzando síntomas con RAG
+      })
+      
+      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+      
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `V2VK devolvió no-JSON: ${texto.slice(0, 100)}`)
+      }
+      
+      const parsed = DiagnosticoV2VKSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema V2VK inválido: ${parsed.error.message}`)
+      }
+      
+      generation.end({ output: parsed.data })
+      return parsed.data
+    } catch (err) {
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error diagnosticando imagen V2VK: ${String(err)}`, err)
     }
   }
 

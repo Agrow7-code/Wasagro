@@ -102,22 +102,89 @@ export async function handleEvento(
     await actualizarMensaje(mensajeId, { contenido_raw: transcripcion })
   } else if (msg.tipo === 'texto') {
     transcripcion = msg.texto!
+  } else if (msg.tipo === 'imagen') {
+    const imageUrl = msg.imagenUrl ?? msg.mediaId
+    if (!imageUrl) {
+      await _sender!.enviarTexto(msg.from, 'No pude procesar la imagen enviada. ⚠️')
+      return
+    }
+    
+    await _sender!.enviarTexto(msg.from, 'Analizando tu imagen con la base de datos agronómica... 🔍')
+
+    try {
+      // 1. Visión Cruda (Objective Description)
+      const descripcionVisual = await _llm!.describirImagenVisual(imageUrl, traceId)
+      
+      // 2. RAG Context Retrieval
+      const contextoRag = usuario.finca_id && _ragRetriever 
+        ? await _ragRetriever.recuperarContexto(usuario.finca_id, descripcionVisual)
+        : 'Sin contexto agronómico disponible.'
+
+      const finca = usuario.finca_id ? await getFincaById(usuario.finca_id) : null
+      
+      // 3. Diagnóstico Clínico (Verified Knowledge)
+      const diagnostico = await _llm!.diagnosticarSintomaV2VK(descripcionVisual, contextoRag, {
+        transcripcion: descripcionVisual,
+        finca_id: usuario.finca_id ?? '',
+        usuario_id: usuario.id,
+        nombre_usuario: usuario.nombre ?? undefined,
+        finca_nombre: finca?.nombre,
+        cultivo_principal: finca?.cultivo_principal ?? undefined,
+        pais: finca?.pais,
+      }, traceId)
+
+      const tipoEventoFinal = diagnostico.tipo_evento_sugerido === 'sin_evento' || !diagnostico.tipo_evento_sugerido
+        ? 'observacion' 
+        : diagnostico.tipo_evento_sugerido
+
+      const eventoId = await saveEvento({
+        finca_id: usuario.finca_id!,
+        lote_id: null, // Si necesitamos el lote, podríamos preguntar después, pero en fase 3 lo omitimos de la primera pasada
+        tipo_evento: tipoEventoFinal as any,
+        status: diagnostico.requiere_accion_inmediata ? 'requires_review' : 'complete',
+        datos_evento: { 
+          descripcion_visual: descripcionVisual,
+          diagnostico: diagnostico.diagnostico_final,
+          recomendacion: diagnostico.recomendacion_tecnica,
+          severidad: diagnostico.severidad,
+          media_ref: imageUrl
+        },
+        descripcion_raw: descripcionVisual,
+        confidence_score: diagnostico.confianza,
+        requiere_validacion: diagnostico.confianza < 0.6,
+        created_by: usuario.id,
+        mensaje_id: mensajeId,
+      })
+
+      await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
+
+      let respuesta = `*Diagnóstico*: ${diagnostico.diagnostico_final}\n`
+      if (diagnostico.severidad) respuesta += `*Severidad*: ${diagnostico.severidad}\n`
+      if (diagnostico.recomendacion_tecnica) respuesta += `\n*Recomendación*: ${diagnostico.recomendacion_tecnica}`
+
+      await _sender!.enviarTexto(msg.from, respuesta)
+    } catch (err) {
+      console.error('[EventHandler] Error en V2VK:', err)
+      await _sender!.enviarTexto(msg.from, 'Hubo un error analizando tu imagen. Tu asesor la revisará manualmente. ⚠️')
+      // Fallback a observación genérica
+      const eventoId = await saveEvento({
+        finca_id: usuario.finca_id!,
+        lote_id: null,
+        tipo_evento: 'observacion',
+        status: 'requires_review',
+        datos_evento: { texto_libre: `Imagen recibida (Falló IA)`, media_ref: imageUrl },
+        descripcion_raw: `Error en análisis de imagen`,
+        confidence_score: 0,
+        requiere_validacion: true,
+        created_by: usuario.id,
+        mensaje_id: mensajeId,
+      })
+      await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
+    }
+    return
   } else {
-    // imagen — guardar como observacion para revisión
-    const eventoId = await saveEvento({
-      finca_id: usuario.finca_id!,
-      lote_id: null,
-      tipo_evento: 'observacion',
-      status: 'requires_review',
-      datos_evento: { texto_libre: `Mensaje tipo ${msg.tipo}`, media_ref: msg.imagenUrl ?? msg.mediaId ?? null },
-      descripcion_raw: `Mensaje tipo ${msg.tipo}`,
-      confidence_score: 0,
-      requiere_validacion: true,
-      created_by: usuario.id,
-      mensaje_id: mensajeId,
-    })
-    await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
-    await _sender!.enviarTexto(msg.from, 'Recibí tu imagen. La revisa tu asesor pronto. ✅')
+    // Otros (documento ya manejado arriba)
+    await _sender!.enviarTexto(msg.from, 'Formato no soportado por ahora. ⚠️')
     return
   }
 
