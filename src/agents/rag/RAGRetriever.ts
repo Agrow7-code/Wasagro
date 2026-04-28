@@ -25,7 +25,7 @@ export class RAGRetriever {
     transcripcion: string,
     options: RecuperarContextoOptions = {},
   ): Promise<string> {
-    const { k = 5, threshold = 0.75 } = options
+    const { k = 3, threshold = 0.75 } = options
 
     try {
       const embedding = await this.embeddingService.generarEmbedding(transcripcion)

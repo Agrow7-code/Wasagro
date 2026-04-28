@@ -20,7 +20,7 @@ import {
 } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
-import { DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
+import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { buildSDRContexto } from './sdrUtils.js'
@@ -156,21 +156,41 @@ export class WasagroAIAgent implements IWasagroLLM {
     const generation = trace.generation({ name: 'describir_imagen', model: 'wasagro-ai-agent' })
     try {
       const prompt = (await PromptManager.getPrompt('sp-03a-vision-describe.md', 'prompts/sp-03a-vision-describe.md', typeof traceId !== 'undefined' ? traceId : undefined))
-      const textoRaw = await this.#adapter.generarTexto('Analiza esta imagen y descríbela objetivamente según tus instrucciones en JSON estricto.', { 
-        systemPrompt: prompt, 
-        responseFormat: 'json_object', // Forzar JSON para el escáner ocular
-        imageUrl, 
-        traceId, 
-        generationName: 'llamarLibre', 
-        modelClass: 'ultra' // Requiere modelo multimodal potente (Gemini 1.5 Pro)
-      })
-
-      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
       
+      let intentos = 0
+      let texto = ''
       let json: any
-      try { json = JSON.parse(texto) } catch {
+      let parsed: ReturnType<typeof DescripcionVisualSchema.safeParse> | null = null
+
+      while (intentos < 2) {
+        const errorFeedback = intentos > 0 ? `\n\nTu respuesta anterior falló la validación Zod: ${parsed?.error?.errors.map(e => e.message).join(', ')}. Por favor, corrige tu JSON.` : ''
+        
+        const textoRaw = await this.#adapter.generarTexto('Analiza esta imagen y descríbela objetivamente según tus instrucciones en JSON estricto.' + errorFeedback, { 
+          systemPrompt: prompt, 
+          responseFormat: 'json_object', // Forzar JSON para el escáner ocular
+          imageUrl, 
+          traceId, 
+          generationName: 'llamarLibre', 
+          modelClass: 'ultra' // Requiere modelo multimodal potente (Gemini 1.5 Pro)
+        })
+
+        texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+        
+        try { 
+          json = JSON.parse(texto) 
+          parsed = DescripcionVisualSchema.safeParse(json)
+          if (parsed.success) break
+          
+          trace.event({ name: 'v2vk_vision_zod_error', level: 'WARNING', output: { error: parsed.error.errors } })
+        } catch {
+          trace.event({ name: 'v2vk_vision_parse_error', level: 'WARNING', output: { texto: texto.slice(0, 100) } })
+        }
+        intentos++
+      }
+
+      if (!parsed?.success) {
         generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Vision Scanner devolvió no-JSON: ${texto.slice(0, 100)}`)
+        throw new LLMError('PARSE_ERROR', `Vision Scanner falló la gobernanza Zod tras reintentos`)
       }
 
       generation.end({ output: json })
@@ -189,6 +209,10 @@ export class WasagroAIAgent implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'diagnosticar_v2vk', model: 'wasagro-ai-agent', input: { descripcionVisual } })
     try {
+      if (!contextoRAG || contextoRAG === 'Sin contexto agronómico disponible.') {
+        trace.event({ name: 'v2vk_empty_rag', level: 'WARNING', input: { descripcionVisual } })
+      }
+
       const prompt = injectarVariables((await PromptManager.getPrompt('sp-03b-diagnostico-v2vk.md', 'prompts/sp-03b-diagnostico-v2vk.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
         CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',

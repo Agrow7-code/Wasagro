@@ -1,5 +1,15 @@
 import { z } from 'zod'
 
+export const DescripcionVisualSchema = z.object({
+  es_imagen_agricola: z.boolean(),
+  organos_visibles: z.array(z.string()).optional(),
+  descripcion_fisica_cruda: z.string().nullable().optional(),
+  porcentaje_area_afectada: z.string().nullable().optional(),
+  presencia_plagas_visibles: z.string().nullable().optional()
+})
+
+export type DescripcionVisual = z.infer<typeof DescripcionVisualSchema>
+
 export const DiagnosticoV2VKSchema = z.object({
   diagnostico_final: z.string(),
   tipo_evento_sugerido: z.enum(['plaga', 'cosecha', 'observacion', 'infraestructura', 'calidad', 'sin_evento']),
