@@ -455,7 +455,7 @@ export class WasagroAIAgent implements IWasagroLLM {
 
     const inicio = Date.now()
     try {
-      const texto = await this.#adapter.generarTexto(`Transcripción: ${input.transcripcion}`, { 
+      const textoRaw = await this.#adapter.generarTexto(`Transcripción: ${input.transcripcion}`, { 
         systemPrompt: prompt, 
         responseFormat: 'json_object', 
         traceId, 
@@ -464,16 +464,22 @@ export class WasagroAIAgent implements IWasagroLLM {
       })
       const latencia = Date.now() - inicio
 
+      // Limpiar Markdown si el LLM envolvió la respuesta
+      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', `Extractor devolvió no-JSON: ${texto.slice(0, 100)}`)
       }
 
+      // Gobernanza Estricta Zod (Stateless Harness)
       const parsed = EventoCampoExtraidoSchema.safeParse(json)
       if (!parsed.success) {
         generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Schema extractor inválido: ${parsed.error.message}`)
+        const erroresHarness = parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
+        console.error(`[Harness] Gobernanza Zod falló en ${tipo_evento}:`, erroresHarness)
+        throw new LLMError('PARSE_ERROR', `Gobernanza Zod rechazó el output: ${erroresHarness}`)
       }
 
       generation.end({ output: parsed.data, metadata: { latencia_ms: latencia } })
