@@ -4,6 +4,18 @@ import { langfuse } from '../integrations/langfuse.js'
 import { getBoss } from '../workers/pgBoss.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
 
+// In-memory dedup: Evolution API sends the same webhook 6-8 times per message.
+// singletonKey in pg-boss has a race condition when requests arrive simultaneously.
+// This set prevents enqueuing the same wamid more than once per 60s window.
+const recentWamids = new Set<string>()
+const WAMID_TTL_MS = 60_000
+function isDuplicate(wamid: string): boolean {
+  if (recentWamids.has(wamid)) return true
+  recentWamids.add(wamid)
+  setTimeout(() => recentWamids.delete(wamid), WAMID_TTL_MS)
+  return false
+}
+
 let adapter: IWhatsAppAdapter
 
 export function inicializarRouter(adapterInstancia: IWhatsAppAdapter): void {
@@ -43,6 +55,10 @@ webhookRouter.post('/whatsapp', async (c) => {
   // Parsear mensaje y encolar trabajo en pg-boss antes de retornar 200
   const msg = adapter.parsearMensaje(payload)
   if (msg) {
+    if (isDuplicate(msg.wamid)) {
+      console.log(`[webhook] wamid duplicado ignorado: ${msg.wamid}`)
+      return c.json({ status: 'received' }, 200)
+    }
     console.log(`[webhook] mensaje de ${msg.from} tipo=${msg.tipo} wamid=${msg.wamid}`)
     try {
       const boss = getBoss()

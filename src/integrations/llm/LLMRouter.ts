@@ -11,6 +11,9 @@ export interface LLMRouterOptions {
   onMetric?: (metric: RouterMetric) => void
 }
 
+// 20s per adapter — prevents slow NVIDIA endpoints from blocking the chain for minutes
+const ADAPTER_TIMEOUT_MS = 20_000
+
 export class LLMRouter implements ILLMAdapter {
   readonly #adapters: readonly ILLMAdapter[]
   readonly #onMetric: ((metric: RouterMetric) => void) | undefined
@@ -29,7 +32,10 @@ export class LLMRouter implements ILLMAdapter {
       const t0 = Date.now()
 
       try {
-        const result = await adapter.generarTexto(userContent, opciones)
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`adapter_timeout_${ADAPTER_TIMEOUT_MS}ms`)), ADAPTER_TIMEOUT_MS)
+        )
+        const result = await Promise.race([adapter.generarTexto(userContent, opciones), timeout])
         this.#onMetric?.({ adapter: i, success: true, latencyMs: Date.now() - t0 })
         return result
       } catch (err) {
