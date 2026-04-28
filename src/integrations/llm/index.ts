@@ -66,6 +66,7 @@ export function crearAdapterLLM(): ILLMAdapter {
       { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'reasoning' },
 
       // TIER 3 (Ultra): Casos críticos, Diagnóstico complejo, V2VK
+      { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'ultra' }, // Soporte Multimodal nativo
       { name: 'Minimax',  key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax',  tier: 'ultra' },
       { name: 'Gemma-4',  key: 'NVIDIA_GEMMA_KEY',   provider: 'gemma',    tier: 'ultra' },
       { name: 'Qwen',     key: 'NVIDIA_QWEN_KEY',    provider: 'qwen',     tier: 'ultra' },
