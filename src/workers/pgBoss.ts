@@ -18,6 +18,9 @@ export async function initPgBoss() {
   await boss.start()
   console.log('[pg-boss] Iniciado correctamente')
 
+  await boss.createQueue('procesar-mensaje')
+  await boss.createQueue('enviar-otp-whatsapp')
+
   await boss.work('procesar-mensaje', async (jobs) => {
     const jobList = Array.isArray(jobs) ? jobs : [jobs]
     for (const job of jobList) {
