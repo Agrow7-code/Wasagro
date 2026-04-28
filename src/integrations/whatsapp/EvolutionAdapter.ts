@@ -15,6 +15,9 @@ const EvolutionPayloadSchema = z.object({
     }),
     message: z.object({
       conversation: z.string().optional(),
+      extendedTextMessage: z.object({
+        text: z.string(),
+      }).optional(),
       audioMessage: z.object({
         url: z.string(),
         mimetype: z.string(),
@@ -35,7 +38,7 @@ const EvolutionPayloadSchema = z.object({
         mimetype: z.string().optional(),
         fileName: z.string().optional(),
       }).optional(),
-    }),
+    }).optional(),
     messageTimestamp: z.number(),
     pushName: z.string().optional(),
   }),
@@ -74,6 +77,10 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
     if (!parsed.success) return null
 
     const { data } = parsed.data
+
+    // Ignorar mensajes enviados por el bot (evita auto-procesamiento en loop)
+    if (data.key.fromMe) return null
+
     const from = data.key.remoteJid.replace(/@.*$/, '')
     const base = {
       wamid: data.key.id,
@@ -82,32 +89,40 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
       rawPayload: payload,
     }
 
-    if (data.message.conversation) {
-      return { ...base, tipo: 'texto', texto: data.message.conversation } as NormalizedMessage
+    const msg = data.message
+    if (!msg) return null
+
+    // Texto simple
+    if (msg.conversation) {
+      return { ...base, tipo: 'texto', texto: msg.conversation } as NormalizedMessage
     }
-    if (data.message.audioMessage) {
-      return { ...base, tipo: 'audio', audioUrl: data.message.audioMessage.url } as NormalizedMessage
+    // Texto en respuesta/cita (WhatsApp extendedTextMessage)
+    if (msg.extendedTextMessage?.text) {
+      return { ...base, tipo: 'texto', texto: msg.extendedTextMessage.text } as NormalizedMessage
     }
-    if (data.message.imageMessage) {
-      return { ...base, tipo: 'imagen', imagenUrl: data.message.imageMessage.url } as NormalizedMessage
+    if (msg.audioMessage) {
+      return { ...base, tipo: 'audio', audioUrl: msg.audioMessage.url } as NormalizedMessage
     }
-    if (data.message.locationMessage) {
+    if (msg.imageMessage) {
+      return { ...base, tipo: 'imagen', imagenUrl: msg.imageMessage.url } as NormalizedMessage
+    }
+    if (msg.locationMessage) {
       return {
         ...base,
         tipo: 'ubicacion',
-        latitud: data.message.locationMessage.degreesLatitude,
-        longitud: data.message.locationMessage.degreesLongitude,
+        latitud: msg.locationMessage.degreesLatitude,
+        longitud: msg.locationMessage.degreesLongitude,
       } as NormalizedMessage
     }
-    if (data.message.documentMessage) {
-      const mime = data.message.documentMessage.mimetype ?? ''
-      const nombre = data.message.documentMessage.fileName ?? ''
+    if (msg.documentMessage) {
+      const mime = msg.documentMessage.mimetype ?? ''
+      const nombre = msg.documentMessage.fileName ?? ''
       const esExcel = mime.includes('spreadsheet') || mime.includes('excel') || nombre.endsWith('.xlsx') || nombre.endsWith('.xls') || nombre.endsWith('.csv')
       if (!esExcel) return { ...base, tipo: 'otro' } as NormalizedMessage
       return {
         ...base,
         tipo: 'documento',
-        documentoUrl: data.message.documentMessage.url,
+        documentoUrl: msg.documentMessage.url,
         documentoNombre: nombre,
         documentoMimetype: mime,
       } as NormalizedMessage
