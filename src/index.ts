@@ -40,7 +40,6 @@ function validarEnvVars(): void {
     if (!process.env['EVOLUTION_API_URL']) criticas.push('EVOLUTION_API_URL')
     if (!process.env['EVOLUTION_API_KEY']) criticas.push('EVOLUTION_API_KEY')
     if (!process.env['EVOLUTION_INSTANCE']) criticas.push('EVOLUTION_INSTANCE')
-    if (!process.env['WHATSAPP_APP_SECRET']) criticas.push('WHATSAPP_APP_SECRET')
   }
 
   if (criticas.length > 0) {
