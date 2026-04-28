@@ -315,11 +315,16 @@ export async function handleEvento(
         },
       })
       
-      const resumenes = eventosValidos.map(e => buildResumenParaConfirmar(e, lotes)).join('\n\n')
-      const prefijo = eventosValidos.length > 1 ? 'Esto es lo que entendí de tu corrección:\n\n' : 'Esto es lo que entendí:\n\n'
-      const sufijo = '\n\nResponde *sí* para guardar o corrígeme si algo está mal.'
-      
-      await _sender!.enviarTexto(msg.from, `${prefijo}${resumenes}${sufijo}`)
+      const bloquesCorr = eventosValidos.map(e => buildResumenParaConfirmar(e, lotes))
+      let mensajeCorr: string
+      if (bloquesCorr.length === 1) {
+        mensajeCorr = `Esto es lo que entendí:\n\n${bloquesCorr[0]}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
+      } else {
+        const numeradosCorr = bloquesCorr.map((b, i) => `${i + 1}. ${b}`).join('\n\n')
+        mensajeCorr = `Esto es lo que entendí de tu corrección:\n\n${numeradosCorr}\n\nResponde *sí* para guardar todo, o corrígeme si algo está mal.`
+      }
+
+      await _sender!.enviarTexto(msg.from, mensajeCorr)
       await actualizarMensaje(mensajeId, { status: 'processing' })
       return
     }
@@ -364,19 +369,45 @@ export async function handleEvento(
     return
   }
 
-  // Verificar si hay algún lote mencionado pero no detectado (en cualquier evento)
+  // Verificar lote: mencionado pero no coincide, O no mencionado con múltiples lotes activos
+  const TIPOS_REQUIEREN_LOTE = new Set(['labor', 'insumo', 'plaga', 'cosecha', 'calidad'])
   const eventoConLoteInvalido = multiExtraction.eventos.find(e => e.lote_detectado_raw && !e.lote_id && lotes.length > 0)
-  if (eventoConLoteInvalido && session.clarification_count < 2) {
-    const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
-    await updateSession(session.session_id, {
-      clarification_count: session.clarification_count + 1,
-      contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[] },
+  const eventoSinLoteConAmbiguedad = !eventoConLoteInvalido && lotes.length > 1
+    ? multiExtraction.eventos.find(e => !e.lote_id && !e.lote_detectado_raw && TIPOS_REQUIEREN_LOTE.has(e.tipo_evento))
+    : undefined
+  const eventoLoteProblema = eventoConLoteInvalido ?? eventoSinLoteConAmbiguedad
+
+  if (eventoLoteProblema) {
+    if (session.clarification_count < 2) {
+      const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
+      await updateSession(session.session_id, {
+        clarification_count: session.clarification_count + 1,
+        contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[] },
+      })
+      const preguntaLote = eventoConLoteInvalido
+        ? `No encontré el lote "${eventoConLoteInvalido.lote_detectado_raw}" en tu finca. Tus lotes disponibles son:\n${listaLotes}\n\n¿En cuál fue?`
+        : `¿En qué lote fue? Tus lotes disponibles son:\n${listaLotes}`
+      await _sender!.enviarTexto(msg.from, preguntaLote)
+      await actualizarMensaje(mensajeId, { status: 'processing' })
+      return
+    }
+
+    // P2: límite de 2 clarificaciones alcanzado — guardar como nota_libre para revisión del asesor
+    const eventoId = await saveEvento({
+      finca_id: usuario.finca_id!,
+      lote_id: null,
+      tipo_evento: 'nota_libre',
+      status: 'requires_review',
+      datos_evento: { texto_libre: transcripcionCombinada, motivo: 'lote_no_resuelto_tras_2_intentos' },
+      descripcion_raw: transcripcionCombinada,
+      confidence_score: 0,
+      requiere_validacion: true,
+      created_by: usuario.id,
+      mensaje_id: mensajeId,
     })
-    await _sender!.enviarTexto(
-      msg.from,
-      `El lote "${eventoConLoteInvalido.lote_detectado_raw}" no está registrado en tu finca. Los lotes disponibles son:\n${listaLotes}\n\n¿En cuál fue?`
-    )
-    await actualizarMensaje(mensajeId, { status: 'processing' })
+    await updateSession(session.session_id, { status: 'completed', clarification_count: 0, contexto_parcial: {} })
+    await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
+    await _sender!.enviarTexto(msg.from, 'Guardé tu reporte para que tu asesor lo revise. ⚠️')
     return
   }
 
@@ -402,12 +433,17 @@ export async function handleEvento(
     },
   })
 
-  // Generar resumen unificado
-  const resumenes = multiExtraction.eventos.map(e => buildResumenParaConfirmar(e, lotes)).join('\n\n')
-  const prefijo = multiExtraction.eventos.length > 1 ? 'Esto es lo que entendí de tus eventos:\n\n' : 'Esto es lo que entendí:\n\n'
-  const sufijo = '\n\nResponde *sí* para guardar o corrígeme si algo está mal.'
-  
-  await _sender!.enviarTexto(msg.from, `${prefijo}${resumenes}${sufijo}`)
+  // Generar resumen unificado — un solo mensaje, un solo "Responde sí"
+  const bloques = multiExtraction.eventos.map(e => buildResumenParaConfirmar(e, lotes))
+  let mensajeResumen: string
+  if (bloques.length === 1) {
+    mensajeResumen = `Esto es lo que entendí:\n\n${bloques[0]}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
+  } else {
+    const numerados = bloques.map((b, i) => `${i + 1}. ${b}`).join('\n\n')
+    mensajeResumen = `Esto es lo que entendí de tus ${bloques.length} reportes:\n\n${numerados}\n\nResponde *sí* para guardar todo, o corrígeme si algo está mal.`
+  }
+
+  await _sender!.enviarTexto(msg.from, mensajeResumen)
   await actualizarMensaje(mensajeId, { status: 'processing' })
 }
 
@@ -477,7 +513,8 @@ function buildResumenParaConfirmar(
     }
   }
 
-  return `Esto es lo que entendí:\n\n${tipo}\n${loteLinea}${fechaLinea}${lineas.join('\n')}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
+  // Returns only the event block — header/footer are assembled by the caller
+  return `${tipo}\n${loteLinea}${fechaLinea}${lineas.join('\n')}`
 }
 
 async function guardarEmbeddingEvento(
