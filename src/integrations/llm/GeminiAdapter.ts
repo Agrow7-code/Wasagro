@@ -40,18 +40,34 @@ export class GeminiAdapter implements ILLMAdapter {
     try {
       const gemini = this.#sdk.getGenerativeModel({ model: activeModel })
       
-      const contents: any[] = []
-      if (opciones.systemPrompt) {
-        contents.push({ role: 'user', parts: [{ text: opciones.systemPrompt }] })
-      }
+      const parts: any[] = []
       
-      if (opciones.imageUrl) {
-        contents.push({ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: opciones.imageUrl } }] })
+      // En Gemini, es mejor mezclar el system prompt como la primera parte de la instrucción de usuario en llamadas multimodales o si no se usa SystemInstruction explícito
+      if (opciones.systemPrompt) {
+        parts.push({ text: `INSTRUCCIONES DEL SISTEMA:\n${opciones.systemPrompt}\n\nMENSAJE DEL USUARIO:\n` })
       }
       
       if (userContent) {
-        contents.push({ role: 'user', parts: [{ text: userContent }] })
+        parts.push({ text: userContent })
       }
+
+      if (opciones.imageUrl) {
+        let base64Data = opciones.imageUrl
+        let mimeType = 'image/jpeg'
+        
+        // Si es una URL http(s), descargarla a base64
+        if (opciones.imageUrl.startsWith('http')) {
+          const res = await fetch(opciones.imageUrl)
+          if (!res.ok) throw new Error(`Error descargando imagen: HTTP ${res.status}`)
+          const buffer = await res.arrayBuffer()
+          base64Data = Buffer.from(buffer).toString('base64')
+          mimeType = res.headers.get('content-type') || 'image/jpeg'
+        }
+        
+        parts.push({ inlineData: { mimeType, data: base64Data } })
+      }
+
+      const contents = [{ role: 'user', parts }]
 
       // Generar el contenido usando el modelo seleccionado dinámicamente
       const result = await gemini.generateContent({

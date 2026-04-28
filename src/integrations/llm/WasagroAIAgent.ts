@@ -156,16 +156,29 @@ export class WasagroAIAgent implements IWasagroLLM {
     const generation = trace.generation({ name: 'describir_imagen', model: 'wasagro-ai-agent' })
     try {
       const prompt = (await PromptManager.getPrompt('sp-03a-vision-describe.md', 'prompts/sp-03a-vision-describe.md', typeof traceId !== 'undefined' ? traceId : undefined))
-      const analisis = await this.#adapter.generarTexto('Analiza esta imagen y descríbela detalladamente según tus instrucciones.', { 
+      const textoRaw = await this.#adapter.generarTexto('Analiza esta imagen y descríbela objetivamente según tus instrucciones en JSON estricto.', { 
         systemPrompt: prompt, 
-        responseFormat: 'text', 
+        responseFormat: 'json_object', // Forzar JSON para el escáner ocular
         imageUrl, 
         traceId, 
         generationName: 'llamarLibre', 
-        modelClass: 'ultra' // Requiere modelo multimodal potente
+        modelClass: 'ultra' // Requiere modelo multimodal potente (Gemini 1.5 Pro)
       })
-      generation.end({ output: analisis })
-      return analisis
+
+      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+      
+      let json: any
+      try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Vision Scanner devolvió no-JSON: ${texto.slice(0, 100)}`)
+      }
+
+      generation.end({ output: json })
+      
+      // Convertir el JSON extraído a un string estructurado para el RAG y Diagnóstico
+      if (json.es_imagen_agricola === false) return "Imagen no agrícola."
+      
+      return `Órganos: ${json.organos_visibles?.join(', ')}\nSíntomas físicos: ${json.descripcion_fisica_cruda}\nÁrea afectada: ${json.porcentaje_area_afectada}\nPlagas: ${json.presencia_plagas_visibles}`
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })
       throw new LLMError('GROQ_ERROR', `Error describiendo imagen: ${String(err)}`, err)
