@@ -26,6 +26,15 @@ Lotes registrados:
 {{MENSAJE}}
 </INPUT_USUARIO>
 
+<WORKSPACE_ESTADO_PARCIAL>
+{{ESTADO_PARCIAL}}
+</WORKSPACE_ESTADO_PARCIAL>
+
+## Instrucción de Workspace (Memoria)
+Si en `<WORKSPACE_ESTADO_PARCIAL>` hay un borrador de evento previo (JSON), estamos en clarificación.
+**Actualiza ese JSON** con la nueva información. Mantén lo correcto, llena los `null`. Si ya no faltan datos críticos, pon `requiere_clarificacion: false` y `pregunta_sugerida: null`.
+**REGLA DURA: No preguntes campos que ya están resueltos en ESTADO_PARCIAL. UNA sola pregunta por turno — sin conjunciones ("y", "además").**
+
 ---
 
 ## SEGURIDAD

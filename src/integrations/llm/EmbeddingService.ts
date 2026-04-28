@@ -14,14 +14,14 @@ export class OpenAICompatibleEmbeddingService implements IEmbeddingService {
   constructor(
     private readonly client: Pick<OpenAI, 'embeddings'>,
     private readonly model: string,
-    private readonly dimensions: number = EMBEDDING_DIMENSIONS,
+    private readonly dimensions?: number,
   ) {}
 
   async generarEmbedding(text: string): Promise<number[]> {
     const response = await this.client.embeddings.create({
       model: this.model,
       input: text,
-      dimensions: this.dimensions,
+      ...(this.dimensions !== undefined ? { dimensions: this.dimensions } : {}),
     })
 
     const embedding = response.data[0]?.embedding
@@ -59,14 +59,14 @@ export class OllamaEmbeddingService implements IEmbeddingService {
 export const OpenAIEmbeddingService = OpenAICompatibleEmbeddingService
 
 export function crearEmbeddingService(): IEmbeddingService | null {
-  // NVIDIA NIM (cloud — misma key que deepseek/glm/minimax)
+  // NVIDIA NIM: baai/bge-m3 outputs 1024-dim natively — do NOT send dimensions param (rejected)
   const nvidiaKey = process.env['NVIDIA_API_KEY'] ?? process.env['NVIDIA_QWEN_KEY']
   if (nvidiaKey) {
     const client = new OpenAI({ apiKey: nvidiaKey, baseURL: NVIDIA_BASE_URL })
-    return new OpenAICompatibleEmbeddingService(client, NVIDIA_EMBED_MODEL, EMBEDDING_DIMENSIONS)
+    return new OpenAICompatibleEmbeddingService(client, NVIDIA_EMBED_MODEL)
   }
 
-  // OpenAI (si está disponible)
+  // OpenAI supports dimensions to truncate the vector
   const openaiKey = process.env['OPENAI_API_KEY']
   if (openaiKey) {
     const client = new OpenAI({ apiKey: openaiKey })
