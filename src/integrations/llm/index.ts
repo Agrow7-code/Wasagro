@@ -1,5 +1,5 @@
 import type { IWasagroLLM } from './IWasagroLLM.js'
-import type { ILLMAdapter } from './ILLMAdapter.js'
+import type { ILLMAdapter, ModelClass } from './ILLMAdapter.js'
 import { GeminiAdapter } from './GeminiAdapter.js'
 import { OllamaAdapter } from './OllamaAdapter.js'
 import { GroqAdapter } from './GroqAdapter.js'
@@ -10,7 +10,6 @@ import { langfuse } from '../langfuse.js'
 
 export type LLMProvider = 'auto' | 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'glm' | 'minimax' | 'qwen' | 'gemma'
 
-// Cada modelo usa su propia key — keys compartidas solo donde corresponde
 function buildAdapter(provider: string): ILLMAdapter {
   if (provider === 'gemini') {
     const apiKey = process.env['GEMINI_API_KEY']
@@ -51,37 +50,44 @@ function buildAdapter(provider: string): ILLMAdapter {
   throw new Error(`Provider desconocido: ${provider}`)
 }
 
-// Cadena auto: Groq (rápido) → Gemini (confiable) → Deepseek → GLM → Minimax → Gemma → Qwen
-// Solo se incluye un adapter si tiene su key configurada
 export function crearAdapterLLM(): ILLMAdapter {
   const provider = (process.env['WASAGRO_LLM'] ?? 'auto') as LLMProvider
 
   if (provider === 'auto') {
-    const chain: Array<{ name: string; key: string; provider: string }> = [
-      { name: 'Groq',     key: 'GROQ_API_KEY',       provider: 'groq'     },
-      { name: 'Gemini',   key: 'GEMINI_API_KEY',      provider: 'gemini'   },
-      { name: 'Deepseek', key: 'NVIDIA_API_KEY',      provider: 'deepseek' },
-      { name: 'GLM-5.1',  key: 'NVIDIA_GLM_KEY',      provider: 'glm'      },
-      { name: 'Minimax',  key: 'NVIDIA_MINIMAX_KEY',  provider: 'minimax'  },
-      { name: 'Gemma-4',  key: 'NVIDIA_GEMMA_KEY',    provider: 'gemma'    },
-      { name: 'Qwen',     key: 'NVIDIA_QWEN_KEY',     provider: 'qwen'     },
+    // TIERED ROUTING POOL (Control activo de cuota y capacidades)
+    const poolConfig: Array<{ name: string; key: string; provider: string; tier: ModelClass }> = [
+      // TIER 1 (Fast): Extracción simple, clasificación rápida, sin penalización por fallos masivos
+      { name: 'Groq',     key: 'GROQ_API_KEY',       provider: 'groq',     tier: 'fast' },
+      { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'fast' }, 
+
+      // TIER 2 (Reasoning): Reflexión profunda, PDR/SR (ReAct)
+      { name: 'Deepseek', key: 'NVIDIA_API_KEY',     provider: 'deepseek', tier: 'reasoning' },
+      { name: 'GLM-5.1',  key: 'NVIDIA_GLM_KEY',     provider: 'glm',      tier: 'reasoning' },
+      { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'reasoning' },
+
+      // TIER 3 (Ultra): Casos críticos, Diagnóstico complejo, V2VK
+      { name: 'Minimax',  key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax',  tier: 'ultra' },
+      { name: 'Gemma-4',  key: 'NVIDIA_GEMMA_KEY',   provider: 'gemma',    tier: 'ultra' },
+      { name: 'Qwen',     key: 'NVIDIA_QWEN_KEY',    provider: 'qwen',     tier: 'ultra' },
     ]
 
-    const adapters: ILLMAdapter[] = []
-    const nombres: string[] = []
-
-    for (const { name, key, provider: p } of chain) {
-      if (process.env[key]) {
-        adapters.push(buildAdapter(p))
-        nombres.push(name)
+    const pool = []
+    
+    for (const config of poolConfig) {
+      if (process.env[config.key] || (config.key.includes('NVIDIA_') && process.env['NVIDIA_API_KEY'])) {
+        try {
+          const adapter = buildAdapter(config.provider)
+          pool.push({ name: config.name, adapter, tier: config.tier })
+        } catch (e) {
+           console.warn(`[llm] Saltando ${config.name} por error de inicialización`)
+        }
       }
     }
 
-    if (adapters.length === 0) throw new Error('WASAGRO_LLM=auto requiere al menos una API key configurada')
-    console.log(`[llm] modo auto — cadena: ${nombres.join(' → ')}`)
-
-    return new LLMRouter(adapters, {
-      onMetric: (m) => console.log(`[llm] ${nombres[m.adapter]} ${m.success ? '✓' : '✗'} ${m.latencyMs}ms${m.error ? ' — ' + m.error.slice(0, 80) : ''}`)
+    if (pool.length === 0) throw new Error('WASAGRO_LLM=auto requiere al menos una API key configurada')
+    
+    return new LLMRouter(pool, {
+      onMetric: (m) => console.log(`[llm_router] Tier:${m.tier} | ${m.adapterName} ${m.success ? '✓' : '✗'} ${m.latencyMs}ms ${m.error ? '— ' + m.error.slice(0, 80) : ''}`)
     })
   }
 

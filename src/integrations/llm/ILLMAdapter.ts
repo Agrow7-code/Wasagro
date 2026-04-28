@@ -1,6 +1,6 @@
 import type { LangfuseTraceClient } from 'langfuse'
 
-export type ModelClass = 'fast' | 'reasoning'
+export type ModelClass = 'fast' | 'reasoning' | 'ultra'
 
 export interface LLMGeneracionOpciones {
   systemPrompt?: string
