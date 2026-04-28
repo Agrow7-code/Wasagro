@@ -39,7 +39,8 @@ const EvolutionPayloadSchema = z.object({
         fileName: z.string().optional(),
       }).optional(),
     }).optional(),
-    messageTimestamp: z.number(),
+    // z.coerce.number() acepta tanto número como string — Evolution API varía entre versiones
+    messageTimestamp: z.coerce.number(),
     pushName: z.string().optional(),
   }),
 })
@@ -74,14 +75,28 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
 
   parsearMensaje(payload: unknown): NormalizedMessage | null {
     const parsed = EvolutionPayloadSchema.safeParse(payload)
-    if (!parsed.success) return null
+    if (!parsed.success) {
+      // Log detallado para Railway — muestra exactamente qué campo falló
+      console.error('[EvolutionAdapter] Schema parse failed:', JSON.stringify(parsed.error.issues))
+      return null
+    }
 
     const { data } = parsed.data
 
     // Ignorar mensajes enviados por el bot (evita auto-procesamiento en loop)
-    if (data.key.fromMe) return null
+    if (data.key.fromMe) {
+      console.log(`[EvolutionAdapter] fromMe ignorado: ${data.key.id}`)
+      return null
+    }
 
-    const from = data.key.remoteJid.replace(/@.*$/, '')
+    // Ignorar chats grupales, broadcast y newsletter — solo procesar chats individuales
+    const jid = data.key.remoteJid
+    if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('newsletter')) {
+      console.log(`[EvolutionAdapter] JID no individual ignorado: ${jid}`)
+      return null
+    }
+
+    const from = jid.replace(/@.*$/, '')
     const base = {
       wamid: data.key.id,
       from,

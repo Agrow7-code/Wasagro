@@ -43,6 +43,7 @@ webhookRouter.post('/whatsapp', async (c) => {
   // Parsear mensaje y encolar trabajo en pg-boss antes de retornar 200
   const msg = adapter.parsearMensaje(payload)
   if (msg) {
+    console.log(`[webhook] mensaje de ${msg.from} tipo=${msg.tipo} wamid=${msg.wamid}`)
     try {
       const boss = getBoss()
       const jobId = await boss.send('procesar-mensaje', { msg, traceId: trace.id }, {
@@ -50,12 +51,15 @@ webhookRouter.post('/whatsapp', async (c) => {
         retryLimit: 3,
         retryBackoff: true,
       })
+      console.log(`[webhook] job encolado: ${jobId ?? 'singleton-exists'} para ${msg.from}`)
       trace.event({ name: 'job_enqueued', output: { jobId, singletonKey: msg.wamid } })
     } catch (err: unknown) {
+      console.error(`[webhook] ERROR al encolar job: ${String(err)}`)
       trace.event({ name: 'enqueue_error', level: 'ERROR', output: { error: String(err) } })
       return c.json({ error: 'Failed to enqueue message' }, 500)
     }
   } else {
+    console.log(`[webhook] mensaje descartado (parsearMensaje=null) — ver log de EvolutionAdapter`)
     trace.event({ name: 'message_ignored', level: 'DEFAULT', input: { reason: 'parsearMensaje returned null' } })
   }
 

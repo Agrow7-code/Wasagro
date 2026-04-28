@@ -25,9 +25,12 @@ export async function initPgBoss() {
     const jobList = Array.isArray(jobs) ? jobs : [jobs]
     for (const job of jobList) {
       const { msg, traceId } = job.data as any
+      console.log(`[pg-boss] procesando job ${job.id} de ${msg?.from ?? '?'} tipo=${msg?.tipo ?? '?'}`)
       try {
         await procesarMensajeEntrante(msg, traceId)
+        console.log(`[pg-boss] job ${job.id} completado OK`)
       } catch (err) {
+        console.error(`[pg-boss] job ${job.id} falló: ${String(err)}`)
         langfuse.trace({ id: traceId }).event({
           name: 'job_attempt_failed',
           level: 'ERROR',

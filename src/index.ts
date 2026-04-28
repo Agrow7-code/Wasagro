@@ -12,7 +12,7 @@ import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { enviarAlertasClima } from './pipeline/alertaClima.js'
 import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
 import { langfuse } from './integrations/langfuse.js'
-import { initPgBoss } from './workers/pgBoss.js'
+import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 
 import { cors } from 'hono/cors'
 import { authRouter } from './auth/router.js'
@@ -148,6 +148,9 @@ app.use('*', cors({
 app.get('/health', (c) => c.json({
   status: 'ok',
   uptime: process.uptime(),
+  pgboss: isPgBossReady() ? 'ready' : 'not_ready',
+  provider: process.env['WHATSAPP_PROVIDER'] ?? 'unset',
+  llm: process.env['WASAGRO_LLM'] ?? 'unset',
 }))
 
 app.route('/webhook', webhookRouter)
