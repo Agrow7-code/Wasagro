@@ -6,6 +6,7 @@ export type LLMErrorCode =
   | 'PARSE_ERROR'
   | 'RATE_LIMIT'
   | 'INVALID_RESPONSE'
+  | 'REACT_ERROR'
 
 export class LLMError extends Error {
   readonly code: LLMErrorCode

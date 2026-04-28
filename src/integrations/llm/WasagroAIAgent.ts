@@ -25,7 +25,7 @@ import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
-
+import { SupabaseTools } from '../../agents/mcp/SupabaseTools.js'
 
 const EXTRACTOR_POR_TIPO: Record<string, string> = {
   insumo: 'sp-01a-extractor-insumo.md',
@@ -521,8 +521,8 @@ export class WasagroAIAgent implements IWasagroLLM {
     const estadoParcialJSON = input.estado_parcial ? JSON.stringify(input.estado_parcial, null, 2) : 'No hay borrador previo'
     const fechaHoy = new Date().toISOString().slice(0, 10)
 
-    const prompt = injectarVariables((await PromptManager.getPrompt(promptFile, `prompts/${promptFile}`, typeof traceId !== 'undefined' ? traceId : undefined)), {
-      LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados',
+    const systemPrompt = injectarVariables((await PromptManager.getPrompt(promptFile, `prompts/${promptFile}`, typeof traceId !== 'undefined' ? traceId : undefined)), {
+      LISTA_LOTES: input.lista_lotes ?? 'No hay lotes registrados', // Fallback por ahora hasta limpar prompts
       FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
       CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
       PAIS: input.pais ?? 'EC',
@@ -541,41 +541,99 @@ export class WasagroAIAgent implements IWasagroLLM {
     })
 
     const inicio = Date.now()
-    try {
-      const textoRaw = await this.#adapter.generarTexto(`Transcripción: ${input.transcripcion}`, { 
-        systemPrompt: prompt, 
-        responseFormat: 'json_object', 
-        traceId, 
-        generationName: 'llamar',
-        modelClass: 'reasoning' // Extracción profunda y validación cruzada (Pro)
-      })
-      const latencia = Date.now() - inicio
+    let conversationHistory = `Transcripción: ${input.transcripcion}`
+    let iterations = 0
+    const maxIterations = 3 // Guardrail: Límite estricto de iteraciones
+    const toolCallHistory = new Set<string>() // Guardrail: Detección de Doom-Loops
 
-      // Limpiar Markdown si el LLM envolvió la respuesta
-      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+    while (iterations < maxIterations) {
+      try {
+        const textoRaw = await this.#adapter.generarTexto(conversationHistory, { 
+          systemPrompt, 
+          responseFormat: 'json_object', 
+          traceId, 
+          generationName: `llamar_react_iter_${iterations}`,
+          modelClass: 'reasoning',
+          tools: SupabaseTools
+        })
 
-      let json: unknown
-      try { json = JSON.parse(texto) } catch {
-        generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Extractor devolvió no-JSON: ${texto.slice(0, 100)}`)
+        // Limpiar Markdown si el LLM envolvió la respuesta
+        const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
+
+        let json: any
+        try { json = JSON.parse(texto) } catch {
+          generation.end({ output: texto, level: 'ERROR' })
+          throw new LLMError('PARSE_ERROR', `Extractor devolvió no-JSON: ${texto.slice(0, 100)}`)
+        }
+
+        // Detectar si el LLM invocó una herramienta (MCP Tool Call)
+        if (json.__tool_call) {
+          const { name, args } = json.__tool_call
+          const toolCallHash = `${name}(${JSON.stringify(args)})`
+
+          trace.event({ name: 'mcp_tool_call', input: { name, args } })
+          console.log(`[MCP] 🛠️  Agente invocó herramienta: ${name}`, args)
+
+          if (toolCallHistory.has(toolCallHash)) {
+            console.warn(`[MCP] ⚠️ Doom-loop detectado para ${toolCallHash}. Abortando herramienta y forzando extracción.`)
+            conversationHistory += `\n\n[Sistema]: Has llamado repetidamente a ${name} con los mismos argumentos sin éxito. DEBES abortar la búsqueda y generar la extracción JSON final usando la información que ya tienes. Si falta información crucial, marca requiere_clarificacion=true y añade una pregunta_sugerida.`
+            iterations++
+            continue
+          }
+          toolCallHistory.add(toolCallHash)
+
+          const tool = SupabaseTools.find(t => t.name === name)
+          let toolResultStr = ''
+          
+          if (!tool) {
+            toolResultStr = `Error: Herramienta '${name}' no existe.`
+          } else {
+            try {
+              // Inyectamos automáticamente el finca_id por seguridad, aunque el modelo deba pasarlo
+              const safeArgs = { ...args, finca_id: input.finca_id }
+              const result = await tool.execute(safeArgs)
+              toolResultStr = JSON.stringify(result, null, 2)
+            } catch (toolErr: any) {
+              // Smart Nudge: Devolver el error al LLM en lugar de fallar
+              toolResultStr = `Error ejecutando herramienta: ${toolErr.message}`
+            }
+          }
+
+          // Agregamos la respuesta al contexto y volvemos a iterar
+          conversationHistory += `\n\n[Resultado Herramienta ${name}]:\n${toolResultStr}\n\n[Sistema]: Analiza este resultado y decide si necesitas llamar otra herramienta o generar el JSON final de extracción.`
+          iterations++
+          continue
+        }
+
+        // Si no es un tool call, intentamos parsear el resultado final (Gobernanza Zod)
+        const parsed = EventoCampoExtraidoSchema.safeParse(json)
+        if (!parsed.success) {
+          // Bucle de auto-corrección de Zod integrado en ReAct
+          const erroresHarness = parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
+          console.warn(`[Harness] Gobernanza Zod falló en ${tipo_evento}:`, erroresHarness)
+          
+          if (iterations >= maxIterations - 1) {
+            generation.end({ output: json, level: 'ERROR' })
+            throw new LLMError('PARSE_ERROR', `Gobernanza Zod rechazó el output tras intentos: ${erroresHarness}`)
+          }
+          
+          conversationHistory += `\n\n[Sistema]: Tu respuesta JSON anterior falló la validación estricta Zod: ${erroresHarness}. Por favor corrige la estructura y responde ÚNICAMENTE con el JSON válido.`
+          iterations++
+          continue
+        }
+
+        const latencia = Date.now() - inicio
+        generation.end({ output: parsed.data, metadata: { latencia_ms: latencia, react_iterations: iterations + 1 } })
+        return parsed.data
+
+      } catch (err) {
+        if (err instanceof LLMError) throw err
+        generation.end({ output: String(err), level: 'ERROR' })
+        throw new LLMError('GROQ_ERROR', `Error extrayendo ${tipo_evento}: ${String(err)}`, err)
       }
-
-      // Gobernanza Estricta Zod (Stateless Harness)
-      const parsed = EventoCampoExtraidoSchema.safeParse(json)
-      if (!parsed.success) {
-        generation.end({ output: json, level: 'ERROR' })
-        const erroresHarness = parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
-        console.error(`[Harness] Gobernanza Zod falló en ${tipo_evento}:`, erroresHarness)
-        throw new LLMError('PARSE_ERROR', `Gobernanza Zod rechazó el output: ${erroresHarness}`)
-      }
-
-      generation.end({ output: parsed.data, metadata: { latencia_ms: latencia } })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error extrayendo ${tipo_evento}: ${String(err)}`, err)
     }
+
+    throw new LLMError('REACT_ERROR', `Se alcanzó el límite máximo de iteraciones (${maxIterations}) sin convergencia en la extracción.`)
   }
 
   

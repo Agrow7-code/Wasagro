@@ -69,14 +69,34 @@ export class GeminiAdapter implements ILLMAdapter {
 
       const contents = [{ role: 'user', parts }]
 
+      let toolsConfig: any = undefined
+      if (opciones.tools && opciones.tools.length > 0) {
+        toolsConfig = [{
+          functionDeclarations: opciones.tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters
+          }))
+        }]
+      }
+
       // Generar el contenido usando el modelo seleccionado dinámicamente
       const result = await gemini.generateContent({
         contents,
         generationConfig: {
           temperature: opciones.temperature ?? 0.7,
-          responseMimeType: opciones.responseFormat === 'json_object' ? 'application/json' : 'text/plain'
-        }
+          responseMimeType: opciones.responseFormat === 'json_object' && !toolsConfig ? 'application/json' : 'text/plain'
+        },
+        tools: toolsConfig
       })
+      
+      const call = result.response.functionCalls()?.[0]
+      if (call) {
+        const toolCallJson = JSON.stringify({ __tool_call: { name: call.name, args: call.args } })
+        generation.end({ output: toolCallJson, usage: { totalTokens: 0 }, metadata: { latencia_ms: Date.now() - inicio } })
+        return toolCallJson
+      }
+
       const texto = result.response.text()
       
       generation.end({ output: texto, usage: { totalTokens: 0 }, metadata: { latencia_ms: Date.now() - inicio } })
