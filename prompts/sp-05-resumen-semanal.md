@@ -1,6 +1,6 @@
 # SP-05: Reporte semanal
 # Archivo: prompts/sp-05-resumen-semanal.md
-# Modelo: gpt-4o-mini
+# Router LLM: Tier reasoning (Deepseek / GLM / Gemini) - ACTUALIZADO: D3 Router Multi-Modelo
 # Variables de inyección: {{FINCA_NOMBRE}}, {{CULTIVO_PRINCIPAL}}, {{FECHA_INICIO}}, {{FECHA_FIN}}, {{EVENTOS_AGREGADOS}}
 # Tokens estimados: ~280
 

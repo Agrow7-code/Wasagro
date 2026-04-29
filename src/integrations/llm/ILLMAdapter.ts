@@ -1,6 +1,6 @@
 import type { LangfuseTraceClient } from 'langfuse'
 
-export type ModelClass = 'fast' | 'reasoning' | 'ultra'
+export type ModelClass = 'fast' | 'reasoning' | 'ultra' | 'ocr'
 
 export interface ToolDef {
   name: string

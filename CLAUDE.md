@@ -169,6 +169,21 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Cumple:** CR3 (extracción JSON), CR5 (LangFuse en ambos paths). Previene diagnósticos absurdos y aprovecha datos de campo que antes se perdían.
 - **Revisar cuando:** Accuracy del clasificador < 90% en imágenes ambiguas. Considerar añadir `recibo_de_pago` como cuarta categoría si agricultores empiezan a enviar comprobantes de compra de insumos.
 
+### D11. Enrutador Visual Dinámico — tier OCR dedicado con DeepSeek-OCR
+
+- **Fecha:** Abril 2026
+- **Reemplaza:** D7 (parcialmente) — D7 introdujo la clasificación visual pero ejecutaba AMBOS paths (clasificador + OCR) con `modelClass: 'ultra'` (Gemini Pro). Usar el mismo modelo generalista para diagnosticar roya y para leer planillas arrugadas es un antipatrón: el modelo no está optimizado para compresión óptica de documentos manuscritos, y la latencia/costo son innecesarios para la clasificación.
+- **Dolor que motivó la decisión:** El clasificador `sp-03c` y el OCR `sp-03d` ambos usaban `modelClass: 'ultra'` (Gemini 1.5 Pro). Para clasificar si una imagen es plaga o documento, un modelo fast basta. Para leer números manuscritos en papel arrugado, se necesita un modelo con compresión óptica especializada (DeepSeek-OCR / InternVL 3.0). Gemini Pro no domina box-free parsing ni handwritten OCR industrial.
+- **Decisión:**
+  1. **Nuevo `ModelClass: 'ocr'`** en `ILLMAdapter` — tier dedicado para procesamiento de documentos. No es `ultra` (multimodal generalista), no es `fast` (texto plano). Es un contrato distinto que recibe imagen y devuelve JSON estructurado con guardrails Zod.
+  2. **Clasificador baja a `fast`** — `clasificarTipoImagen()` usa `modelClass: 'fast'` (Gemini Flash / Groq). Latencia <1s, costo 10x menor.
+  3. **OCR usa `ocr` tier** — `extraerDocumentoOCR()` usa `modelClass: 'ocr'` que enruta a DeepSeek-OCR (vía NVIDIA API) o InternVL 3.0 como fallback.
+  4. **Guardrails de salida Zod** — `ResultadoOCRSchema` valida TODO campo del output antes de persistir. Si el modelo devuelve `"20 usd"` donde se espera un número, Zod lo intercepta y marca como `requires_review` en vez de crashear la inserción en Supabase.
+  5. **Fallback graceful** — Si el tier `ocr` no tiene adapters configurados (sin NVIDIA_API_KEY), el router hace fallback a `ultra` (Gemini Pro) con warning en logs.
+- **Implementación:** `src/integrations/llm/ILLMAdapter.ts` (ModelClass extendido), `src/integrations/llm/NvidiaAdapter.ts` (reutilizado para DeepSeek-OCR vía NVIDIA API), `src/integrations/llm/index.ts` (pool config con tier `ocr`), `src/types/dominio/OCR.ts` (ResultadoOCRSchema), `prompts/sp-03d-ocr-documento.md` (reescrito para OCR especializado), `src/integrations/llm/WasagroAIAgent.ts` (modelClass actualizados).
+- **Cumple:** CR3 (JSON extraction con validación Zod <10ms), CR5 (LangFuse en ambos paths), D3 (router tiered), AGENTS.md Regla 1 (no inventar datos — Zod bloquea formatos incorrectos).
+- **Revisar cuando:** Field-level accuracy en OCR < 85%. Si InternVL 3.0 supera a DeepSeek-OCR en benchmarks de handwritten, hacer swap. Si se añade `recibo_de_pago` a TipoImagen, necesita su propio prompt y schema de validación.
+
 ### D8. Descarga de media de Evolution API como base64
 
 - **Fecha:** Abril 2026
@@ -182,10 +197,26 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 
 - **Fecha:** Abril 2026
 - **Dolor que motivó la decisión:** Un agricultor decía: "Apliqué Entrust, gasté $20, me sobró 1 litro". El sistema trataba el mensaje como un único evento. Si el clasificador lo mapeaba a `aplicacion_insumo`, se perdía el dato de gasto. Si lo mapeaba a `nota_economica`, se perdía la aplicación. Un mensaje = muchos datos = pérdida garantizada con extractor monolítico.
-- **Decisión:** `WasagroAIAgent.extraerEventos()` clasifica primero la intención del mensaje (puede ser múltiple), luego ejecuta extractores especializados en paralelo por cada intención detectada. El resultado es `ExtraccionMultiEvento` con array de eventos independientes.
+- **Decisión:** `WasagroAIAgent.extraerEventos()` clasifica primero la intención del mensaje (puede ser múltiple), luego ejecuta extractores especializados por cada intención detectada. El resultado es `ExtraccionMultiEvento` con array de eventos independientes.
 - **Implementación:** `src/integrations/llm/WasagroAIAgent.ts`. Clasificador usa tier `fast`. Extractores especializados en paralelo con `Promise.all`. `sp-01a-extractor-insumo.md` ahora incluye campos `cantidad_sobrante` y `unidad_sobrante`.
 - **Limitación actual:** El clasificador puede fallar en mensajes con más de 3 intenciones simultáneas. En ese caso, el sistema registra lo que puede y marca el raw como `requires_review` (P1 — nunca inventar, P2 — máx 2 preguntas).
 - **Revisar cuando:** Se detecten en LangFuse mensajes con > 2 intenciones que se pierdan. Próxima iteración: extractores en paralelo con merge de confianza.
+- **REEMPLAZADO POR D10** — El `Promise.all` en línea fue eliminado en favor del patrón Initiator-Sub-Agent con pg-boss por intención.
+
+### D10. Patrón Initiator-Sub-Agent con pg-boss por intención
+
+- **Fecha:** Abril 2026
+- **Reemplaza:** D9 (Promise.all en línea) — El `Promise.all` dentro de un solo job de pg-boss perdía TODOS los resultados si Railway reiniciaba el proceso, incluyendo los que ya habían completado.
+- **Dolor que motivó la decisión:** Un reinicio de Railway mataba el job de pg-boss mientras 3 extractores corrían en paralelo. Si el extractor de "gasto" ya había guardado su resultado pero el de "aplicación" no, se perdía TODO — el gasto ya persistido se quedaba huérfano sin confirmación al agricultor. Además, 3 intenciones paralelas sin control de concurrencia podían saturar las APIs de IA con errores 429 en cascada.
+- **Decisión:** Desacoplar clasificación de ejecución:
+  1. **IntentGate (Agente Iniciador):** Modelo Tier fast clasifica el mensaje y devuelve array de intenciones. No ejecuta extracción.
+  2. **Encolamiento por intención:** Cada intención se encola como job independiente en pg-boss (`procesar-intencion`). Cada job tiene su propio retry budget.
+  3. **Worker por intención (Sub-agente):** Cada worker ejecuta `#extraerEspecializado` para un solo tipo, guarda checkpoint en Supabase, marca la intención como completada en la sesión.
+  4. **Coordinación en sesión:** Array `intenciones_pendientes` en `sesiones_activas.contexto_parcial`. Cuando todas completan → confirmación al agricultor.
+  5. **WAIT-CAP-STOP:** 429 → exponential backoff con `Retry-After` (WAIT). Múltiples 429s → reducir `maxThreads` (CAP). 5+ 429s consecutivos → abortar job (STOP). pg-boss reintentará automáticamente.
+- **Implementación:** `src/integrations/llm/IntentGate.ts`, `src/workers/pgBoss.ts` (worker `procesar-intencion`), `src/pipeline/handlers/EventHandler.ts` (encolamiento), `src/pipeline/supabaseQueries.ts` (coord. funciones), `src/types/dominio/EventoCampo.ts` (tipos). ADR: `docs/decisions/006-initiator-sub-agent-pg-boss.md`.
+- **Resultado:** Si Railway mata el proceso mientras el worker de "gasto" se ejecuta, pg-boss solo reintenta la tarea de "gasto". La tarea de "aplicación" que terminó milisegundos antes y guardó su estado queda intacta.
+- **Revisar cuando:** Latencia del IntentGate > 2s (debería ser <1s con Tier fast). Errores de coordinación en sesión cuando >5 intenciones simultáneas (edge case extremo).
 
 ### D4. STT: GPT-4o Mini Transcribe
 
@@ -229,11 +260,12 @@ Wasagro/
 │   ├── 01-problema-y-contexto.md
 │   ├── 02-arquitectura.md
 │   └── decisions/                   ← ADRs (Architecture Decision Records)
-│       ├── 001-hono-over-n8n.md
-│       ├── 002-evolution-api-over-meta.md
-│       ├── 003-image-classifier-before-v2vk.md  ← D7
-│       ├── 004-evolution-media-download-as-base64.md  ← D8
-│       └── 005-multi-intent-extraction.md  ← D9
+│ ├── 001-hono-over-n8n.md
+│ ├── 002-evolution-api-over-meta.md
+│ ├── 003-image-classifier-before-v2vk.md ← D7
+│ ├── 004-evolution-media-download-as-base64.md ← D8
+│ ├── 005-multi-intent-extraction.md ← D9
+│ └── 006-initiator-sub-agent-pg-boss.md ← D10 (reemplaza D9)
 └── tests/
 ```
 

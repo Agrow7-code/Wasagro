@@ -1,10 +1,11 @@
-import type { EntradaEvento, ExtraccionMultiEvento } from '../../types/dominio/EventoCampo.js'
+import type { EntradaEvento, ExtraccionMultiEvento, ResultadoIntentGate } from '../../types/dominio/EventoCampo.js'
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import type { EntradaSDR, RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import type { ClasificacionExcel, EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 import type { DiagnosticoV2VK } from '../../types/dominio/Vision.js'
+import type { ResultadoOCR } from '../../types/dominio/OCR.js'
 
 export type TipoImagen = 'plaga_cultivo' | 'documento_tabla' | 'otro'
 
@@ -14,15 +15,8 @@ export interface ContextoOCR {
   lista_lotes?: string | undefined
 }
 
-export interface ResultadoOCR {
-  tipo_documento: string
-  registros: Record<string, unknown>[]
-  texto_completo_visible: string
-  confianza_lectura: number
-  advertencia: string | null
-}
-
 export interface IWasagroLLM {
+  clasificarIntenciones(input: EntradaEvento, traceId: string): Promise<ResultadoIntentGate>
   extraerEventos(input: EntradaEvento, traceId: string): Promise<ExtraccionMultiEvento>
   corregirTranscripcion(raw: string, traceId: string): Promise<string>
   describirImagenVisual(imageUrl: string, traceId: string): Promise<string>

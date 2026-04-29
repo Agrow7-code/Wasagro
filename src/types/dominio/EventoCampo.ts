@@ -46,6 +46,26 @@ export const EntradaEventoSchema = z.object({
 
 export type EntradaEvento = z.infer<typeof EntradaEventoSchema>
 
+export const IntencionDetectadaSchema = z.object({
+  tipo_evento: z.enum(['insumo', 'labor', 'cosecha', 'calidad', 'venta', 'gasto', 'plaga', 'clima', 'infraestructura', 'observacion', 'nota_libre']),
+  confidence: z.number().min(0).max(1),
+  lote_hint: z.string().nullable().default(null),
+  producto_hint: z.string().nullable().default(null),
+  monto_hint: z.string().nullable().default(null),
+})
+
+export type IntencionDetectada = z.infer<typeof IntencionDetectadaSchema>
+
+export const ResultadoIntentGateSchema = z.object({
+  intenciones: z.array(IntencionDetectadaSchema),
+  es_no_evento: z.boolean().default(false),
+  tipo_no_evento: z.enum(['saludo', 'consulta', 'ambiguo']).nullable().default(null),
+  confidence_general: z.number().min(0).max(1),
+  mensaje_clarificacion: z.string().nullable().default(null),
+})
+
+export type ResultadoIntentGate = z.infer<typeof ResultadoIntentGateSchema>
+
 export function sinEvento(mensaje: string): ExtraccionMultiEvento {
   return {
     eventos: [{

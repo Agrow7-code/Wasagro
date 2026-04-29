@@ -2,10 +2,11 @@
 -- Wasagro H0 — Parche: Tracking de costos WhatsApp
 -- Archivo: backend/sql/05-patch-wa-message-costs.sql
 -- Descripción: Registra costo por mensaje WhatsApp enviado/recibido.
---              Permite medir costo real por finca para el modelo de negocio.
---              En H0 con Meta Cloud API directo, mensajes user-initiated
---              dentro de ventana 24h = $0 (D6). Solo templates tienen costo.
+-- Permite medir costo real por finca para el modelo de negocio.
+-- En H0 con Evolution API (D6), mensajes dentro de ventana 24h = $0.
+-- Solo templates fuera de ventana tienen costo.
 -- Prerequisito: 01-schema-core.sql
+-- ACTUALIZADO: Eliminada referencia a Meta Cloud API (usamos Evolution API)
 -- =============================================================================
 
 CREATE TABLE wa_message_costs (

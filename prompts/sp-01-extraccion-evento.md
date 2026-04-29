@@ -1,6 +1,6 @@
 # SP-01: Extracción de eventos de campo
 # Archivo: prompts/sp-01-extraccion-evento.md
-# Modelo: gpt-4o-mini
+# Router LLM: Tier según complejidad (fast/reasoning) - ACTUALIZADO: D3 Router Multi-Modelo
 # Variables de inyección: {{LISTA_LOTES}}, {{FINCA_NOMBRE}}, {{CULTIVO_PRINCIPAL}}, {{PAIS}}
 # Tokens estimados (sin variables): ~600 | Con lista de lotes (~5): ~700
 
