@@ -70,7 +70,63 @@ async function procesarIntencionWorker(
     }
 
     const ext = multiExtraction.eventos[0] as EventoCampoExtraido
-    const tipo_evento = ext.requiere_clarificacion ? 'nota_libre' : ext.tipo_evento
+
+    if (ext.requiere_clarificacion && ext.pregunta_sugerida) {
+      // Flujo interactivo desde el background: pedimos el dato faltante
+      const sender = crearSenderWhatsApp()
+      const destinatario = data.phone
+
+      // En lugar de guardar en BD y cerrar, preparamos la sesión para la respuesta
+      const { supabase } = await import('../integrations/supabase.js')
+      const { data: sData } = await supabase.from('sesiones_activas').select('*').eq('session_id', data.sessionId).single()
+      
+      if (sData) {
+        const ctx = sData.contexto_parcial as Record<string, unknown>
+        const intenciones = (ctx['intenciones_pendientes'] as any[]) ?? []
+        
+        // Removemos o marcamos como completada esta intención para que no bloquee
+        const actualizadas = intenciones.map(i => 
+          i.job_id === jobId ? { ...i, status: 'completed', evento_extraido: { _es_clarificacion: true } } : i
+        )
+
+        const completadas = actualizadas.filter(i => i.status === 'completed').length
+        const fallidas = actualizadas.filter(i => i.status === 'failed').length
+        const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
+
+        await supabase.from('sesiones_activas').update({
+          // MANTENEMOS ESTADO ACTIVE (o lo forzamos) para recibir la respuesta
+          status: 'active',
+          clarification_count: (sData.clarification_count ?? 0) + 1,
+          contexto_parcial: {
+            ...ctx,
+            intenciones_pendientes: actualizadas,
+            completadas,
+            fallidas,
+            original_transcripcion: data.transaccionOriginal,
+            extracted_data: [ext],
+          }
+        }).eq('session_id', data.sessionId)
+
+        if (destinatario) {
+          await sender.enviarTexto(destinatario, ext.pregunta_sugerida).catch(() => {})
+        }
+
+        // Si esta era la última intención, revisamos si hay otras que completaron bien para avisar
+        if (todasCompletas && completadas > 1) {
+          // Extraemos las que NO son de clarificación
+          const completadasReales = actualizadas.filter(i => i.status === 'completed' && !i.evento_extraido?._es_clarificacion)
+          if (completadasReales.length > 0) {
+            await sender.enviarTexto(destinatario, `(Y ya registré los otros ${completadasReales.length} reportes ✅)`).catch(() => {})
+          }
+        }
+      }
+
+      generation.end({ output: { status: 'clarification_requested' }, metadata: { tipo_evento: data.tipo_evento } })
+      consecutive429Count = 0
+      return
+    }
+
+    const tipo_evento = ext.tipo_evento
     const evStatus = (ext.confidence_score < 0.5 || ext.requiere_clarificacion) ? 'requires_review' : 'complete'
 
     if (ext.alerta_urgente) {
