@@ -330,6 +330,15 @@ export async function handleEvento(
   // ── Confirmación pendiente: el usuario responde al resumen ────────────────
   if (session.status === 'pending_confirmation') {
     const respuesta = transcripcion.toLowerCase().trim()
+
+    // Comando explícito de escape o rechazo total
+    if (/^(cancelar|abortar|salir|borrar|ignorar|no|nop|nada)/.test(respuesta)) {
+      await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+      await _sender!.enviarTexto(msg.from, '❌ Reporte cancelado. La sesión fue limpiada.\n\n¿Qué quieres registrar de nuevo?')
+      await actualizarMensaje(mensajeId, { status: 'processed' })
+      return
+    }
+
     const confirma = /^(sí|si|s|yes|ok|correcto|exacto|dale|listo|confirmo|✅)/.test(respuesta)
 
     if (confirma) {
@@ -452,6 +461,22 @@ export async function handleEvento(
         return
       }
 
+      // Validar si requiere clarificación (ej. falta cantidad de plaga)
+      const eventoAClarificar = eventosValidos.find(e => e.requiere_clarificacion && e.pregunta_sugerida)
+      if (eventoAClarificar) {
+        await updateSession(session.session_id, {
+          status: 'pending_confirmation',
+          clarification_count: session.clarification_count + 1,
+          contexto_parcial: {
+            extracted_data: eventosValidos as unknown as Record<string, unknown>[],
+            transcripcion_original: transcripcionMerged,
+          },
+        })
+        await _sender!.enviarTexto(msg.from, eventoAClarificar.pregunta_sugerida!)
+        await actualizarMensaje(mensajeId, { status: 'processing' })
+        return
+      }
+
       await updateSession(session.session_id, {
         status: 'pending_confirmation',
         clarification_count: 0,
@@ -550,6 +575,7 @@ export async function handleEvento(
       usuarioId: usuario.id,
       fincaId: usuario.finca_id,
       transaccionOriginal: transcripcion,
+      phone: msg.from,
     }, {
       retryLimit: 3,
       retryBackoff: true,
