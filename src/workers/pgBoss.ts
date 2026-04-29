@@ -8,6 +8,7 @@ import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/Evento
 import { saveEvento, marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
 import { enriquecerDatosEventoInfraestructura } from '../pipeline/derivadorInfraestructura.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
+import { getUserByPhone } from '../pipeline/supabaseQueries.js'
 
 let boss: PgBoss
 
@@ -119,35 +120,39 @@ async function procesarIntencionWorker(
       const fallidas = intenciones.filter(i => i.status === 'failed')
 
       if (completadas.length > 0) {
-        try {
-          const sender = crearSenderWhatsApp()
-          const confirmaciones = completadas.map(i => {
-            const extData = i.evento_extraido as unknown as EventoCampoExtraido
-            const labels: Record<string, string> = {
-              labor: 'labor de campo',
-              insumo: 'aplicación',
-              plaga: 'reporte de plaga',
-              clima: 'evento climático',
-              cosecha: 'cosecha',
-              gasto: 'gasto',
-              infraestructura: 'reporte de infraestructura',
-              observacion: 'observación',
-              nota_libre: 'nota',
-            }
-            const label = labels[extData?.tipo_evento ?? ''] ?? 'reporte'
-            const isReview = extData?.confidence_score != null && extData.confidence_score < 0.5
-            if (isReview) return 'Registré tu reporte. Lo revisa tu asesor pronto. ✅'
-            return `✅ Registré tu ${label}.`
-          })
+        const sender = crearSenderWhatsApp()
+        const confirmaciones = completadas.map(i => {
+          const extData = i.evento_extraido as unknown as EventoCampoExtraido
+          const labels: Record<string, string> = {
+            labor: 'labor de campo',
+            insumo: 'aplicación',
+            plaga: 'reporte de plaga',
+            clima: 'evento climático',
+            cosecha: 'cosecha',
+            gasto: 'gasto',
+            infraestructura: 'reporte de infraestructura',
+            observacion: 'observación',
+            nota_libre: 'nota',
+          }
+          const label = labels[extData?.tipo_evento ?? ''] ?? 'reporte'
+          const isReview = extData?.confidence_score != null && extData.confidence_score < 0.5
+          if (isReview) return 'Registré tu reporte. Lo revisa tu asesor pronto. ✅'
+          return `✅ Registré tu ${label}.`
+        })
 
-          const msg = confirmaciones.length > 1
-            ? `¡Listo! Guardé tus reportes:\n\n${confirmaciones.map(c => `• ${c.replace('✅ ', '')}`).join('\n')}\n\n✅`
-            : (confirmaciones[0] ?? '✅ Registrado.')
+        const msg = confirmaciones.length > 1
+          ? `¡Listo! Guardé tus reportes:\n\n${confirmaciones.map(c => `• ${c.replace('✅ ', '')}`).join('\n')}\n\n✅`
+          : (confirmaciones[0] ?? '✅ Registrado.')
 
-          await sender.enviarTexto(data.entrada.transcripcion.split('\n')[0] ?? '', msg).catch(() => {})
-        } catch (err) {
-          console.error('[procesar-intencion] Error enviando confirmación final:', err)
+        // El teléfono viene del campo 'from' del mensaje original que inició el pipeline
+        // Buscamos una forma de recuperar el destinatario. 
+        // Si no está en entrada.transcripcion (que es raro), usamos un fallback.
+        const destinatario = data.entrada.usuario_id ? (await getUserByPhone(data.entrada.usuario_id.split(':')[1] ?? ''))?.phone : null
+
+        if (destinatario) {
+          await sender.enviarTexto(destinatario, msg).catch(() => {})
         }
+
       }
     }
   } catch (err: unknown) {
