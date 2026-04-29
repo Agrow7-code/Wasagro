@@ -165,13 +165,18 @@ export class WasagroAIAgent implements IWasagroLLM {
       while (intentos < 2) {
         const errorFeedback = intentos > 0 ? `\n\nTu respuesta anterior falló la validación Zod: ${parsed?.error?.errors.map(e => e.message).join(', ')}. Por favor, corrige tu JSON.` : ''
         
-        const textoRaw = await this.#adapter.generarTexto('Analiza esta imagen y descríbela objetivamente según tus instrucciones en JSON estricto.' + errorFeedback, { 
-          systemPrompt: prompt, 
-          responseFormat: 'json_object', // Forzar JSON para el escáner ocular
-          imageUrl, 
-          traceId, 
-          generationName: 'llamarLibre', 
-          modelClass: 'ultra' // Requiere modelo multimodal potente (Gemini 1.5 Pro)
+        const isBase64DataUri = imageUrl.startsWith('data:')
+        const imageOpciones = isBase64DataUri
+          ? { imageBase64: imageUrl.split(',')[1] ?? imageUrl, imageMimeType: imageUrl.split(';')[0]?.replace('data:', '') ?? 'image/jpeg' }
+          : { imageUrl }
+
+        const textoRaw = await this.#adapter.generarTexto('Analiza esta imagen y descríbela objetivamente según tus instrucciones en JSON estricto.' + errorFeedback, {
+          systemPrompt: prompt,
+          responseFormat: 'json_object',
+          ...imageOpciones,
+          traceId,
+          generationName: 'llamarLibre',
+          modelClass: 'ultra',
         })
 
         texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
@@ -248,6 +253,81 @@ export class WasagroAIAgent implements IWasagroLLM {
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })
       throw new LLMError('GROQ_ERROR', `Error diagnosticando imagen V2VK: ${String(err)}`, err)
+    }
+  }
+
+  async clasificarTipoImagen(base64: string, mimeType: string, traceId: string): Promise<import('./IWasagroLLM.js').TipoImagen> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({ name: 'clasificar_imagen', model: 'wasagro-ai-agent' })
+    try {
+      const prompt = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
+      const raw = await this.#adapter.generarTexto('Clasifica esta imagen.', {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        traceId,
+        generationName: 'clasificar_imagen',
+        modelClass: 'ultra',
+      })
+      const json = JSON.parse(raw.replace(/```json|```/g, '').trim())
+      const tipos = ['plaga_cultivo', 'documento_tabla', 'otro'] as const
+      const tipo = tipos.includes(json.tipo) ? json.tipo : 'plaga_cultivo'
+      generation.end({ output: { tipo, confianza: json.confianza } })
+      return tipo
+    } catch (err) {
+      console.error('[WasagroAIAgent] Error clasificando imagen:', err)
+      generation.end({ output: String(err), level: 'ERROR' })
+      trace.event({ name: 'clasificar_imagen_error', level: 'ERROR', input: { error: String(err) } })
+      return 'plaga_cultivo'
+    }
+  }
+
+  async extraerDocumentoOCR(
+    base64: string,
+    mimeType: string,
+    contexto: import('./IWasagroLLM.js').ContextoOCR,
+    traceId: string,
+  ): Promise<import('./IWasagroLLM.js').ResultadoOCR> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ai-agent', input: { tipo_contexto: contexto.cultivo_principal } })
+    try {
+      const prompt = injectarVariables(
+        await PromptManager.getPrompt('sp-03d-ocr-documento.md', 'prompts/sp-03d-ocr-documento.md', traceId),
+        {
+          FINCA_NOMBRE: contexto.finca_nombre ?? 'No especificada',
+          CULTIVO_PRINCIPAL: contexto.cultivo_principal ?? 'No especificado',
+          LISTA_LOTES: contexto.lista_lotes ?? 'No hay lotes registrados',
+        },
+      )
+      const raw = await this.#adapter.generarTexto('Extrae los datos de este documento.', {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        traceId,
+        generationName: 'ocr_documento',
+        modelClass: 'ultra',
+      })
+      const texto = raw.replace(/```json|```/g, '').trim()
+      let json: unknown
+      try { json = JSON.parse(texto) } catch {
+        generation.end({ output: texto, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `OCR devolvió no-JSON: ${texto.slice(0, 100)}`)
+      }
+      const result: import('./IWasagroLLM.js').ResultadoOCR = {
+        tipo_documento: (json as any).tipo_documento ?? 'otro',
+        registros: Array.isArray((json as any).registros) ? (json as any).registros : [],
+        texto_completo_visible: (json as any).texto_completo_visible ?? '',
+        confianza_lectura: typeof (json as any).confianza_lectura === 'number' ? (json as any).confianza_lectura : 0,
+        advertencia: (json as any).advertencia ?? null,
+      }
+      generation.end({ output: { tipo_documento: result.tipo_documento, n_registros: result.registros.length, confianza: result.confianza_lectura } })
+      return result
+    } catch (err) {
+      console.error('[WasagroAIAgent] Error en OCR de documento:', err)
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error en OCR de documento: ${String(err)}`, err)
     }
   }
 

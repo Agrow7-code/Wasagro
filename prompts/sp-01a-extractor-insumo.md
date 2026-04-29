@@ -86,7 +86,9 @@ Cuando el agricultor mencione un lote (por apodo, número, descripción), búsca
     "dosis_litros_equivalente": null,
     "area_afectada_ha": null,
     "metodo_aplicacion": "aspersion|drench|granular|foliar|null",
-    "num_trabajadores": null
+    "num_trabajadores": null,
+    "cantidad_sobrante": null,
+    "unidad_sobrante": "litros|bombadas|sacos|kg|null"
   },
   "confidence_por_campo": {
     "lote_id": 0.0,

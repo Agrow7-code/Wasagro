@@ -19,6 +19,27 @@ import {
 import { transcribirAudio } from '../sttService.js'
 import { handleDocumento, procesarFilasExcelConfirmadas } from '../procesarExcel.js'
 import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES_ADMIN } from '../procesarMensajeEntrante.js'
+import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
+
+async function resolverMediaImagen(msg: NormalizedMessage, traceId: string): Promise<{ base64: string; mimeType: string } | null> {
+  if (msg.mediaBase64) return { base64: msg.mediaBase64, mimeType: msg.mediaMimetype ?? 'image/jpeg' }
+
+  const apiUrl = process.env['EVOLUTION_API_URL']
+  const apiKey = process.env['EVOLUTION_API_KEY']
+  const instance = process.env['EVOLUTION_INSTANCE']
+
+  if (!apiUrl || !apiKey || !instance) {
+    langfuse.trace({ id: traceId }).event({ name: 'media_download_skipped', level: 'WARNING', input: { reason: 'env_vars_missing' } })
+    return null
+  }
+
+  try {
+    return await downloadEvolutionMedia(msg.rawPayload, apiUrl, apiKey, instance)
+  } catch (err) {
+    langfuse.trace({ id: traceId }).event({ name: 'media_download_failed', level: 'ERROR', input: { error: String(err) } })
+    return null
+  }
+}
 
 // ─── Flujo de reporte de campo ─────────────────────────────────────────────
 
@@ -78,6 +99,7 @@ export async function handleEvento(
   let transcripcion: string
 
   if (msg.tipo === 'audio') {
+    await _sender!.enviarTexto(msg.from, '✅ Recibí tu audio, lo estoy procesando...')
     const audioRef = msg.audioUrl ?? msg.mediaId ?? ''
     try {
       transcripcion = await transcribirAudio(audioRef, traceId)
@@ -103,27 +125,80 @@ export async function handleEvento(
   } else if (msg.tipo === 'texto') {
     transcripcion = msg.texto!
   } else if (msg.tipo === 'imagen') {
-    const imageUrl = msg.imagenUrl ?? msg.mediaId
-    if (!imageUrl) {
+    if (!msg.imagenUrl && !msg.mediaBase64) {
       await _sender!.enviarTexto(msg.from, 'No pude procesar la imagen enviada. ⚠️')
       return
     }
-    
-    await _sender!.enviarTexto(msg.from, 'Analizando tu imagen con la base de datos agronómica... 🔍')
+
+    await _sender!.enviarTexto(msg.from, 'Analizando tu imagen... 🔍')
+
+    const media = await resolverMediaImagen(msg, traceId)
+
+    if (!media) {
+      await _sender!.enviarTexto(msg.from, 'No pude descargar la imagen. ¿Puedes mandarla de nuevo? ⚠️')
+      await actualizarMensaje(mensajeId, { status: 'error', error_detail: 'media_download_failed' })
+      return
+    }
+
+    const finca = usuario.finca_id ? await getFincaById(usuario.finca_id) : null
+    const lotes = usuario.finca_id ? await getLotesByFinca(usuario.finca_id) : []
+    const lista_lotes = lotes.map(l => `- ${l.lote_id}: "${l.nombre_coloquial}"`).join('\n') || 'Sin lotes'
 
     try {
-      // 1. Visión Cruda (Objective Description)
-      const descripcionVisual = await _llm!.describirImagenVisual(imageUrl, traceId)
-      
-      // 2. RAG Context Retrieval
-      const contextoRag = usuario.finca_id && _ragRetriever 
-        ? await _ragRetriever.recuperarContexto(usuario.finca_id, descripcionVisual)
-        : 'Sin contexto agronómico disponible.'
+      const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId)
 
-      const finca = usuario.finca_id ? await getFincaById(usuario.finca_id) : null
-      
-      // 3. Diagnóstico Clínico (Verified Knowledge)
-      const diagnostico = await _llm!.diagnosticarSintomaV2VK(descripcionVisual, contextoRag, {
+      langfuse.trace({ id: traceId }).event({ name: 'imagen_clasificada', input: { tipo: tipoImagen } })
+
+      if (tipoImagen === 'documento_tabla') {
+        const ocr = await _llm!.extraerDocumentoOCR(media.base64, media.mimeType, {
+          finca_nombre: finca?.nombre,
+          cultivo_principal: finca?.cultivo_principal ?? undefined,
+          lista_lotes,
+        }, traceId)
+
+        const eventoId = await saveEvento({
+          finca_id: usuario.finca_id!,
+          lote_id: null,
+          tipo_evento: 'observacion',
+          status: ocr.confianza_lectura >= 0.5 ? 'complete' : 'requires_review',
+          datos_evento: {
+            tipo_documento: ocr.tipo_documento,
+            registros: ocr.registros,
+            texto_completo: ocr.texto_completo_visible,
+            confianza_lectura: ocr.confianza_lectura,
+            advertencia: ocr.advertencia,
+            caption: msg.texto ?? null,
+          },
+          descripcion_raw: ocr.texto_completo_visible || 'Documento fotografiado',
+          confidence_score: ocr.confianza_lectura,
+          requiere_validacion: ocr.confianza_lectura < 0.5,
+          created_by: usuario.id,
+          mensaje_id: mensajeId,
+        })
+
+        await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
+
+        if (ocr.confianza_lectura < 0.3 || ocr.advertencia === 'imagen borrosa') {
+          await _sender!.enviarTexto(msg.from, 'La imagen está borrosa y no pude leer bien los datos. ¿Puedes mandar una foto más clara o escribirme los datos? ⚠️')
+        } else {
+          const nRegistros = ocr.registros.length
+          await _sender!.enviarTexto(msg.from, `Leí tu documento. Encontré ${nRegistros} registro${nRegistros !== 1 ? 's' : ''} para revisar. Tu asesor los revisará y te confirma. ✅`)
+        }
+        return
+      }
+
+      // plaga_cultivo u otro → pipeline V2VK
+      const contextoExtra = msg.texto ? `\nNota del agricultor: ${msg.texto}` : ''
+      const descripcionVisual = await _llm!.describirImagenVisual(
+        `data:${media.mimeType};base64,${media.base64}`,
+        traceId,
+      )
+
+      const contextoRag = usuario.finca_id && _ragRetriever
+        ? await _ragRetriever.recuperarContexto(usuario.finca_id, descripcionVisual + contextoExtra)
+        : ''
+
+      const diagnostico = await _llm!.diagnosticarSintomaV2VK(descripcionVisual + contextoExtra, contextoRag, {
         transcripcion: descripcionVisual,
         finca_id: usuario.finca_id ?? '',
         usuario_id: usuario.id,
@@ -134,20 +209,20 @@ export async function handleEvento(
       }, traceId)
 
       const tipoEventoFinal = diagnostico.tipo_evento_sugerido === 'sin_evento' || !diagnostico.tipo_evento_sugerido
-        ? 'observacion' 
+        ? 'observacion'
         : diagnostico.tipo_evento_sugerido
 
       const eventoId = await saveEvento({
         finca_id: usuario.finca_id!,
-        lote_id: null, // Si necesitamos el lote, podríamos preguntar después, pero en fase 3 lo omitimos de la primera pasada
+        lote_id: null,
         tipo_evento: tipoEventoFinal as any,
         status: diagnostico.requiere_accion_inmediata ? 'requires_review' : 'complete',
-        datos_evento: { 
+        datos_evento: {
           descripcion_visual: descripcionVisual,
           diagnostico: diagnostico.diagnostico_final,
           recomendacion: diagnostico.recomendacion_tecnica,
           severidad: diagnostico.severidad,
-          media_ref: imageUrl
+          caption: msg.texto ?? null,
         },
         descripcion_raw: descripcionVisual,
         confidence_score: diagnostico.confianza,
@@ -164,22 +239,22 @@ export async function handleEvento(
 
       await _sender!.enviarTexto(msg.from, respuesta)
     } catch (err) {
-      console.error('[EventHandler] Error en V2VK:', err)
-      await _sender!.enviarTexto(msg.from, 'Hubo un error analizando tu imagen. Tu asesor la revisará manualmente. ⚠️')
-      // Fallback a observación genérica
-      const eventoId = await saveEvento({
+      console.error('[EventHandler] Error procesando imagen:', err)
+      langfuse.trace({ id: traceId }).event({ name: 'imagen_pipeline_error', level: 'ERROR', input: { error: String(err), wamid: msg.wamid } })
+      await _sender!.enviarTexto(msg.from, 'Tuve un error con tu imagen. Mándamela de nuevo o descríbeme lo que ves. ⚠️')
+      await saveEvento({
         finca_id: usuario.finca_id!,
         lote_id: null,
         tipo_evento: 'observacion',
         status: 'requires_review',
-        datos_evento: { texto_libre: `Imagen recibida (Falló IA)`, media_ref: imageUrl },
-        descripcion_raw: `Error en análisis de imagen`,
+        datos_evento: { error: String(err), caption: msg.texto ?? null },
+        descripcion_raw: 'Error procesando imagen',
         confidence_score: 0,
         requiere_validacion: true,
         created_by: usuario.id,
         mensaje_id: mensajeId,
       })
-      await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
+      await actualizarMensaje(mensajeId, { status: 'error', error_detail: String(err) })
     }
     return
   } else {

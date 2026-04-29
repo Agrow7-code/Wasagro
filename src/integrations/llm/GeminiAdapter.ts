@@ -19,7 +19,6 @@ export class GeminiAdapter implements ILLMAdapter {
   }
 
   async generarTexto(userContent: string, opciones: LLMGeneracionOpciones): Promise<string> {
-    // Selección dinámica del modelo (Enrutamiento PDR/SR H1)
     let activeModel = this.#model
     if (opciones.modelClass === 'fast') {
       activeModel = process.env['GEMINI_FAST_MODEL'] ?? 'gemini-2.5-flash'
@@ -51,19 +50,18 @@ export class GeminiAdapter implements ILLMAdapter {
         parts.push({ text: userContent })
       }
 
-      if (opciones.imageUrl) {
-        let base64Data = opciones.imageUrl
+      if (opciones.imageBase64) {
+        parts.push({ inlineData: { mimeType: opciones.imageMimeType ?? 'image/jpeg', data: opciones.imageBase64 } })
+      } else if (opciones.imageUrl) {
+        let base64Data: string
         let mimeType = 'image/jpeg'
-        
-        // Si es una URL http(s), descargarla a base64
-        if (opciones.imageUrl.startsWith('http')) {
-          const res = await fetch(opciones.imageUrl)
-          if (!res.ok) throw new Error(`Error descargando imagen: HTTP ${res.status}`)
-          const buffer = await res.arrayBuffer()
-          base64Data = Buffer.from(buffer).toString('base64')
-          mimeType = res.headers.get('content-type') || 'image/jpeg'
-        }
-        
+
+        const res = await fetch(opciones.imageUrl)
+        if (!res.ok) throw new Error(`Error descargando imagen: HTTP ${res.status}`)
+        const buffer = await res.arrayBuffer()
+        base64Data = Buffer.from(buffer).toString('base64')
+        mimeType = res.headers.get('content-type') || 'image/jpeg'
+
         parts.push({ inlineData: { mimeType, data: base64Data } })
       }
 

@@ -119,7 +119,12 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
       return { ...base, tipo: 'audio', audioUrl: msg.audioMessage.url } as NormalizedMessage
     }
     if (msg.imageMessage) {
-      return { ...base, tipo: 'imagen', imagenUrl: msg.imageMessage.url } as NormalizedMessage
+      return {
+        ...base,
+        tipo: 'imagen',
+        imagenUrl: msg.imageMessage.url,
+        texto: msg.imageMessage.caption,
+      } as NormalizedMessage
     }
     if (msg.locationMessage) {
       return {

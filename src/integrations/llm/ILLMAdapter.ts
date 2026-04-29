@@ -13,6 +13,8 @@ export interface LLMGeneracionOpciones {
   temperature?: number
   responseFormat?: 'json_object' | 'text'
   imageUrl?: string
+  imageBase64?: string
+  imageMimeType?: string
   traceId: string
   generationName: string
   generationInput?: unknown
