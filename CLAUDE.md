@@ -6,9 +6,11 @@
 
 Wasagro es un sistema operativo de campo agrícola AI-first. Captura datos en fincas de exportación (cacao/banano) en Ecuador/Guatemala via WhatsApp (voz, texto, imagen), los estructura con IA, y genera reportes y alertas.
 
-**Horizonte actual: H0 — Validación del problema.**
-**Métrica Norte: Eventos de campo completos por semana por finca activa.**
+**Horizonte actual: H0-R — Producto funcional para primera finca pagante.**
+**Métrica Norte: Eventos de campo correctamente estructurados por semana por finca activa (accuracy ≥ 85%).**
 **Modelo de negocio: B2B enterprise — exportadora paga, agricultor usa gratis.**
+
+> **Por qué cambió el horizonte:** H0 original fue escrito sin probar con usuarios reales. Las primeras pruebas con colegas ingenieros revelaron que el sistema no creaba valor: no identificaba plagas en imágenes, no estructuraba mensajes con múltiples datos, y devolvía errores o preguntas sin sentido. H0-R es el horizonte corregido con dolores reales: el objetivo ya no es "validar el problema" (ese problema existe y está confirmado) sino entregar un producto que funcione en campo antes del primer cliente pagante.
 
 ## SSOT — Dónde vive cada cosa
 
@@ -141,11 +143,49 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Ventajas concretas:** lógica testeable con Vitest, diff legible en git, LangFuse SDK directo, estado conversacional como query a Supabase.
 - **Revisar cuando:** Volumen requiera workers distribuidos o colas de mensajes (>500 eventos/día). Alternativa: Inngest (añade queue + retry declarativo sin reemplazar el código).
 
-### D3. LLM de texto: GPT-4o Mini
+### D3. LLM de texto: Router multi-modelo (Gemini + Groq)
+
+- **Fecha:** Abril 2026 (actualizado — reemplaza GPT-4o Mini para TODO)
+- **Dolor que motivó el cambio:** GPT-4o Mini fue la decisión inicial de papel. Las primeras pruebas revelaron tres problemas concretos: (1) latencia de 4-6s en texto → violaba P3, (2) sin soporte nativo multimodal para imágenes de campo, (3) costo en scale > lo proyectado para B2B enterprise.
+- **Decisión:** Router tiered con dos modelos validados en H0-R:
+  - **Tier fast** → `gemini-2.5-flash` (Gemini) + `llama-3.3-70b-versatile` (Groq): extracción simple, clasificación de tipo de mensaje, acuse de recibo. Latencia < 1s.
+  - **Tier reasoning** → `gemini-2.5-flash` (Gemini): reflexión profunda, análisis multi-intento. La razón de usar flash también aquí es cuota: 2.5 Pro supera límites gratuitos rápidamente.
+  - **Tier ultra** → `gemini-2.5-flash` (Gemini) + Minimax + Gemma-4 (NVIDIA): casos críticos, V2VK con imagen. Gemini es el único con soporte multimodal nativo en el pool.
+- **Por qué no GPT-4o Mini:** OpenAI no está en el router activo. Sin multimodal para imágenes vía URL no autenticada (problema de CDN WhatsApp), y el costo por finca no justifica mantener dos proveedores de pago en H0-R con Gemini cubriendo todo el espectro.
+- **Implementación:** `src/integrations/llm/LLMRouter.ts` + `src/integrations/llm/index.ts`. Variable de entorno `WASAGRO_LLM=auto` activa el router. Pool se construye con las API keys disponibles en Railway.
+- **Cumple:** CR3 — español LATAM, JSON extraction, latencia < 2s (fast), soporte multimodal (ultra).
+- **Revisar cuando:** Field-level accuracy en evals < 85%. Si Groq supera cuota diaria en prod, añadir fallback a Gemini en tier fast (ya está en el pool). Si llega H1, re-evaluar OpenAI para reasoning con datos de accuracy reales.
+
+### D7. Pipeline de clasificación de imágenes antes del diagnóstico
 
 - **Fecha:** Abril 2026
-- **Cumple:** CR3 — español LATAM, JSON extraction, ~2s latencia, ~$0.09/finca/mes.
-- **Revisar cuando:** Field-level accuracy en evals <85% con datos reales. En H0, GPT-4o Mini para TODO. Si un evento requiere GPT-4o, loggear en engram por qué.
+- **Dolor que motivó la decisión:** Un colega envió una foto de un racimo con trips. El sistema intentó diagnosticar directamente con V2VK y falló porque no había RAG histórico. Peor aún: cuando se enviaba una foto de un formulario de campo (planilla de cosecha manuscrita), el sistema intentaba diagnosticar una "plaga" en el documento. No había distinción entre "imagen de problema agrícola" e "imagen de documento con datos".
+- **Decisión:** Clasificar TODA imagen antes de rutear. Tres categorías:
+  - `plaga_cultivo` → V2VK (descripción visual → diagnóstico agronómico)
+  - `documento_tabla` → OCR estructurado (extrae `registros[]` en JSON para persistencia)
+  - `otro` → descarte con mensaje explicativo al usuario
+- **Implementación:** `prompts/sp-03c-clasificador-imagen.md` + `prompts/sp-03d-ocr-documento.md`. Handler en `src/pipeline/handlers/EventHandler.ts` — función `resolverMediaImagen()` resuelve el base64, luego `clasificarTipoImagen()` enruta.
+- **Métodos en IWasagroLLM:** `clasificarTipoImagen(base64, mimeType, traceId)` y `extraerDocumentoOCR(base64, mimeType, contexto, traceId)`.
+- **Cumple:** CR3 (extracción JSON), CR5 (LangFuse en ambos paths). Previene diagnósticos absurdos y aprovecha datos de campo que antes se perdían.
+- **Revisar cuando:** Accuracy del clasificador < 90% en imágenes ambiguas. Considerar añadir `recibo_de_pago` como cuarta categoría si agricultores empiezan a enviar comprobantes de compra de insumos.
+
+### D8. Descarga de media de Evolution API como base64
+
+- **Fecha:** Abril 2026
+- **Dolor que motivó la decisión:** Evolution API envía webhooks con URLs de media de WhatsApp CDN (`media.cdn.whatsapp.net`). Estas URLs requieren autenticación Bearer que solo tiene Evolution API. Cuando GeminiAdapter intentaba `fetch(imageUrl)` directamente para pasarla al LLM, recibía 401/403. TODA imagen enviada al sistema fallaba silenciosamente y se guardaba como `nota_libre` con `status: requires_review`. El agricultor jamás recibía un diagnóstico — solo silencio.
+- **Decisión:** Nunca pasar la URL de CDN al LLM. En cambio, descargar el media como base64 usando el endpoint de Evolution API (`/chat/getBase64FromMediaMessage/:instance`) y pasar `imageBase64` + `imageMimeType` directamente al adapter.
+- **Implementación:** `src/integrations/whatsapp/EvolutionMediaClient.ts` — función `downloadEvolutionMedia(rawPayload, apiUrl, apiKey, instance)`. `NormalizedMessage` ahora incluye `mediaBase64` y `mediaMimetype`. `GeminiAdapter` tiene path separado: si `opciones.imageBase64` existe, usa `inlineData` directamente; si solo tiene `imageUrl`, usa fetch como fallback.
+- **Variables requeridas en Railway:** `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`.
+- **Revisar cuando:** Se migre a Meta Cloud API en H1 (sus URLs de media tienen autenticación diferente — requeriría token de Meta, no de Evolution).
+
+### D9. Extracción multi-intento para mensajes compuestos
+
+- **Fecha:** Abril 2026
+- **Dolor que motivó la decisión:** Un agricultor decía: "Apliqué Entrust, gasté $20, me sobró 1 litro". El sistema trataba el mensaje como un único evento. Si el clasificador lo mapeaba a `aplicacion_insumo`, se perdía el dato de gasto. Si lo mapeaba a `nota_economica`, se perdía la aplicación. Un mensaje = muchos datos = pérdida garantizada con extractor monolítico.
+- **Decisión:** `WasagroAIAgent.extraerEventos()` clasifica primero la intención del mensaje (puede ser múltiple), luego ejecuta extractores especializados en paralelo por cada intención detectada. El resultado es `ExtraccionMultiEvento` con array de eventos independientes.
+- **Implementación:** `src/integrations/llm/WasagroAIAgent.ts`. Clasificador usa tier `fast`. Extractores especializados en paralelo con `Promise.all`. `sp-01a-extractor-insumo.md` ahora incluye campos `cantidad_sobrante` y `unidad_sobrante`.
+- **Limitación actual:** El clasificador puede fallar en mensajes con más de 3 intenciones simultáneas. En ese caso, el sistema registra lo que puede y marca el raw como `requires_review` (P1 — nunca inventar, P2 — máx 2 preguntas).
+- **Revisar cuando:** Se detecten en LangFuse mensajes con > 2 intenciones que se pierdan. Próxima iteración: extractores en paralelo con merge de confianza.
 
 ### D4. STT: GPT-4o Mini Transcribe
 
@@ -189,7 +229,11 @@ Wasagro/
 │   ├── 01-problema-y-contexto.md
 │   ├── 02-arquitectura.md
 │   └── decisions/                   ← ADRs (Architecture Decision Records)
-│       └── 001-hono-over-n8n.md     ← Por qué eliminamos n8n
+│       ├── 001-hono-over-n8n.md
+│       ├── 002-evolution-api-over-meta.md
+│       ├── 003-image-classifier-before-v2vk.md  ← D7
+│       ├── 004-evolution-media-download-as-base64.md  ← D8
+│       └── 005-multi-intent-extraction.md  ← D9
 └── tests/
 ```
 

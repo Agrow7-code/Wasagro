@@ -52,76 +52,88 @@ Verificar:
 
 **PASS si:** Hay logging explícito en toda la cadena: recepción → STT → LLM → extracción → persistencia.
 
-## Regla 5: Scope de H0 — Solo estructura de datos, no lógica ejecutable de horizontes futuros
+## Regla 5: No lógica ejecutable para features NO documentadas en CLAUDE.md Capa 3
 
-**Criterio:** La distinción no es semántica (qué "parece" de H1) sino **estructural**: ¿el código es estructura de datos o es lógica ejecutable?
+**Criterio principal:** La referencia de verdad es **CLAUDE.md Capa 3 — Decisiones actuales** (D1–D9 y las que se agreguen). Si una feature tiene una decisión documentada ahí, su lógica ejecutable está aprobada. Si NO tiene decisión en Capa 3, no se puede implementar lógica ejecutable.
 
-- **Estructura de datos** = columnas, tipos, enums, índices, campos con defaults → PERMITIDO siempre, incluso si prepara features de H1/H2
-- **Lógica ejecutable** = funciones, condicionales, handlers, endpoints, workflows que procesan datos de features de H1/H2 → PROHIBIDO
+**La distinción no es semántica** (qué "parece" de H1 o H2). Es estructural: ¿el código es estructura de datos o es lógica ejecutable para una feature aprobada?
+
+- **Estructura de datos** = columnas, tipos, enums, índices, campos con defaults → PERMITIDO siempre, incluso si prepara features no documentadas aún
+- **Lógica ejecutable para feature aprobada en Capa 3** → PERMITIDO
+- **Lógica ejecutable para feature NO en Capa 3** → FAIL
+
+### Cómo verificar (proceso GGA):
+
+1. Identificar qué feature implementa el código
+2. Buscar en `CLAUDE.md` → **Capa 3 — Decisiones actuales**
+3. Si existe una decisión (D1, D2, D3... Dn) que cubra esa feature → PASS
+4. Si no existe ninguna decisión → FAIL
 
 ### Ejemplos concretos (GGA debe usar estos como referencia):
 
-**✅ PASS — Estructura que prepara futuro:**
+**✅ PASS — Estructura que prepara futuro (siempre permitido):**
 ```sql
 -- Agregar columna para compliance futuro
 ALTER TABLE fincas ADD COLUMN eudr_compliant BOOLEAN DEFAULT false;
 ```
 
-**✅ PASS — Enum con valores futuros:**
+**✅ PASS — Enum con valores futuros (siempre permitido):**
 ```sql
 -- Tipos de alerta (algunos se usarán en H2)
 CREATE TYPE tipo_alerta AS ENUM ('threshold', 'pattern_based', 'predictive');
 ```
 
-**✅ PASS — Campo de relación para feature futura:**
+**✅ PASS — Router tiered de LLM (aprobado en D3):**
 ```typescript
-// Interface que incluye campo opcional para H2
-interface FincaProfile {
-  id: string;
-  nombre: string;
-  eudr_compliant?: boolean; // Se usará en H2
+// Router documentado en CLAUDE.md D3 — aprobado para H0-R
+class LLMRouter {
+  async generarTexto(content: string, opciones: LLMGeneracionOpciones): Promise<string> {
+    const adapter = this.selectAdapter(opciones.modelClass)
+    return adapter.generarTexto(content, opciones)
+  }
 }
 ```
 
-**❌ FAIL — Función con lógica de validación de H1:**
+**✅ PASS — Clasificador de imágenes (aprobado en D7):**
 ```typescript
-// Esta función implementa lógica de compliance que es de H1
+// Clasificación de imágenes documentada en CLAUDE.md D7
+async clasificarTipoImagen(base64: string, mimeType: string, traceId: string): Promise<TipoImagen>
+```
+
+**✅ PASS — Descarga de media Evolution API (aprobado en D8):**
+```typescript
+// EvolutionMediaClient documentado en CLAUDE.md D8
+export async function downloadEvolutionMedia(rawPayload: unknown, ...): Promise<MediaResult>
+```
+
+**❌ FAIL — Función con lógica de validación EUDR (no documentada en Capa 3):**
+```typescript
+// EUDR compliance no está en ninguna decisión de CLAUDE.md Capa 3
 function checkEudrCompliance(finca: Finca): ComplianceReport {
   const hasPolygon = finca.poligono !== null;
-  const hasPrecision = checkCoordinatePrecision(finca.coordenadas);
-  return { compliant: hasPolygon && hasPrecision, issues: [] };
+  return { compliant: hasPolygon, issues: [] };
 }
 ```
 
-**❌ FAIL — Condicional con lógica de feature de H2:**
+**❌ FAIL — Alertas pattern-based (no documentadas en Capa 3):**
 ```typescript
-// Pattern-based alerts es feature de H2
+// Pattern-based alerts no tiene decisión en CLAUDE.md Capa 3
 if (alert.tipo === 'pattern_based') {
   const patterns = await detectPatterns(finca.id, last30Days);
   await notifyGerente(patterns);
 }
 ```
 
-**❌ FAIL — Endpoint para dashboard web (H2):**
+**❌ FAIL — Endpoint para dashboard web (no documentado en Capa 3):**
 ```typescript
-// Dashboard web es H2
+// Dashboard web no tiene decisión en CLAUDE.md Capa 3
 app.get('/api/dashboard/:fincaId', async (req, res) => {
   const stats = await getDashboardStats(req.params.fincaId);
   res.json(stats);
 });
 ```
 
-**❌ FAIL — Router de modelos LLM (H1):**
-```typescript
-// Router de complejidad es aspiracional para H1
-function selectModel(event: FieldEvent): string {
-  if (event.hasImage) return 'gpt-4o';
-  if (event.complexity > 0.7) return 'gpt-4o';
-  return 'gpt-4o-mini';
-}
-```
-
-**Resumen de la regla:** Si `grep -r "function\|handler\|endpoint\|if.*===\|switch.*case"` encuentra lógica que procesa datos de features listadas como H1/H2 en el CLAUDE.md, es FAIL. Si solo encuentra definiciones de tipos, columnas, enums, o interfaces con campos opcionales, es PASS.
+**Resumen:** Antes de hacer FAIL, GGA debe leer CLAUDE.md Capa 3 y verificar si la feature tiene decisión documentada. Si la tiene → PASS. Si no la tiene → FAIL con mensaje: "Feature sin decisión en CLAUDE.md Capa 3. Documentar en D[N] antes de implementar."
 
 ## Convenciones de calidad (warnings, no FAIL)
 
