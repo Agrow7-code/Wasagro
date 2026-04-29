@@ -174,10 +174,14 @@ Es **VITAL** extraer:
 2. `tamano_muestra` (ej: "en 10 plantas", "muestreamos 50 hijos")
 3. `organo_afectado` (ej: "hijo", "racimo", "tallo")
 
-Si en el mensaje original (y en el ESTADO_PARCIAL) falta información sobre la metodología de muestreo (`tamano_muestra` o `organo_afectado`):
+Si en el mensaje original (y en el ESTADO_PARCIAL) falta información clave sobre la metodología de muestreo (como el tamaño de la muestra o el órgano afectado) O faltan los conteos básicos (individuos encontrados):
 
-**DEBES OBLIGATORIAMENTE** marcar `"requiere_clarificacion": true` y utilizar EXACTAMENTE esta `"pregunta_sugerida"`:
-"¿Cuántas plantas muestreaste y en qué parte de la planta viste la plaga (hojas, tallo, hijo, racimo)?"
+**DEBES OBLIGATORIAMENTE** marcar `"requiere_clarificacion": true` y formular una `"pregunta_sugerida"`.
+La pregunta debe ser conversacional, directa y natural, agrupando los datos faltantes en una sola oración sin usar conjunciones robóticas.
+EJEMPLOS:
+- Si falta cantidad de insectos y tamaño de muestra: "¿Cuántos insectos encontraste y en cuántas plantas hiciste el muestreo?"
+- Si falta tamaño de muestra y órgano: "¿Cuántas plantas muestreaste y en qué parte de la planta estaba el daño (hojas, tallo, hijo, racimo)?"
+- Si solo falta el órgano: "¿En qué parte de la planta encontraste la plaga (tallo, hojas, fruto)?"
 
 ## MANEJO DE CORRECCIONES Y META-COMENTARIOS
 Si el agricultor te dice algo como "No me preguntaste cuántas" o "Te faltó preguntarme la severidad", NO intentes adivinar el dato ni cambies los datos previos (como el nombre de la plaga). 
