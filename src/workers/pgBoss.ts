@@ -71,15 +71,18 @@ async function procesarIntencionWorker(
 
     const ext = multiExtraction.eventos[0] as EventoCampoExtraido
 
-    if (ext.requiere_clarificacion && ext.pregunta_sugerida) {
+    const { supabase } = await import('../integrations/supabase.js')
+    const { data: sData } = await supabase.from('sesiones_activas').select('*').eq('session_id', data.sessionId).single()
+
+    // UX Rule: Max 1 clarification per event to avoid interrogation loops in the field.
+    const maxClarificationsReached = (sData?.clarification_count ?? 0) >= 1
+
+    if (ext.requiere_clarificacion && ext.pregunta_sugerida && !maxClarificationsReached) {
       // Flujo interactivo desde el background: pedimos el dato faltante
       const sender = crearSenderWhatsApp()
       const destinatario = data.phone
 
       // En lugar de guardar en BD y cerrar, preparamos la sesión para la respuesta
-      const { supabase } = await import('../integrations/supabase.js')
-      const { data: sData } = await supabase.from('sesiones_activas').select('*').eq('session_id', data.sessionId).single()
-      
       if (sData) {
         const ctx = sData.contexto_parcial as Record<string, unknown>
         const intenciones = (ctx['intenciones_pendientes'] as any[]) ?? []
@@ -126,7 +129,7 @@ async function procesarIntencionWorker(
       return
     }
 
-    const tipo_evento = ext.tipo_evento
+    const tipo_evento = (ext.requiere_clarificacion && maxClarificationsReached) ? ext.tipo_evento : ext.tipo_evento
     const evStatus = (ext.confidence_score < 0.5 || ext.requiere_clarificacion) ? 'requires_review' : 'complete'
 
     if (ext.alerta_urgente) {
