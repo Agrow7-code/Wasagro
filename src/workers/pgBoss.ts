@@ -40,6 +40,7 @@ async function procesarIntencionWorker(
     usuarioId: string
     fincaId: string
     transaccionOriginal: string
+    phone: string
   },
   jobId: string,
   llm: IWasagroLLM,
@@ -144,13 +145,13 @@ async function procesarIntencionWorker(
           ? `¡Listo! Guardé tus reportes:\n\n${confirmaciones.map(c => `• ${c.replace('✅ ', '')}`).join('\n')}\n\n✅`
           : (confirmaciones[0] ?? '✅ Registrado.')
 
-        // El teléfono viene del campo 'from' del mensaje original que inició el pipeline
-        // Buscamos una forma de recuperar el destinatario. 
-        // Si no está en entrada.transcripcion (que es raro), usamos un fallback.
-        const destinatario = data.entrada.usuario_id ? (await getUserByPhone(data.entrada.usuario_id.split(':')[1] ?? ''))?.phone : null
+        // El teléfono viene en la carga útil del job desde el orquestador
+        const destinatario = data.phone
 
         if (destinatario) {
-          await sender.enviarTexto(destinatario, msg).catch(() => {})
+          await sender.enviarTexto(destinatario, msg).catch((err) => {
+            console.error('[procesar-intencion] Error enviando WhatsApp:', err)
+          })
         }
 
       }
