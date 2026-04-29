@@ -26,6 +26,7 @@ import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
+import type { ResultadoOCR } from '../../types/dominio/OCR.js'
 import { SupabaseTools } from '../../agents/mcp/SupabaseTools.js'
 import { IntentGate } from './IntentGate.js'
 
@@ -283,7 +284,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     mimeType: string,
     contexto: import('./IWasagroLLM.js').ContextoOCR,
     traceId: string,
-  ): Promise<import('./IWasagroLLM.js').ResultadoOCR> {
+  ): Promise<ResultadoOCR> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ai-agent', input: { tipo_contexto: contexto.cultivo_principal } })
     try {
@@ -310,7 +311,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', `OCR devolvió no-JSON: ${texto.slice(0, 100)}`)
       }
-      const result: import('./IWasagroLLM.js').ResultadoOCR = {
+      const result: ResultadoOCR = {
         tipo_documento: (json as any).tipo_documento ?? 'otro',
         registros: Array.isArray((json as any).registros) ? (json as any).registros : [],
         texto_completo_visible: (json as any).texto_completo_visible ?? '',
