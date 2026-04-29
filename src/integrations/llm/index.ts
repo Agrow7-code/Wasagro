@@ -67,8 +67,8 @@ export function crearAdapterLLM(): ILLMAdapter {
   // TIERED ROUTING POOL (Control activo de cuota y capacidades)
     const poolConfig: Array<{ name: string; key: string; provider: string; tier: ModelClass }> = [
     // TIER 1 (Fast): Extracción simple, clasificación rápida, sin penalización por fallos masivos
-    { name: 'Groq', key: 'GROQ_API_KEY', provider: 'groq', tier: 'fast' },
     { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast' },
+    { name: 'Groq', key: 'GROQ_API_KEY', provider: 'groq', tier: 'fast' },
 
     // TIER 2 (Reasoning): Reflexión profunda, PDR/SR (ReAct)
     { name: 'Deepseek', key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'reasoning' },
