@@ -164,14 +164,15 @@ export async function handleEvento(
           lote_id: null,
           tipo_evento: 'observacion',
           status: ocr.confianza_lectura >= 0.5 ? 'complete' : 'requires_review',
-          datos_evento: {
-            tipo_documento: ocr.tipo_documento,
-            registros: ocr.registros,
-            texto_completo: ocr.texto_completo_visible,
-            confianza_lectura: ocr.confianza_lectura,
-            advertencia: ocr.advertencia,
-            caption: msg.texto ?? null,
-          },
+        datos_evento: {
+          tipo_documento: ocr.tipo_documento,
+          fecha_documento: ocr.fecha_documento,
+          registros: ocr.registros,
+          texto_completo: ocr.texto_completo_visible,
+          confianza_lectura: ocr.confianza_lectura,
+          advertencia: ocr.advertencia,
+          caption: msg.texto ?? null,
+        },
           descripcion_raw: ocr.texto_completo_visible || 'Documento fotografiado',
           confidence_score: ocr.confianza_lectura,
           requiere_validacion: ocr.confianza_lectura < 0.5,
@@ -181,7 +182,7 @@ export async function handleEvento(
 
         await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
 
-        if (ocr.confianza_lectura < 0.3 || ocr.advertencia === 'imagen borrosa') {
+        if (ocr.confianza_lectura < 0.3 || ocr.advertencia?.includes('imagen borrosa')) {
           await _sender!.enviarTexto(msg.from, 'La imagen está borrosa y no pude leer bien los datos. ¿Puedes mandar una foto más clara o escribirme los datos? ⚠️')
         } else {
           const nRegistros = ocr.registros.length

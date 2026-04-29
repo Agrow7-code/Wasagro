@@ -8,7 +8,7 @@ import { LLMRouter } from './LLMRouter.js'
 import { WasagroAIAgent } from './WasagroAIAgent.js'
 import { langfuse } from '../langfuse.js'
 
-export type LLMProvider = 'auto' | 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'glm' | 'minimax' | 'qwen' | 'gemma'
+export type LLMProvider = 'auto' | 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'deepseek-ocr' | 'internvl' | 'glm' | 'minimax' | 'qwen' | 'gemma'
 
 function buildAdapter(provider: string): ILLMAdapter {
   if (provider === 'gemini') {
@@ -25,6 +25,16 @@ function buildAdapter(provider: string): ILLMAdapter {
     const apiKey = process.env['NVIDIA_API_KEY']
     if (!apiKey) throw new Error('deepseek requiere NVIDIA_API_KEY')
     return new NvidiaAdapter({ apiKey, model: 'deepseek-ai/deepseek-v4-pro', extraParams: { top_p: 0.95, chat_template_kwargs: { thinking: false } } })
+  }
+  if (provider === 'deepseek-ocr') {
+    const apiKey = process.env['NVIDIA_OCR_KEY'] ?? process.env['NVIDIA_API_KEY']
+    if (!apiKey) throw new Error('deepseek-ocr requiere NVIDIA_OCR_KEY o NVIDIA_API_KEY')
+    return new NvidiaAdapter({ apiKey, model: 'deepseek-ai/deepseek-ocr-v2', extraParams: { top_p: 0.1, temperature: 0.05 } })
+  }
+  if (provider === 'internvl') {
+    const apiKey = process.env['NVIDIA_INTERVL_KEY'] ?? process.env['NVIDIA_API_KEY']
+    if (!apiKey) throw new Error('internvl requiere NVIDIA_INTERVL_KEY o NVIDIA_API_KEY')
+    return new NvidiaAdapter({ apiKey, model: 'nvidia/internvl-3.0-78b', extraParams: { top_p: 0.1, temperature: 0.05 } })
   }
   if (provider === 'glm') {
     const apiKey = process.env['NVIDIA_GLM_KEY'] ?? process.env['NVIDIA_API_KEY']
@@ -54,22 +64,26 @@ export function crearAdapterLLM(): ILLMAdapter {
   const provider = (process.env['WASAGRO_LLM'] ?? 'auto') as LLMProvider
 
   if (provider === 'auto') {
-    // TIERED ROUTING POOL (Control activo de cuota y capacidades)
+  // TIERED ROUTING POOL (Control activo de cuota y capacidades)
     const poolConfig: Array<{ name: string; key: string; provider: string; tier: ModelClass }> = [
-      // TIER 1 (Fast): Extracción simple, clasificación rápida, sin penalización por fallos masivos
-      { name: 'Groq',     key: 'GROQ_API_KEY',       provider: 'groq',     tier: 'fast' },
-      { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'fast' }, 
+    // TIER 1 (Fast): Extracción simple, clasificación rápida, sin penalización por fallos masivos
+    { name: 'Groq', key: 'GROQ_API_KEY', provider: 'groq', tier: 'fast' },
+    { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast' },
 
-      // TIER 2 (Reasoning): Reflexión profunda, PDR/SR (ReAct)
-      { name: 'Deepseek', key: 'NVIDIA_API_KEY',     provider: 'deepseek', tier: 'reasoning' },
-      { name: 'GLM-5.1',  key: 'NVIDIA_GLM_KEY',     provider: 'glm',      tier: 'reasoning' },
-      { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'reasoning' },
+    // TIER 2 (Reasoning): Reflexión profunda, PDR/SR (ReAct)
+    { name: 'Deepseek', key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'reasoning' },
+    { name: 'GLM-5.1', key: 'NVIDIA_GLM_KEY', provider: 'glm', tier: 'reasoning' },
+    { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'reasoning' },
 
-      // TIER 3 (Ultra): Casos críticos, Diagnóstico complejo, V2VK
-      { name: 'Gemini',   key: 'GEMINI_API_KEY',     provider: 'gemini',   tier: 'ultra' }, // Soporte Multimodal nativo
-      { name: 'Minimax',  key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax',  tier: 'ultra' },
-      { name: 'Gemma-4',  key: 'NVIDIA_GEMMA_KEY',   provider: 'gemma',    tier: 'ultra' },
-      { name: 'Qwen',     key: 'NVIDIA_QWEN_KEY',    provider: 'qwen',     tier: 'ultra' },
+    // TIER 3 (Ultra): Casos críticos, Diagnóstico complejo, V2VK
+    { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'ultra' }, // Soporte Multimodal nativo
+    { name: 'Minimax', key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax', tier: 'ultra' },
+    { name: 'Gemma-4', key: 'NVIDIA_GEMMA_KEY', provider: 'gemma', tier: 'ultra' },
+    { name: 'Qwen', key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'ultra' },
+
+    // TIER 4 (OCR): Procesamiento de documentos manuscritos, box-free parsing
+    { name: 'DeepSeek-OCR', key: 'NVIDIA_OCR_KEY', provider: 'deepseek-ocr', tier: 'ocr' },
+    { name: 'InternVL', key: 'NVIDIA_INTERVL_KEY', provider: 'internvl', tier: 'ocr' },
     ]
 
     const pool = []
@@ -85,8 +99,21 @@ export function crearAdapterLLM(): ILLMAdapter {
       }
     }
 
-    if (pool.length === 0) throw new Error('WASAGRO_LLM=auto requiere al menos una API key configurada')
-    
+  if (pool.length === 0) throw new Error('WASAGRO_LLM=auto requiere al menos una API key configurada')
+
+    const hasOcrTier = pool.some(p => p.tier === 'ocr')
+    if (!hasOcrTier) {
+      const hasUltraTier = pool.some(p => p.tier === 'ultra')
+      if (hasUltraTier) {
+        console.warn('[llm] ⚠️ No hay adapters de tier OCR. Fallback a tier ultra para procesamiento de documentos.')
+        pool.filter(p => p.tier === 'ultra').forEach(p => {
+          pool.push({ name: `${p.name}-ocr-fallback`, adapter: p.adapter, tier: 'ocr' })
+        })
+      } else {
+        console.warn('[llm] ⚠️ No hay adapters de tier OCR ni ultra. OCR de documentos no estará disponible.')
+      }
+    }
+
     return new LLMRouter(pool, {
       onMetric: (m) => console.log(`[llm_router] Tier:${m.tier} | ${m.adapterName} ${m.success ? '✓' : '✗'} ${m.latencyMs}ms ${m.error ? '— ' + m.error.slice(0, 80) : ''}`)
     })

@@ -21,11 +21,13 @@ export class GeminiAdapter implements ILLMAdapter {
   async generarTexto(userContent: string, opciones: LLMGeneracionOpciones): Promise<string> {
     let activeModel = this.#model
     if (opciones.modelClass === 'fast') {
-      activeModel = process.env['GEMINI_FAST_MODEL'] ?? 'gemini-2.5-flash'
+    activeModel = process.env['GEMINI_FAST_MODEL'] ?? 'gemini-2.5-flash'
     } else if (opciones.modelClass === 'reasoning') {
-      activeModel = process.env['GEMINI_PRO_MODEL'] ?? 'gemini-2.5-pro'
+    activeModel = process.env['GEMINI_PRO_MODEL'] ?? 'gemini-2.5-pro'
     } else if (opciones.modelClass === 'ultra') {
-      activeModel = process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro' // Modalidad multimodal robusta
+    activeModel = process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro' // Modalidad multimodal robusta
+    } else if (opciones.modelClass === 'ocr') {
+    activeModel = process.env['GEMINI_OCR_MODEL'] ?? process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro' // Fallback multimodal
     }
 
     const trace = langfuse.trace({ id: opciones.traceId })
