@@ -597,36 +597,22 @@ export async function marcarIntencionCompletada(
   const fallidas = actualizadas.filter(i => i.status === 'failed').length
   const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
 
-  if (todasCompletas) {
-    const { error: updateError } = await client
-      .from('sesiones_activas')
-      .update({
-        contexto_parcial: {
-          ...ctx,
-          intenciones_pendientes: actualizadas,
-          completadas,
-          fallidas,
-          extracted_data: actualizadas.filter(i => i.status === 'completed').map(i => i.evento_extraido),
-          transaccion_original: transaccionOriginal,
-        },
-        status: 'pending_confirmation',
-      })
-      .eq('session_id', sessionId)
-    if (updateError) throw updateError
-  } else {
-    const { error: updateError } = await client
-      .from('sesiones_activas')
-      .update({
-        contexto_parcial: {
-          ...ctx,
-          intenciones_pendientes: actualizadas,
-          completadas,
-          fallidas,
-        },
-      })
-      .eq('session_id', sessionId)
-    if (updateError) throw updateError
-  }
+  const newStatus = todasCompletas ? 'completed' : 'processing_intentions'
+  const { error: updateError } = await client
+    .from('sesiones_activas')
+    .update({
+      contexto_parcial: {
+        ...ctx,
+        intenciones_pendientes: actualizadas,
+        completadas,
+        fallidas,
+        extracted_data: actualizadas.filter(i => i.status === 'completed').map(i => i.evento_extraido),
+        transaccion_original: transaccionOriginal,
+      },
+      status: newStatus,
+    })
+    .eq('session_id', sessionId)
+  if (updateError) throw updateError
 
   return { todas_completas: todasCompletas, intenciones: actualizadas, transaccion_original: transaccionOriginal }
 }
@@ -657,7 +643,7 @@ export async function marcarIntencionFallida(
   const fallidas = actualizadas.filter(i => i.status === 'failed').length
   const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
 
-  const newStatus = todasCompletas ? 'pending_confirmation' : 'processing_intentions'
+  const newStatus = todasCompletas ? 'completed' : 'processing_intentions'
   const newCtx = todasCompletas
     ? {
         ...ctx,
