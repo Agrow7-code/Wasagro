@@ -256,15 +256,15 @@ export class WasagroAIAgent implements IWasagroLLM {
     const generation = trace.generation({ name: 'clasificar_imagen', model: 'wasagro-ai-agent' })
     try {
       const prompt = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
-      const raw = await this.#adapter.generarTexto('Clasifica esta imagen.', {
-        systemPrompt: prompt,
-        responseFormat: 'json_object',
-        imageBase64: base64,
-        imageMimeType: mimeType,
-        traceId,
-        generationName: 'clasificar_imagen',
-        modelClass: 'ultra',
-      })
+    const raw = await this.#adapter.generarTexto('Clasifica esta imagen.', {
+      systemPrompt: prompt,
+      responseFormat: 'json_object',
+      imageBase64: base64,
+      imageMimeType: mimeType,
+      traceId,
+      generationName: 'clasificar_imagen',
+      modelClass: 'fast',
+    })
       const json = JSON.parse(raw.replace(/```json|```/g, '').trim())
       const tipos = ['plaga_cultivo', 'documento_tabla', 'otro'] as const
       const tipo = tipos.includes(json.tipo) ? json.tipo : 'plaga_cultivo'
@@ -285,7 +285,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     traceId: string,
   ): Promise<import('./IWasagroLLM.js').ResultadoOCR> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ai-agent', input: { tipo_contexto: contexto.cultivo_principal } })
+    const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ocr-tier', input: { tipo_contexto: contexto.cultivo_principal } })
     try {
       const prompt = injectarVariables(
         await PromptManager.getPrompt('sp-03d-ocr-documento.md', 'prompts/sp-03d-ocr-documento.md', traceId),
@@ -302,7 +302,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         imageMimeType: mimeType,
         traceId,
         generationName: 'ocr_documento',
-        modelClass: 'ultra',
+        modelClass: 'ocr',
       })
       const texto = raw.replace(/```json|```/g, '').trim()
       let json: unknown
@@ -310,15 +310,41 @@ export class WasagroAIAgent implements IWasagroLLM {
         generation.end({ output: texto, level: 'ERROR' })
         throw new LLMError('PARSE_ERROR', `OCR devolvió no-JSON: ${texto.slice(0, 100)}`)
       }
-      const result: import('./IWasagroLLM.js').ResultadoOCR = {
-        tipo_documento: (json as any).tipo_documento ?? 'otro',
-        registros: Array.isArray((json as any).registros) ? (json as any).registros : [],
-        texto_completo_visible: (json as any).texto_completo_visible ?? '',
-        confianza_lectura: typeof (json as any).confianza_lectura === 'number' ? (json as any).confianza_lectura : 0,
-        advertencia: (json as any).advertencia ?? null,
+
+      const { ResultadoOCRSchema } = await import('../../types/dominio/OCR.js')
+      const parsed = ResultadoOCRSchema.safeParse(json)
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+        console.warn(`[WasagroAIAgent] OCR Zod validation issues: ${issues}`)
+        trace.event({ name: 'ocr_zod_fallback', level: 'WARNING', input: { issues } })
+
+        const result: import('./IWasagroLLM.js').ResultadoOCR = {
+          tipo_documento: (json as any).tipo_documento ?? 'otro',
+          fecha_documento: (json as any).fecha_documento ?? null,
+          registros: Array.isArray((json as any).registros) ? (json as any).registros.map((r: any) => ({
+            fila: r.fila ?? 0,
+            lote_raw: r.lote_raw ?? null,
+            lote_id: r.lote_id ?? null,
+            actividad: r.actividad ?? null,
+            producto: r.producto ?? null,
+            cantidad: typeof r.cantidad === 'number' ? r.cantidad : (typeof r.cantidad === 'string' ? (isNaN(Number(r.cantidad)) ? null : Number(r.cantidad)) : null),
+            unidad: r.unidad ?? null,
+            trabajadores: typeof r.trabajadores === 'number' ? r.trabajadores : (typeof r.trabajadores === 'string' ? (isNaN(Number(r.trabajadores)) ? null : Number(r.trabajadores)) : null),
+            monto: typeof r.monto === 'number' ? r.monto : (typeof r.monto === 'string' ? (isNaN(parseFloat(r.monto.replace(/[^0-9.-]/g, ''))) ? null : parseFloat(r.monto.replace(/[^0-9.-]/g, ''))) : null),
+            fecha_raw: r.fecha_raw ?? null,
+            notas: r.notas ?? null,
+            ilegible: r.ilegible ?? false,
+          })) : [],
+          texto_completo_visible: (json as any).texto_completo_visible ?? '',
+          confianza_lectura: typeof (json as any).confianza_lectura === 'number' ? (json as any).confianza_lectura : 0,
+          advertencia: [(json as any).advertencia, `zod_validation_issues: ${issues}`].filter(Boolean).join(' | '),
+        }
+        generation.end({ output: { tipo_documento: result.tipo_documento, n_registros: result.registros.length, confianza: result.confianza_lectura, zod_valid: false } })
+        return result
       }
-      generation.end({ output: { tipo_documento: result.tipo_documento, n_registros: result.registros.length, confianza: result.confianza_lectura } })
-      return result
+
+      generation.end({ output: { tipo_documento: parsed.data.tipo_documento, n_registros: parsed.data.registros.length, confianza: parsed.data.confianza_lectura, zod_valid: true } })
+      return parsed.data
     } catch (err) {
       console.error('[WasagroAIAgent] Error en OCR de documento:', err)
       generation.end({ output: String(err), level: 'ERROR' })
