@@ -560,7 +560,9 @@ export async function handleEvento(
   }
 
   // ── IntentGate aprobado → Encolar cada intención a pg-boss ──────────────
-  await _sender!.enviarTexto(msg.from, `Procesando tus ${intentResult.intenciones.length} reporte${intentResult.intenciones.length > 1 ? 's' : ''}... 🔍`)
+  if (session.clarification_count === 0) {
+    await _sender!.enviarTexto(msg.from, `Procesando tus ${intentResult.intenciones.length} reporte${intentResult.intenciones.length > 1 ? 's' : ''}... 🔍`)
+  }
 
   const boss = getBoss()
   const intencionesPendientes: IntencionPendiente[] = []

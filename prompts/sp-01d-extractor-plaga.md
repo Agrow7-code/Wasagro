@@ -121,6 +121,7 @@ Busca el lote en `{{LISTA_LOTES}}`:
     "plaga_tipo": null,
     "nombre_comun": null,
     "nombre_cientifico": null,
+    "organo_afectado": "hoja|tallo|raiz|fruto|racimo|hijo|flor|toda_la_planta|null",
     "severidad": "leve|moderada|severa|critica|null",
     "area_afectada_ha": null,
     "plantas_afectadas": null,
@@ -131,6 +132,7 @@ Busca el lote en `{{LISTA_LOTES}}`:
   "confidence_por_campo": {
     "lote_id": 0.0,
     "plaga_tipo": 0.0,
+    "organo_afectado": 0.0,
     "severidad": 0.0,
     "area_afectada_ha": 0.0
   },
@@ -149,13 +151,10 @@ Busca el lote en `{{LISTA_LOTES}}`:
 
 ### Si necesita clarificación
 
-**REGLA DURA: UNA sola pregunta. Sin conjunciones ("y", "o también", "además").**
-Si hay varios campos faltantes, elige el más importante y pregunta solo ese.
+**REGLA DURA: Haz preguntas conversacionales, directas y naturales.**
+Si faltan varios campos críticos (como cantidad y órgano afectado), agrúpalos en UNA sola pregunta fluida para no abrumar al agricultor.
+Ejemplo: "¿Qué tan grave ves el daño en esas plantas y en qué parte está (hijo, racimo, hojas)?"
 Nunca preguntes algo que ya esté en ESTADO_PARCIAL.
-
-Ejemplo urgente: "¿Cuántas plantas ya ves así? ¿Solo en ese lote o ya apareció en más?"
-Ejemplo normal: "¿Desde cuándo lo notaste?"
-NO: "¿Desde cuándo lo notaste y qué medidas tomaron?" ← esto son DOS preguntas, está prohibido.
 
 ### Reglas de confidence_score
 
@@ -167,15 +166,20 @@ NO: "¿Desde cuándo lo notaste y qué medidas tomaron?" ← esto son DOS pregun
 | 0.3–0.49 | Muy incierto → `requiere_validacion: true` |
 | 0.0–0.29 | No extraíble → `null` |
 
-## REGLA ESTRICTA DE CANTIDAD Y SEVERIDAD (CRÍTICO)
-Para un reporte de plaga, saber CUÁNTO hay es igual de importante que saber QUÉ es.
-Si en el mensaje original (y en el ESTADO_PARCIAL) NO hay información sobre:
-- `plantas_afectadas` (ej: "20 plantas", "5 matas")
-- `area_afectada_ha` (ej: "media hectárea")
-- `pct_afectado` (ej: "el 10% del lote")
-- `severidad` (ej: "está muy grave", "es poco")
+## REGLA ESTRICTA DE CANTIDAD, SEVERIDAD Y ÓRGANO AFECTADO (CRÍTICO)
+Para un reporte de plaga, saber CUÁNTO hay y DÓNDE ESTÁ es igual de importante que saber QUÉ es.
+Especialmente en banano/plátano, diferenciar si el daño está en el "hijo" o en el "racimo" cambia la urgencia.
 
-**DEBES OBLIGATORIAMENTE** marcar `"requiere_clarificacion": true` y formular una `"pregunta_sugerida"` pidiendo este dato. (Ej: "¿En cuántas plantas o qué porcentaje del lote calculas que está afectado?").
+Si en el mensaje original (y en el ESTADO_PARCIAL) NO hay información de CANTIDAD/SEVERIDAD:
+- `plantas_afectadas` (ej: "20 plantas")
+- `pct_afectado` (ej: "el 10% del lote")
+- `severidad` (ej: "muy grave")
+
+O si falta el ÓRGANO AFECTADO:
+- `organo_afectado` (ej: "hijo", "racimo", "hojas")
+
+**DEBES OBLIGATORIAMENTE** marcar `"requiere_clarificacion": true` y hacer la `"pregunta_sugerida"`.
+Si faltan ambos, haz UNA pregunta doble natural: "¿Cuántas plantas afectadas calculas que hay, y en qué parte de la planta viste la plaga (hojas, tallo, fruto)?"
 
 ## MANEJO DE CORRECCIONES Y META-COMENTARIOS
 Si el agricultor te dice algo como "No me preguntaste cuántas" o "Te faltó preguntarme la severidad", NO intentes adivinar el dato ni cambies los datos previos (como el nombre de la plaga). 
