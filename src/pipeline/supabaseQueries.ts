@@ -239,9 +239,58 @@ export interface FincaConCoordenadasRow {
 }
 
 export async function getFincasConCoordenadas(client: SupabaseClient = defaultClient): Promise<FincaConCoordenadasRow[]> {
-  const { data, error } = await client.rpc('get_fincas_con_coordenadas')
-  if (error) throw error
-  return (data ?? []) as FincaConCoordenadasRow[]
+  // Intentar usar la función RPC primero (más eficiente)
+  try {
+    const { data, error } = await client.rpc('get_fincas_con_coordenadas')
+    if (!error) return (data ?? []) as FincaConCoordenadasRow[]
+    
+    // Si falla la función, loggear y continuar con fallback
+    console.warn('[getFincasConCoordenadas] RPC function error, using fallback query:', error.message)
+  } catch (err) {
+    console.warn('[getFincasConCoordenadas] RPC not available, using fallback query:', err)
+  }
+  
+  // Fallback: query directa si la función no existe o falla
+  const { data, error } = await client
+    .from('fincas')
+    .select('finca_id, nombre, cultivo_principal, coordenadas')
+    .eq('activa', true)
+    .not('coordenadas', 'is', null)
+  
+  if (error) {
+    console.error('[getFincasConCoordenadas] Fallback query failed:', error)
+    throw error
+  }
+  
+  // Transformar coordenadas PostGIS a lat/lng
+  return (data ?? []).map((finca: any) => {
+    // coordenadas viene como string "POINT(lng lat)" o objeto
+    let lat: number | null = null
+    let lng: number | null = null
+    
+    if (finca.coordenadas) {
+      if (typeof finca.coordenadas === 'object' && finca.coordenadas.coordinates) {
+        // Formato GeoJSON: [lng, lat]
+        lng = finca.coordenadas.coordinates[0]
+        lat = finca.coordenadas.coordinates[1]
+      } else if (typeof finca.coordenadas === 'string') {
+        // Parsear "POINT(lng lat)"
+        const match = finca.coordenadas.match(/POINT\(([^\s]+)\s+([^\)]+)\)/i)
+        if (match) {
+          lng = parseFloat(match[1])
+          lat = parseFloat(match[2])
+        }
+      }
+    }
+    
+    return {
+      finca_id: finca.finca_id,
+      nombre: finca.nombre,
+      cultivo_principal: finca.cultivo_principal,
+      lat: lat ?? 0,
+      lng: lng ?? 0,
+    }
+  })
 }
 
 export interface EventoResumenRow {

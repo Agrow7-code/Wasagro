@@ -7,6 +7,9 @@ import type { ClasificacionExcel, EntradaClasificacionExcel } from '../../types/
 import type { DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import type { ResultadoOCR } from '../../types/dominio/OCR.js'
 
+// Re-exportar tipos para uso en otros módulos
+export type { ResultadoOCR } from '../../types/dominio/OCR.js'
+
 export type TipoImagen = 'plaga_cultivo' | 'documento_tabla' | 'otro'
 
 export interface ContextoOCR {
