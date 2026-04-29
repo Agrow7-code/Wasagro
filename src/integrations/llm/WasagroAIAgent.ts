@@ -22,6 +22,8 @@ import {
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
+import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
+import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
 import { buildSDRContexto } from './sdrUtils.js'
@@ -281,9 +283,9 @@ export class WasagroAIAgent implements IWasagroLLM {
   async extraerDocumentoOCR(
     base64: string,
     mimeType: string,
-    contexto: import('./IWasagroLLM.js').ContextoOCR,
+    contexto: ContextoOCR,
     traceId: string,
-  ): Promise<import('./IWasagroLLM.js').ResultadoOCR> {
+  ): Promise<ResultadoOCR> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ocr-tier', input: { tipo_contexto: contexto.cultivo_principal } })
     try {
@@ -318,7 +320,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         console.warn(`[WasagroAIAgent] OCR Zod validation issues: ${issues}`)
         trace.event({ name: 'ocr_zod_fallback', level: 'WARNING', input: { issues } })
 
-        const result: import('./IWasagroLLM.js').ResultadoOCR = {
+        const result: ResultadoOCR = {
           tipo_documento: (json as any).tipo_documento ?? 'otro',
           fecha_documento: (json as any).fecha_documento ?? null,
           registros: Array.isArray((json as any).registros) ? (json as any).registros.map((r: any) => ({
