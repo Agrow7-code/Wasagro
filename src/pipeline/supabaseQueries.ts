@@ -489,3 +489,141 @@ export async function guardarEmbeddingEnEvento(
     .eq('id', eventoId)
   if (error) throw error
 }
+
+export interface IntencionPendiente {
+  tipo_evento: string
+  job_id: string
+  status: 'pending' | 'completed' | 'failed'
+  evento_extraido: Record<string, unknown> | null
+  evento_id: string | null
+}
+
+export async function guardarLoteIntenciones(
+  sessionId: string,
+  intenciones: IntencionPendiente[],
+  transaccionOriginal: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('sesiones_activas')
+    .update({
+      contexto_parcial: {
+        intenciones_pendientes: intenciones,
+        transaccion_original: transaccionOriginal,
+        total_intenciones: intenciones.length,
+        completadas: 0,
+        fallidas: 0,
+      },
+      status: 'processing_intentions',
+    })
+    .eq('session_id', sessionId)
+  if (error) throw error
+}
+
+export async function marcarIntencionCompletada(
+  sessionId: string,
+  jobId: string,
+  eventoExtraido: Record<string, unknown>,
+  eventoId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<{ todas_completas: boolean; intenciones: IntencionPendiente[]; transaccion_original: string }> {
+  const { data, error: fetchError } = await client
+    .from('sesiones_activas')
+    .select('contexto_parcial')
+    .eq('session_id', sessionId)
+    .single()
+  if (fetchError) throw fetchError
+
+  const ctx = (data as { contexto_parcial: Record<string, unknown> }).contexto_parcial
+  const intenciones = (ctx['intenciones_pendientes'] as IntencionPendiente[]) ?? []
+  const transaccionOriginal = (ctx['transaccion_original'] as string) ?? ''
+
+  const actualizadas = intenciones.map(i =>
+    i.job_id === jobId
+      ? { ...i, status: 'completed' as const, evento_extraido: eventoExtraido, evento_id: eventoId }
+      : i
+  )
+
+  const completadas = actualizadas.filter(i => i.status === 'completed').length
+  const fallidas = actualizadas.filter(i => i.status === 'failed').length
+  const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
+
+  if (todasCompletas) {
+    const { error: updateError } = await client
+      .from('sesiones_activas')
+      .update({
+        contexto_parcial: {
+          ...ctx,
+          intenciones_pendientes: actualizadas,
+          completadas,
+          fallidas,
+          extracted_data: actualizadas.filter(i => i.status === 'completed').map(i => i.evento_extraido),
+          transaccion_original: transaccionOriginal,
+        },
+        status: 'pending_confirmation',
+      })
+      .eq('session_id', sessionId)
+    if (updateError) throw updateError
+  } else {
+    const { error: updateError } = await client
+      .from('sesiones_activas')
+      .update({
+        contexto_parcial: {
+          ...ctx,
+          intenciones_pendientes: actualizadas,
+          completadas,
+          fallidas,
+        },
+      })
+      .eq('session_id', sessionId)
+    if (updateError) throw updateError
+  }
+
+  return { todas_completas: todasCompletas, intenciones: actualizadas, transaccion_original: transaccionOriginal }
+}
+
+export async function marcarIntencionFallida(
+  sessionId: string,
+  jobId: string,
+  errorDetail: string,
+  client: SupabaseClient = defaultClient,
+): Promise<{ todas_completas: boolean; intenciones: IntencionPendiente[] }> {
+  const { data, error: fetchError } = await client
+    .from('sesiones_activas')
+    .select('contexto_parcial')
+    .eq('session_id', sessionId)
+    .single()
+  if (fetchError) throw fetchError
+
+  const ctx = (data as { contexto_parcial: Record<string, unknown> }).contexto_parcial
+  const intenciones = (ctx['intenciones_pendientes'] as IntencionPendiente[]) ?? []
+
+  const actualizadas = intenciones.map(i =>
+    i.job_id === jobId
+      ? { ...i, status: 'failed' as const, evento_extraido: { error: errorDetail } as unknown as Record<string, unknown> }
+      : i
+  )
+
+  const completadas = actualizadas.filter(i => i.status === 'completed').length
+  const fallidas = actualizadas.filter(i => i.status === 'failed').length
+  const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
+
+  const newStatus = todasCompletas ? 'pending_confirmation' : 'processing_intentions'
+  const newCtx = todasCompletas
+    ? {
+        ...ctx,
+        intenciones_pendientes: actualizadas,
+        completadas,
+        fallidas,
+        extracted_data: actualizadas.filter(i => i.status === 'completed').map(i => i.evento_extraido),
+      }
+    : { ...ctx, intenciones_pendientes: actualizadas, completadas, fallidas }
+
+  const { error: updateError } = await client
+    .from('sesiones_activas')
+    .update({ contexto_parcial: newCtx, status: newStatus })
+    .eq('session_id', sessionId)
+  if (updateError) throw updateError
+
+  return { todas_completas: todasCompletas, intenciones: actualizadas }
+}

@@ -14,12 +14,15 @@ import {
   updateFincaCoordenadas,
   actualizarMensaje,
   getPendingAgricultoresByFinca,
-  approveAgricultor
+  approveAgricultor,
+  guardarLoteIntenciones,
+  type IntencionPendiente,
 } from '../supabaseQueries.js'
 import { transcribirAudio } from '../sttService.js'
 import { handleDocumento, procesarFilasExcelConfirmadas } from '../procesarExcel.js'
 import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES_ADMIN } from '../procesarMensajeEntrante.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
+import { getBoss } from '../../workers/pgBoss.js'
 
 async function resolverMediaImagen(msg: NormalizedMessage, traceId: string): Promise<{ base64: string; mimeType: string } | null> {
   if (msg.mediaBase64) return { base64: msg.mediaBase64, mimeType: msg.mediaMimetype ?? 'image/jpeg' }
@@ -478,7 +481,7 @@ export async function handleEvento(
     return
   }
 
-  // ── Extracción ────────────────────────────────────────────────────────────
+  // ── Extracción — IntentGate + pg-boss por intención ──────────────────────
   const transcripcionCombinada = session.clarification_count > 0 && session.contexto_parcial['original_transcripcion']
     ? `${String(session.contexto_parcial['original_transcripcion'])} ${transcripcion}`
     : transcripcion
@@ -487,13 +490,10 @@ export async function handleEvento(
     ? await _ragRetriever.recuperarContexto(usuario.finca_id, transcripcionCombinada)
     : undefined
 
-  // En modo clarificación los tipos de evento ya fueron determinados en el turno anterior.
-  // Forzarlos evita que el clasificador re-interprete el mensaje combinado y añada eventos
-  // adicionales (p.ej. un insumo por "planteo aplicar X" dentro de una respuesta de plaga).
   const tiposPrevios = session.clarification_count > 0 && session.contexto_parcial['extracted_data']
     ? (session.contexto_parcial['extracted_data'] as EventoCampoExtraido[])
-        .map(e => e.tipo_evento)
-        .filter((t): t is NonNullable<EventoCampoExtraido['tipo_evento']> => !!t && t !== 'sin_evento' && t !== 'observacion')
+      .map(e => e.tipo_evento)
+      .filter((t): t is NonNullable<EventoCampoExtraido['tipo_evento']> => !!t && t !== 'sin_evento' && t !== 'observacion')
     : undefined
 
   const entrada: EntradaEvento = {
@@ -510,41 +510,47 @@ export async function handleEvento(
     ...(session.contexto_parcial['extracted_data'] ? { estado_parcial: session.contexto_parcial['extracted_data'] as EventoCampoExtraido[] } : {}),
   }
 
-  const multiExtraction = await _llm!.extraerEventos(entrada, traceId)
+  const intentResult = await _llm!.clasificarIntenciones(entrada, traceId)
 
-  // Mensajes que no son eventos de campo (saludo, consulta)
-  if (multiExtraction.eventos.length === 1 && multiExtraction.eventos[0]?.tipo_evento === 'sin_evento') {
-    const respuesta = multiExtraction.pregunta_sugerida ?? '¿En qué te puedo ayudar?'
-    await _sender!.enviarTexto(msg.from, respuesta)
+  if (intentResult.es_no_evento) {
+    if (intentResult.tipo_no_evento === 'saludo') {
+      await _sender!.enviarTexto(msg.from, '¡Hola! ¿Qué pasó hoy en la finca?')
+    } else if (intentResult.tipo_no_evento === 'consulta') {
+      await _sender!.enviarTexto(msg.from, 'Claro, ¿qué necesitas? Si tienes algo que reportar de la finca, mándame el mensaje.')
+    } else {
+      const pregunta = intentResult.mensaje_clarificacion ?? '¿Puedes contarme más sobre lo que pasó en la finca?'
+      await _sender!.enviarTexto(msg.from, pregunta)
+    }
     await actualizarMensaje(mensajeId, { status: 'processed' })
     await updateSession(session.session_id, { clarification_count: 0, status: 'completed' })
     return
   }
 
-  // Verificar lote: mencionado pero no coincide, O no mencionado con múltiples lotes activos
+  if (intentResult.intenciones.length === 0) {
+    await _sender!.enviarTexto(msg.from, intentResult.mensaje_clarificacion ?? 'No pude identificar qué evento reportas. ¿Me lo explicas de otra forma?')
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    await updateSession(session.session_id, { clarification_count: 0, status: 'completed' })
+    return
+  }
+
   const TIPOS_REQUIEREN_LOTE = new Set(['labor', 'insumo', 'plaga', 'cosecha', 'calidad'])
-  const eventoConLoteInvalido = multiExtraction.eventos.find(e => e.lote_detectado_raw && !e.lote_id && lotes.length > 0)
-  const eventoSinLoteConAmbiguedad = !eventoConLoteInvalido && lotes.length > 1
-    ? multiExtraction.eventos.find(e => !e.lote_id && !e.lote_detectado_raw && TIPOS_REQUIEREN_LOTE.has(e.tipo_evento))
-    : undefined
-  const eventoLoteProblema = eventoConLoteInvalido ?? eventoSinLoteConAmbiguedad
+  const requiereLote = intentResult.intenciones.some(i => TIPOS_REQUIEREN_LOTE.has(i.tipo_evento))
+  const loteMencionadoInvalido = !lotes.find(l => l.nombre_coloquial.toLowerCase() === transcripcionCombinada.toLowerCase())
+  const tieneMultiplesLotes = lotes.length > 1
+  const necesitaClarificarLote = requiereLote && tieneMultiplesLotes
 
-  if (eventoLoteProblema) {
-    if (session.clarification_count < 2) {
-      const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
-      await updateSession(session.session_id, {
-        clarification_count: session.clarification_count + 1,
-        contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[] },
-      })
-      const preguntaLote = eventoConLoteInvalido
-        ? `No encontré el lote "${eventoConLoteInvalido.lote_detectado_raw}" en tu finca. Tus lotes disponibles son:\n${listaLotes}\n\n¿En cuál fue?`
-        : `¿En qué lote fue? Tus lotes disponibles son:\n${listaLotes}`
-      await _sender!.enviarTexto(msg.from, preguntaLote)
-      await actualizarMensaje(mensajeId, { status: 'processing' })
-      return
-    }
+  if (necesitaClarificarLote && session.clarification_count < 2) {
+    const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
+    await updateSession(session.session_id, {
+      clarification_count: session.clarification_count + 1,
+      contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: intentResult.intenciones.map(i => ({ tipo_evento: i.tipo_evento, confidence_score: i.confidence, lote_id: null, lote_detectado_raw: null, fecha_evento: null, requiere_validacion: false, alerta_urgente: false, campos_extraidos: {}, confidence_por_campo: {}, campos_faltantes: [], requiere_clarificacion: false })) as unknown as Record<string, unknown>[] },
+    })
+    await _sender!.enviarTexto(msg.from, `¿En qué lote fue? Tus lotes disponibles son:\n${listaLotes}`)
+    await actualizarMensaje(mensajeId, { status: 'processing' })
+    return
+  }
 
-    // P2: límite de 2 clarificaciones alcanzado — guardar como nota_libre para revisión del asesor
+  if (necesitaClarificarLote && session.clarification_count >= 2) {
     const eventoId = await saveEvento({
       finca_id: usuario.finca_id!,
       lote_id: null,
@@ -563,39 +569,43 @@ export async function handleEvento(
     return
   }
 
-  // Clarificación pendiente (Regla 2: máx 2 preguntas) usando la pregunta unificada
-  const requiereClarificacion = multiExtraction.eventos.some(e => e.requiere_clarificacion)
-  if (requiereClarificacion && session.clarification_count < 2) {
-    await updateSession(session.session_id, {
-      clarification_count: session.clarification_count + 1,
-      contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[] },
+  // ── IntentGate aprobado → Encolar cada intención a pg-boss ──────────────
+  await _sender!.enviarTexto(msg.from, `Procesando tus ${intentResult.intenciones.length} reporte${intentResult.intenciones.length > 1 ? 's' : ''}... 🔍`)
+
+  const boss = getBoss()
+  const intencionesPendientes: IntencionPendiente[] = []
+
+  for (const intencion of intentResult.intenciones) {
+    const jobId = await boss.send('procesar-intencion', {
+      tipo_evento: intencion.tipo_evento,
+      entrada,
+      traceId,
+      sessionId: session.session_id,
+      mensajeId,
+      usuarioId: usuario.id,
+      fincaId: usuario.finca_id,
+      transaccionOriginal: transcripcion,
+    }, {
+      retryLimit: 3,
+      retryBackoff: true,
+      retryDelay: 5,
     })
-    const pregunta = multiExtraction.pregunta_sugerida ?? '¿Puedes contarme más detalles sobre esto?'
-    await _sender!.enviarTexto(msg.from, pregunta)
-    await actualizarMensaje(mensajeId, { status: 'processing' })
-    return
+
+    intencionesPendientes.push({
+      tipo_evento: intencion.tipo_evento,
+      job_id: jobId ?? '',
+      status: 'pending',
+      evento_extraido: null,
+      evento_id: null,
+    })
+
+    langfuse.trace({ id: traceId }).event({
+      name: 'intencion_encolada',
+      input: { tipo_evento: intencion.tipo_evento, job_id: jobId },
+    })
   }
 
-  // ── Mostrar resumen y esperar confirmación antes de guardar ───────────────
-  await updateSession(session.session_id, {
-    status: 'pending_confirmation',
-    contexto_parcial: {
-      extracted_data: multiExtraction.eventos as unknown as Record<string, unknown>[],
-      transcripcion_original: transcripcion,
-    },
-  })
-
-  // Generar resumen unificado — un solo mensaje, un solo "Responde sí"
-  const bloques = multiExtraction.eventos.map(e => buildResumenParaConfirmar(e, lotes))
-  let mensajeResumen: string
-  if (bloques.length === 1) {
-    mensajeResumen = `Esto es lo que entendí:\n\n${bloques[0]}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
-  } else {
-    const numerados = bloques.map((b, i) => `${i + 1}. ${b}`).join('\n\n')
-    mensajeResumen = `Esto es lo que entendí de tus ${bloques.length} reportes:\n\n${numerados}\n\nResponde *sí* para guardar todo, o corrígeme si algo está mal.`
-  }
-
-  await _sender!.enviarTexto(msg.from, mensajeResumen)
+  await guardarLoteIntenciones(session.session_id, intencionesPendientes, transcripcion)
   await actualizarMensaje(mensajeId, { status: 'processing' })
 }
 

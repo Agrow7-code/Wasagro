@@ -1,6 +1,6 @@
 # SP-04: Onboarding conversacional
 # Archivo: prompts/sp-04-onboarding.md
-# Modelo: gpt-4o-mini
+# Router LLM: Tier fast (Gemini Flash / Groq Llama) - ACTUALIZADO: D3 Router Multi-Modelo
 # Variables de inyección: {{PASO_ACTUAL}}, {{DATOS_RECOPILADOS}}
 # Tokens estimados: ~500
 

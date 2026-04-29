@@ -14,7 +14,7 @@ export class GeminiAdapter implements ILLMAdapter {
   readonly #model: string
 
   constructor(config: GeminiAdapterConfig) {
-    this.#model = config.model ?? process.env['GEMINI_MODEL'] ?? 'gemini-2.0-flash'
+    this.#model = config.model ?? process.env['GEMINI_MODEL'] ?? 'gemini-2.5-flash' // ACTUALIZADO: Modelo por defecto actualizado a gemini-2.5-flash según D3
     this.#sdk = config.sdkClient ?? new GoogleGenerativeAI(config.apiKey)
   }
 

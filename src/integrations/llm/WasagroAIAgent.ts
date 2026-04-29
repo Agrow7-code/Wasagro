@@ -11,6 +11,7 @@ import {
   type EntradaEvento,
   type ExtraccionMultiEvento,
   type EventoCampoExtraido,
+  type ResultadoIntentGate,
 } from '../../types/dominio/EventoCampo.js'
 import {
   RespuestaOnboardingSchema,
@@ -26,6 +27,7 @@ import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../ty
 import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 import { SupabaseTools } from '../../agents/mcp/SupabaseTools.js'
+import { IntentGate } from './IntentGate.js'
 
 const EXTRACTOR_POR_TIPO: Record<string, string> = {
   insumo: 'sp-01a-extractor-insumo.md',
@@ -54,18 +56,23 @@ type ResultadoClasificacion = z.infer<typeof ResultadoClasificacionSchema>
 export class WasagroAIAgent implements IWasagroLLM {
   readonly #adapter: ILLMAdapter
   readonly #lf: Langfuse
+  readonly #intentGate: IntentGate
 
   constructor(adapter: ILLMAdapter, lf?: Langfuse) {
     this.#adapter = adapter
     this.#lf = lf ?? langfuseDefault
+    this.#intentGate = new IntentGate(adapter, lf)
+  }
+
+  async clasificarIntenciones(input: EntradaEvento, traceId: string): Promise<ResultadoIntentGate> {
+    return this.#intentGate.clasificar(input, traceId)
   }
 
   async extraerEventos(input: EntradaEvento, traceId: string): Promise<ExtraccionMultiEvento> {
     const trace = this.#lf.trace({ id: traceId })
 
-    // Paso 1 — clasificar (o usar tipos forzados si el orquestador ya lo resolvió)
     let clasificacion: ResultadoClasificacion;
-    
+
     if (input.tipos_forzados && input.tipos_forzados.length > 0) {
       clasificacion = { tipos_evento: input.tipos_forzados as any, confidence: 1, requiere_imagen_para_confirmar: false, motivo_ambiguo: null, mensaje_clarificacion: null }
     } else if (input.tipo_forzado) {
@@ -74,7 +81,6 @@ export class WasagroAIAgent implements IWasagroLLM {
       clasificacion = await this.#clasificar(input, traceId)
     }
 
-    // Paso 2 — manejar no-eventos puros (si solo es saludo o consulta)
     if (clasificacion.tipos_evento.length === 1) {
       const tipoUnico = clasificacion.tipos_evento[0];
       if (tipoUnico === 'saludo') {
@@ -106,34 +112,23 @@ export class WasagroAIAgent implements IWasagroLLM {
       }
     }
 
-    // Paso 3 — Filtrar tipos válidos para extracción y ejecutar agentes en paralelo
     const tiposValidos = clasificacion.tipos_evento.filter(t => !['saludo', 'consulta', 'ambiguo'].includes(t));
-    
+
     if (tiposValidos.length === 0) {
       return sinEvento('No pude identificar qué evento reportas. ¿Me lo explicas de otra forma?');
     }
 
-    const promesasExtraccion = tiposValidos.map(tipo => {
-      // Creamos una pseudo-clasificación para cada agente especialista
-      const pseudoClasif: ResultadoClasificacion = {
-        ...clasificacion,
-        tipos_evento: [tipo] // el agente especialista solo se enfoca en su tipo
-      };
-      return this.#extraerEspecializado(pseudoClasif, tipo, input, traceId);
-    });
-
-    const eventosExtraidos = await Promise.all(promesasExtraccion);
-
-    // Determinar si hay alguna pregunta sugerida (tomamos la primera válida para no abrumar al usuario)
-    const eventoConPregunta = eventosExtraidos.find(e => e.requiere_clarificacion && e.pregunta_sugerida);
+  const tipoElegido = tiposValidos[0]!
+  const eventoExtraido = await this.#extraerEspecializado(
+    { ...clasificacion, tipos_evento: [tipoElegido] } as ResultadoClasificacion,
+    tipoElegido,
+      input,
+      traceId,
+    );
 
     return {
-      eventos: eventosExtraidos.map(e => {
-        // Limpiamos la pregunta sugerida individual para cumplir con ExtraccionMultiEventoSchema
-        const { pregunta_sugerida, ...resto } = e;
-        return resto as any;
-      }),
-      pregunta_sugerida: eventoConPregunta?.pregunta_sugerida
+      eventos: [eventoExtraido],
+      pregunta_sugerida: eventoExtraido.requiere_clarificacion ? (eventoExtraido as any).pregunta_sugerida : undefined,
     }
   }
 
