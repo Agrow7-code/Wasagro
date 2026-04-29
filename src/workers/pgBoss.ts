@@ -130,7 +130,7 @@ async function procesarIntencionWorker(
     }
 
     const tipo_evento = (ext.requiere_clarificacion && maxClarificationsReached) ? ext.tipo_evento : ext.tipo_evento
-    const evStatus = (ext.confidence_score < 0.5 || ext.requiere_clarificacion) ? 'requires_review' : 'complete'
+    const evStatus = (ext.confidence_score < 0.5 || (ext.requiere_clarificacion && maxClarificationsReached)) ? 'requires_review' : 'complete'
 
     if (ext.alerta_urgente) {
       langfuse.trace({ id: data.traceId }).event({
