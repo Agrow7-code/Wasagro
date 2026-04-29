@@ -534,42 +534,6 @@ export async function handleEvento(
     return
   }
 
-  const TIPOS_REQUIEREN_LOTE = new Set(['labor', 'insumo', 'plaga', 'cosecha', 'calidad'])
-  const requiereLote = intentResult.intenciones.some(i => TIPOS_REQUIEREN_LOTE.has(i.tipo_evento))
-  const loteMencionadoInvalido = !lotes.find(l => l.nombre_coloquial.toLowerCase() === transcripcionCombinada.toLowerCase())
-  const tieneMultiplesLotes = lotes.length > 1
-  const necesitaClarificarLote = requiereLote && tieneMultiplesLotes
-
-  if (necesitaClarificarLote && session.clarification_count < 2) {
-    const listaLotes = lotes.map(l => `• ${l.nombre_coloquial}`).join('\n')
-    await updateSession(session.session_id, {
-      clarification_count: session.clarification_count + 1,
-      contexto_parcial: { original_transcripcion: transcripcionCombinada, extracted_data: intentResult.intenciones.map(i => ({ tipo_evento: i.tipo_evento, confidence_score: i.confidence, lote_id: null, lote_detectado_raw: null, fecha_evento: null, requiere_validacion: false, alerta_urgente: false, campos_extraidos: {}, confidence_por_campo: {}, campos_faltantes: [], requiere_clarificacion: false })) as unknown as Record<string, unknown>[] },
-    })
-    await _sender!.enviarTexto(msg.from, `¿En qué lote fue? Tus lotes disponibles son:\n${listaLotes}`)
-    await actualizarMensaje(mensajeId, { status: 'processing' })
-    return
-  }
-
-  if (necesitaClarificarLote && session.clarification_count >= 2) {
-    const eventoId = await saveEvento({
-      finca_id: usuario.finca_id!,
-      lote_id: null,
-      tipo_evento: 'nota_libre',
-      status: 'requires_review',
-      datos_evento: { texto_libre: transcripcionCombinada, motivo: 'lote_no_resuelto_tras_2_intentos' },
-      descripcion_raw: transcripcionCombinada,
-      confidence_score: 0,
-      requiere_validacion: true,
-      created_by: usuario.id,
-      mensaje_id: mensajeId,
-    })
-    await updateSession(session.session_id, { status: 'completed', clarification_count: 0, contexto_parcial: {} })
-    await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
-    await _sender!.enviarTexto(msg.from, 'Guardé tu reporte para que tu asesor lo revise. ⚠️')
-    return
-  }
-
   // ── IntentGate aprobado → Encolar cada intención a pg-boss ──────────────
   await _sender!.enviarTexto(msg.from, `Procesando tus ${intentResult.intenciones.length} reporte${intentResult.intenciones.length > 1 ? 's' : ''}... 🔍`)
 
