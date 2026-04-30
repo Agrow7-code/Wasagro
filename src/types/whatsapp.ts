@@ -23,6 +23,13 @@ export const WhatsAppMessageSchema = z.object({
           text: z.object({ body: z.string() }).optional(),
           audio: z.object({ id: z.string(), mime_type: z.string() }).optional(),
           image: z.object({ id: z.string(), mime_type: z.string(), caption: z.string().optional() }).optional(),
+          referral: z.object({
+            source_url: z.string().optional(),
+            source_type: z.string().optional(),
+            source_id: z.string().optional(),
+            headline: z.string().optional(),
+            body: z.string().optional(),
+          }).optional(),
         })).optional(),
       }),
       field: z.string(),

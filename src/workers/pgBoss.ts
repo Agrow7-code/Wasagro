@@ -307,6 +307,7 @@ export async function initPgBoss(): Promise<PgBoss> {
   await boss.createQueue('procesar-mensaje')
   await boss.createQueue('enviar-otp-whatsapp')
   await boss.createQueue('procesar-intencion')
+  await boss.createQueue('sdr-chaser')
 
   await boss.work('procesar-mensaje', async (jobs) => {
     for (const job of jobs) {
@@ -322,6 +323,18 @@ export async function initPgBoss(): Promise<PgBoss> {
           level: 'ERROR',
           output: { error: String(err), jobId: job.id },
         })
+        throw err
+      }
+    }
+  })
+
+  await boss.work('sdr-chaser', async (jobs) => {
+    const { sdrChaserHandler } = await import('./sdrChaserWorker.js')
+    for (const job of jobs) {
+      try {
+        await sdrChaserHandler(job as any)
+      } catch (err) {
+        console.error(`[pg-boss] sdr-chaser job ${job.id} falló:`, err)
         throw err
       }
     }

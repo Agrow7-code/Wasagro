@@ -11,20 +11,8 @@ import {
   getSDRProspectosPendingApproval,
   actualizarMensaje,
 } from '../pipeline/supabaseQueries.js'
-import type { EntradaSDR, PreguntaRealizada, ScoreDimensions } from '../types/dominio/SDRTypes.js'
 
-const MAX_SDR_TURNS = 10
-
-const SCORE_MAX: Record<keyof ScoreDimensions, number> = {
-  eudr_urgency: 25,
-  tamano_cartera: 20,
-  calidad_dato: 20,
-  champion: 15,
-  timeline_decision: 10,
-  presupuesto: 10,
-}
-
-const SCORE_DIMS = ['eudr_urgency', 'tamano_cartera', 'calidad_dato', 'champion', 'timeline_decision', 'presupuesto'] as const
+const MAX_SDR_TURNS = 4 // Reducido para cerrar más rápido
 
 const OBJECTION_PATTERNS: Array<[RegExp, string]> = [
   [/no\s+ten(go|emos)\s+presupuesto|no\s+hay\s+plata|muy\s+caro|costoso/i, 'sin_presupuesto'],
@@ -46,7 +34,12 @@ export function detectarObjecion(texto: string): string | null {
   return null
 }
 
-// REQ-hand-001: text-based handoff triggers (score_threshold is handled separately)
+function calcularPrecio(segmento_icp: string, fincas: number): string {
+  if (segmento_icp === 'exportadora') return 'Tenemos planes personalizados para operaciones grandes. Nos gustaría hacer una videollamada para entender tu volumen y armarte una propuesta a medida.'
+  if (segmento_icp === 'ong') return 'Manejamos precios especiales con descuento para organizaciones sin fines de lucro. Hablemos unos minutos para cotizarte el alcance exacto.'
+  return 'Es un costo variable según el tamaño de tu finca y las hectáreas activas. Lo mejor es agendar una breve llamada para darte el precio exacto.'
+}
+
 export function detectarHandoffTrigger(texto: string, turno: number): 'human_request' | 'price_readiness' | null {
   if (/hablar\s+con\s+alguien|hablar\s+con\s+ustedes|hablar\s+con\s+el\s+equipo|persona\s+real|hablar\s+directamente/i.test(texto)) {
     return 'human_request'
@@ -74,216 +67,200 @@ export async function handleSDRSession(
 
     if (!prospecto) {
       const narrativa: 'A' | 'B' = Math.random() < 0.5 ? 'A' : 'B'
-      prospecto = await createSDRProspecto({ phone: msg.from, narrativa_asignada: narrativa }, client)
+      
+      let sourceContext = msg.source_context
+      if (!sourceContext && msg.tipo === 'texto') {
+        const txtNormalizado = texto.toLowerCase().trim()
+        if (txtNormalizado.includes('quiero empezar con wasagro') || 
+            txtNormalizado.includes('no tengo acceso a wasagro') || 
+            txtNormalizado === 'hola wasagro') {
+          sourceContext = 'Tráfico Orgánico - Landing Page'
+        }
+      }
+
+      prospecto = await createSDRProspecto({ 
+        phone: msg.from, 
+        narrativa_asignada: narrativa,
+        source_context: sourceContext ?? null
+      }, client)
       isNuevoProspecto = true
-      trace.event({ name: 'sdr_prospecto_created', input: { phone: msg.from, narrativa } })
+      trace.event({ name: 'sdr_prospecto_created', input: { phone: msg.from, narrativa, source_context: sourceContext } })
     }
 
-    // REQ-narr-005: sdr_session_started fires on new prospect
     if (isNuevoProspecto) {
       trace.event({
         name: 'sdr_session_started',
         input: {
           narrativa: prospecto['narrativa_asignada'],
           segmento_icp: prospecto['segmento_icp'],
+          source_context: prospecto['source_context'],
         },
       })
     }
 
     const objection_detected = detectarObjecion(texto)
+    const nuevoTurno = (prospecto['turns_total'] as number) + 1
+    const preHandoffTrigger = detectarHandoffTrigger(texto, nuevoTurno)
 
-    const scores: ScoreDimensions = {
-      eudr_urgency: prospecto['score_eudr_urgency'] as number,
-      tamano_cartera: prospecto['score_tamano_cartera'] as number,
-      calidad_dato: prospecto['score_calidad_dato'] as number,
-      champion: prospecto['score_champion'] as number,
-      timeline_decision: prospecto['score_timeline_decision'] as number,
-      presupuesto: prospecto['score_presupuesto'] as number,
-    }
+    // Contexto para el LLM Extractor
+    const contextoActual = `
+Fincas/Hectáreas: ${prospecto['fincas_en_cartera'] ?? 'Desconocido'}
+Cultivo Principal: ${prospecto['cultivo_principal'] ?? 'Desconocido'}
+País: ${prospecto['pais'] ?? 'Desconocido'}
+Sistema Actual: ${prospecto['sistema_actual'] ?? 'Desconocido'}
+    `.trim()
 
-    const preguntasRealizadas = (prospecto['preguntas_realizadas'] as PreguntaRealizada[]) ?? []
+    // 1. LLM extrae datos deterministas
+    const extraccion = await llm.extraerDatosSDR(texto, contextoActual, traceId)
 
-    const entrada: EntradaSDR = {
-      mensaje: texto,
-      prospecto: {
-        nombre: prospecto['nombre'] as string | null,
-        empresa: prospecto['empresa'] as string | null,
-        segmento_icp: prospecto['segmento_icp'] as string,
-        narrativa: prospecto['narrativa_asignada'] as 'A' | 'B',
-        score_total: prospecto['score_total'] as number,
-        scores_por_dimension: scores,
-        preguntas_realizadas: preguntasRealizadas,
-        objeciones_manejadas: (prospecto['objeciones_manejadas'] as string[]) ?? [],
-        punto_de_dolor_principal: prospecto['punto_de_dolor_principal'] as string | null,
-      },
-      narrativa: prospecto['narrativa_asignada'] as 'A' | 'B',
-      preguntas_realizadas: preguntasRealizadas,
-      score_actual: prospecto['score_total'] as number,
-      turno: (prospecto['turns_total'] as number) + 1,
-      objection_detected,
-      segmento_icp: prospecto['segmento_icp'] as string,
-    }
+    // 2. Actualizar estado del prospecto
+    const updateData: Record<string, unknown> = {}
+    if (extraccion.fincas_en_cartera != null && prospecto['fincas_en_cartera'] == null) updateData.fincas_en_cartera = extraccion.fincas_en_cartera
+    if (extraccion.cultivo_principal != null && prospecto['cultivo_principal'] == null) updateData.cultivo_principal = extraccion.cultivo_principal
+    if (extraccion.pais != null && prospecto['pais'] == null) updateData.pais = extraccion.pais
+    if (extraccion.sistema_actual != null && prospecto['sistema_actual'] == null) updateData.sistema_actual = extraccion.sistema_actual
 
-    // REQ-hand-001: detect text-based handoff trigger before calling LLM
-    const preHandoffTrigger = detectarHandoffTrigger(texto, entrada.turno)
-
-    const rawResultado = await llm.atenderSDR(entrada, traceId)
-    // Shallow copy so we never mutate the LLM response object (critical for test isolation)
-    const resultado = {
-      ...rawResultado,
-      score_delta: { ...rawResultado.score_delta },
-    }
-
-    // REQ-hand-001: force propose_pilot when text-based trigger detected
-    if (preHandoffTrigger && resultado.action !== 'propose_pilot' && resultado.action !== 'graceful_exit') {
-      resultado.action = 'propose_pilot'
-      resultado.requires_founder_approval = true
-      const brief = { ...((resultado.deal_brief as Record<string, unknown>) ?? {}), handoff_trigger: preHandoffTrigger }
-      resultado.deal_brief = brief
-    }
-
-    // Regla 2: hard cap — never loop past MAX_SDR_TURNS turns
-    if (resultado.action === 'continue_discovery' && entrada.turno >= MAX_SDR_TURNS) {
-      resultado.action = 'graceful_exit'
-      resultado.respuesta = 'Gracias por tu tiempo. Si en algún momento quieres retomar la conversación, aquí estaremos. ✅'
-    }
-
-    // REQ-qual-009: evidence-gated score validation — reject non-zero deltas without evidence_quote
-    const invalidEvidence = resultado.preguntas_respondidas.some(p => p.score_delta !== 0 && p.evidence_quote === null)
-    if (invalidEvidence) {
-      trace.event({
-        name: 'sdr_evidence_validation_error',
-        input: { preguntas: resultado.preguntas_respondidas.filter(p => p.score_delta !== 0 && p.evidence_quote === null) },
-      })
-      for (const dim of SCORE_DIMS) {
-        resultado.score_delta[dim] = 0
-      }
-    }
-
-    const nuevosDimensions: Record<string, number> = {}
-    for (const dim of SCORE_DIMS) {
-      const current = scores[dim]
-      const d = (resultado.score_delta[dim] ?? 0)
-      nuevosDimensions[`score_${dim}`] = Math.min(SCORE_MAX[dim], Math.max(current, current + d))
-    }
-
-    const preguntasExistentes = new Set(preguntasRealizadas.map(p => p.question_id))
-    const nuevasPreguntas = resultado.preguntas_respondidas.filter(p => !preguntasExistentes.has(p.question_id))
-    const preguntasActualizadas = [
-      ...preguntasRealizadas,
-      ...nuevasPreguntas.map(p => ({
-        question_id: p.question_id,
-        question_text: p.question_id,
-        answer_text: p.answer_text,
-        dimension: p.dimension,
-        score_delta: p.score_delta,
-        evidence_quote: p.evidence_quote,
-        turn: entrada.turno,
-        answered_at: new Date().toISOString(),
-      })),
-    ]
+    const combinedProspecto = { ...prospecto, ...updateData }
 
     const objecionesActuales = (prospecto['objeciones_manejadas'] as string[]) ?? []
     const nuevasObjeciones = objection_detected && !objecionesActuales.includes(objection_detected)
       ? [...objecionesActuales, objection_detected]
       : objecionesActuales
+    if (nuevasObjeciones.length > objecionesActuales.length) updateData.objeciones_manejadas = nuevasObjeciones
 
-    const nuevoTurno = (prospecto['turns_total'] as number) + 1
     let nuevoStatus = prospecto['status'] === 'new' ? 'en_discovery' : (prospecto['status'] as string)
-    let dealBriefParaGuardar: unknown = prospecto['deal_brief']
-    let founderNotifiedAt: string | null = prospecto['founder_notified_at'] as string | null
+    updateData.turns_total = nuevoTurno
+    
+    // 3. Enrutamiento Lógico (TypeScript)
+    let respuesta = ''
+    let action = 'continue_discovery'
+    let requires_founder_approval = false
 
-    if (resultado.action === 'graceful_exit') {
-      nuevoStatus = 'unqualified'
-      await sender.enviarTexto(msg.from, resultado.respuesta)
-    } else if (resultado.action === 'propose_pilot' || resultado.requires_founder_approval) {
-      nuevoStatus = 'piloto_propuesto'
-      dealBriefParaGuardar = {
-        ...((resultado.deal_brief as object) ?? {}),
-        draft_message: resultado.respuesta,
+    if (extraccion.es_spam) {
+      action = 'graceful_exit'
+      respuesta = 'Soy el asistente de Wasagro, un sistema para operaciones agrícolas. Creo que te has equivocado de número o consulta. ¡Que tengas un buen día! 👋'
+    } else if (extraccion.pregunta_precio || preHandoffTrigger === 'price_readiness') {
+      action = 'request_pricing'
+      respuesta = calcularPrecio(combinedProspecto['segmento_icp'] as string, (combinedProspecto['fincas_en_cartera'] as number) || 0)
+      trace.event({ name: 'sdr_price_requested', input: { segmento_icp: combinedProspecto['segmento_icp'], respuesta } })
+    } else if (preHandoffTrigger === 'human_request') {
+      action = 'propose_pilot'
+      requires_founder_approval = true
+      respuesta = 'Con gusto. Agendemos una breve videollamada con nuestro equipo para que te explique a detalle y resolvamos tus dudas.'
+    } else {
+      // Contar cuántos datos tenemos
+      let datosConocidos = 0
+      if (combinedProspecto['fincas_en_cartera'] != null) datosConocidos++
+      if (combinedProspecto['cultivo_principal'] != null) datosConocidos++
+      if (combinedProspecto['pais'] != null) datosConocidos++
+      if (combinedProspecto['sistema_actual'] != null) datosConocidos++
+
+      if (datosConocidos >= 3 || nuevoTurno >= MAX_SDR_TURNS) {
+        action = 'propose_pilot'
+        requires_founder_approval = true
+        respuesta = 'Me parece que Wasagro es ideal para ti. Para mostrarte cómo funciona y no darte más vueltas por aquí, agendemos una breve videollamada de 15 minutos. 🚜'
+      } else {
+        // Seleccionar pregunta faltante
+        if (combinedProspecto['fincas_en_cartera'] == null) {
+          respuesta = '¡Genial! Para entender mejor tu operación, ¿cuántas hectáreas o fincas administras actualmente?'
+        } else if (combinedProspecto['cultivo_principal'] == null) {
+          respuesta = 'Perfecto. ¿Qué tipo de cultivo principal tienen en la finca?'
+        } else if (combinedProspecto['pais'] == null) {
+          respuesta = 'Entendido. ¿En qué país está ubicada tu operación agrícola?'
+        } else if (combinedProspecto['sistema_actual'] == null) {
+          respuesta = 'Excelente. ¿Cómo registran actualmente las labores o aplicaciones de insumos? ¿Usan papel, Excel u otra herramienta?'
+        } else {
+          action = 'propose_pilot'
+          requires_founder_approval = true
+          respuesta = 'Excelente. Agendemos una breve videollamada para mostrarte cómo Wasagro te ayuda a registrar todo desde WhatsApp.'
+        }
       }
-      founderNotifiedAt = new Date().toISOString()
+    }
 
-      // Send demo invitation directly to prospect — no founder gate (Option A)
-      await sender.enviarTexto(msg.from, resultado.respuesta)
+    // 4. Ejecución de Acción
+    if (action === 'graceful_exit') {
+      nuevoStatus = 'unqualified'
+      updateData.status = nuevoStatus
+      await sender.enviarTexto(msg.from, respuesta)
+      trace.event({ name: 'sdr_unqualified', input: { exit_reason: 'spam_detected' } })
+    } else if (action === 'propose_pilot' || requires_founder_approval) {
+      nuevoStatus = 'piloto_propuesto'
+      updateData.status = nuevoStatus
+      updateData.founder_notified_at = new Date().toISOString()
+      
+      const brief = {
+        draft_message: respuesta,
+        fincas_en_cartera: combinedProspecto['fincas_en_cartera'],
+        cultivo_principal: combinedProspecto['cultivo_principal'],
+        pais: combinedProspecto['pais'],
+        sistema_actual: combinedProspecto['sistema_actual'],
+        handoff_trigger: preHandoffTrigger ?? 'score_threshold',
+        source_context: combinedProspecto['source_context'],
+        segmento_icp: combinedProspecto['segmento_icp']
+      }
+      updateData.deal_brief = brief
+
+      await sender.enviarTexto(msg.from, respuesta)
       const bookingUrl = process.env['DEMO_BOOKING_URL']
       const followUp = bookingUrl
-        ? `📅 Puedes agendar aquí: ${bookingUrl}`
-        : '¿Cuándo tienes 20 minutos disponibles para una llamada rápida? Dime el día y la hora que mejor te quede. 📅'
+        ? `📅 Puedes elegir el horario aquí: ${bookingUrl}`
+        : '¿Qué día y hora te queda mejor la próxima semana? 📅'
       await sender.enviarTexto(msg.from, followUp)
 
-      // Notify founder informatively only — no approval gate
-      const founderPhone = process.env['FOUNDER_PHONE']
-      if (founderPhone) {
-        const brief = resultado.deal_brief as Record<string, unknown> | null
-        await sender.enviarTexto(founderPhone, buildFounderNotification(
-          prospecto,
-          resultado.respuesta,
-          brief,
-        ))
+      const founderEmail = process.env['FOUNDER_EMAIL']
+      if (founderEmail) {
+        try {
+          const { Resend } = await import('resend')
+          const resendClient = new Resend(process.env['RESEND_API_KEY'])
+          await resendClient.emails.send({
+            from: 'SDR Agent <sdr@wasagro.com>',
+            to: founderEmail,
+            subject: `⚡ LEAD CALIFICADO: ${combinedProspecto['segmento_icp']} - ${combinedProspecto['pais'] ?? 'País Desconocido'}`,
+            text: buildFounderNotification(combinedProspecto, respuesta, brief),
+          })
+          console.log(`[SDR] Deal Brief enviado por correo a ${founderEmail}`)
+        } catch (emailErr) {
+          console.error('[SDR] Error enviando Handoff por email:', emailErr)
+        }
       }
-
-      trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'], phone: prospecto['phone'] } })
+      trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'] } })
+      trace.event({ name: 'sdr_qualified', input: { turns_to_qualify: nuevoTurno } })
     } else {
-      await sender.enviarTexto(msg.from, resultado.respuesta)
+      updateData.status = nuevoStatus
+      await sender.enviarTexto(msg.from, respuesta)
     }
 
-    const scoreAfter = SCORE_DIMS.reduce((sum, dim) => sum + (nuevosDimensions[`score_${dim}`] ?? 0), 0)
+    // 5. Persistencia
+    await updateSDRProspecto(prospecto['id'] as string, updateData, client)
 
-    // REQ-narr-005: fire A/B tracking events
-    if (resultado.action === 'propose_pilot' || resultado.requires_founder_approval) {
-      trace.event({
-        name: 'sdr_qualified',
-        input: {
-          narrativa: prospecto['narrativa_asignada'],
-          segmento_icp: prospecto['segmento_icp'],
-          score_total: scoreAfter,
-          turns_to_qualify: nuevoTurno,
-        },
-      })
-    } else if (resultado.action === 'graceful_exit') {
-      trace.event({
-        name: 'sdr_unqualified',
-        input: {
-          narrativa: prospecto['narrativa_asignada'],
-          segmento_icp: prospecto['segmento_icp'],
-          score_total: scoreAfter,
-          exit_reason: entrada.turno >= MAX_SDR_TURNS ? 'max_turns' : 'no_qualify',
-        },
-      })
-    }
-
-    // REQ-disc-003: persist segmento_icp if LLM updated it
-    const segmentoUpdate = resultado.segmento_icp ? { segmento_icp: resultado.segmento_icp } : {}
-
-    await updateSDRProspecto(prospecto['id'] as string, {
-      ...nuevosDimensions,
-      ...segmentoUpdate,
-      preguntas_realizadas: preguntasActualizadas,
-      objeciones_manejadas: nuevasObjeciones,
-      status: nuevoStatus,
-      turns_total: nuevoTurno,
-      deal_brief: dealBriefParaGuardar,
-      founder_notified_at: founderNotifiedAt,
+    await saveSDRInteraccion({
+      prospecto_id: prospecto['id'],
+      phone: msg.from,
+      turno: nuevoTurno,
+      tipo: 'inbound',
+      contenido: texto,
+      score_before: 0,
+      score_after: 0,
+      score_delta: { eudr_urgency: 0, tamano_cartera: 0, calidad_dato: 0, champion: 0, timeline_decision: 0, presupuesto: 0 },
+      objection_detected,
+      action_taken: action,
+      narrativa: prospecto['narrativa_asignada'],
+      segmento_icp: prospecto['segmento_icp'],
+      langfuse_trace_id: traceId,
     }, client)
 
-    // REQ-qual-009: skip interaction log when evidence validation failed
-    if (!invalidEvidence) {
-      await saveSDRInteraccion({
-        prospecto_id: prospecto['id'],
-        phone: msg.from,
-        turno: nuevoTurno,
-        tipo: 'inbound',
-        contenido: texto,
-        score_before: prospecto['score_total'],
-        score_after: scoreAfter,
-        score_delta: resultado.score_delta,
-        objection_detected,
-        action_taken: resultado.action,
-        narrativa: prospecto['narrativa_asignada'],
-        segmento_icp: prospecto['segmento_icp'],
-        langfuse_trace_id: traceId,
-      }, client)
+    // Task 11: Enqueue sdr_chaser job (20h delay)
+    try {
+      const { getBoss, isPgBossReady } = await import('../workers/pgBoss.js')
+      if (isPgBossReady()) {
+        const boss = getBoss()
+        await boss.send('sdr-chaser', {
+          prospecto_id: prospecto['id'],
+          expected_turn: nuevoTurno
+        }, { startAfter: 20 * 3600 })
+      }
+    } catch (bossErr) {
+      console.warn('[SDR] No se pudo encolar chaser:', bossErr)
     }
 
     await actualizarMensaje(mensajeId, { status: 'processed' })
@@ -306,7 +283,6 @@ export async function handleFounderApproval(
     const pendientes = await getSDRProspectosPendingApproval(client)
     if (pendientes.length === 0) return false
 
-    // pendientes.length > 0 is guaranteed above — non-null assertion is safe
     const prospecto = pendientes[0]!
     const trace = langfuse.trace({ id: traceId })
     const texto = (msg.texto ?? '').trim()
@@ -339,7 +315,6 @@ export async function handleFounderApproval(
     if (mensajeAlProspecto) {
       await sender.enviarTexto(prospecto['phone'] as string, mensajeAlProspecto)
 
-      // REQ-hand-006: send booking link or availability question after pilot proposal
       if (isSi || !isNo) {
         const bookingUrl = process.env['DEMO_BOOKING_URL']
         const followUp = bookingUrl
@@ -348,7 +323,6 @@ export async function handleFounderApproval(
         await sender.enviarTexto(prospecto['phone'] as string, followUp)
       }
 
-      // REQ-narr-005: sdr_pilot_proposed fires when draft is sent to prospect
       trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'], narrativa: prospecto['narrativa_asignada'] } })
     }
 
@@ -393,7 +367,6 @@ export function detectarConfirmacionReunion(texto: string): boolean {
   return MEETING_CONFIRMATION_PATTERNS.some(p => p.test(texto))
 }
 
-// REQ-hand-006: handles prospect messages when status = 'piloto_propuesto'
 export async function handleMeetingConfirmation(
   msg: NormalizedMessage,
   mensajeId: string,
@@ -452,48 +425,40 @@ export async function handleMeetingConfirmation(
   }
 }
 
-// REQ-hand-003: full founder notification format
 function buildFounderNotification(
   prospecto: Record<string, unknown>,
   draftMessage: string,
   brief: Record<string, unknown> | null,
 ): string {
-  const scoreTotal = (brief?.['qualification_score'] as number | undefined) ?? (prospecto['score_total'] as number)
   const segmento = String(brief?.['segmento_icp'] ?? prospecto['segmento_icp'] ?? 'desconocido')
-  const narrativa = String(brief?.['narrativa_asignada'] ?? prospecto['narrativa_asignada'] ?? '?')
-  const nombre = String(brief?.['nombre_contacto'] ?? prospecto['nombre'] ?? prospecto['phone'])
-  const cargo = brief?.['cargo'] ? ` — ${String(brief['cargo'])}` : ''
-  const empresa = brief?.['empresa'] ? String(brief['empresa']) : null
+  const narrativa = String(prospecto['narrativa_asignada'] ?? '?')
+  const nombre = String(prospecto['nombre'] ?? prospecto['phone'])
+  const empresa = prospecto['empresa'] ? String(prospecto['empresa']) : null
   const pais = brief?.['pais'] ? String(brief['pais']) : null
   const cultivo = brief?.['cultivo_principal'] ? String(brief['cultivo_principal']) : null
   const fincas = brief?.['fincas_en_cartera'] != null ? String(brief['fincas_en_cartera']) : '?'
   const sistemaActual = brief?.['sistema_actual'] ? String(brief['sistema_actual']) : 'desconocido'
-  const eudrNivel = brief?.['eudr_urgency_nivel'] ? String(brief['eudr_urgency_nivel']) : 'desconocida'
-  const scoresDim = brief?.['scores_por_dimension'] as Record<string, number> | null
-  const presupuestoScore = scoresDim?.['presupuesto'] ?? (prospecto['score_presupuesto'] as number ?? 0)
-  const dolor = brief?.['punto_de_dolor_principal'] ? String(brief['punto_de_dolor_principal']) : null
-  const objeciones = (brief?.['objeciones_manejadas'] as string[] | null) ?? []
+  const objeciones = (prospecto['objeciones_manejadas'] as string[] | null) ?? []
   const objecionesStr = objeciones.length > 0 ? objeciones.join(', ') : 'ninguna'
 
   const lines = [
     '⚡ LEAD CALIFICADO — Wasagro SDR',
     '',
-    `Score: ${scoreTotal}/100 | ${segmento} | ${narrativa}`,
+    `${segmento} | ${narrativa}`,
     '',
-    `👤 ${nombre}${cargo}`,
+    `👤 ${nombre}`,
   ]
 
   if (empresa) lines.push(`🏢 ${empresa}`)
 
+  const sourceCtx = (brief?.['source_context'] as string | undefined) ?? (prospecto['source_context'] as string | null)
+  if (sourceCtx) lines.push(`🔗 Origen: ${sourceCtx}`)
+
   const ubicacion = [pais, cultivo].filter(Boolean).join(' | ')
   if (ubicacion) lines.push(`📍 ${ubicacion}`)
 
-  lines.push(`🌾 ${fincas} fincas`)
+  lines.push(`🌾 ${fincas} fincas/hectáreas`)
   lines.push(`📋 Sistema actual: ${sistemaActual}`)
-  lines.push(`🔥 EUDR: ${eudrNivel}`)
-  lines.push(`💰 Presupuesto: ${presupuestoScore}/10`)
-  lines.push('')
-  if (dolor) lines.push(`Dolor principal: ${dolor}`)
   lines.push(`Objeciones manejadas: ${objecionesStr}`)
   lines.push('')
   lines.push('─────────────────────────────')

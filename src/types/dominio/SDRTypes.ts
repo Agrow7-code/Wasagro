@@ -21,18 +21,16 @@ export const PreguntaRespondidaSchema = z.object({
 
 export type PreguntaRespondida = z.infer<typeof PreguntaRespondidaSchema>
 
-export const RespuestaSDRSchema = z.object({
-  respuesta: z.string(),
-  preguntas_respondidas: z.array(PreguntaRespondidaSchema).default([]),
-  score_delta: ScoreDeltaSchema,
-  action: z.enum(['continue_discovery', 'propose_pilot', 'handle_objection', 'graceful_exit']),
-  objection_type: z.string().nullable().default(null),
-  requires_founder_approval: z.boolean().default(false),
-  deal_brief: z.unknown().nullable().default(null),
-  segmento_icp: z.string().optional(),
+export const ExtraccionSDRSchema = z.object({
+  fincas_en_cartera: z.number().nullable(),
+  cultivo_principal: z.string().nullable(),
+  pais: z.string().nullable(),
+  sistema_actual: z.string().nullable(),
+  es_spam: z.boolean().default(false),
+  pregunta_precio: z.boolean().default(false),
 })
 
-export type RespuestaSDR = z.infer<typeof RespuestaSDRSchema>
+export type ExtraccionSDR = z.infer<typeof ExtraccionSDRSchema>
 
 export interface PreguntaRealizada {
   question_id: string
@@ -75,6 +73,7 @@ export interface DealBrief {
   turns_total: number
   questions_asked: number
   handoff_trigger: 'score_threshold' | 'human_request' | 'price_readiness'
+  source_context?: string | null
 }
 
 export interface SDRProspectoRow {
@@ -105,6 +104,7 @@ export interface SDRProspectoRow {
   deal_brief: DealBrief | null
   founder_notified_at: string | null
   reunion_agendada_at: string | null
+  source_context: string | null
 }
 
 export interface SDRProspectoInsert {
@@ -113,6 +113,7 @@ export interface SDRProspectoInsert {
   nombre?: string | null
   empresa?: string | null
   segmento_icp?: string
+  source_context?: string | null
 }
 
 export interface SDRProspectoContext {
@@ -125,6 +126,7 @@ export interface SDRProspectoContext {
   preguntas_realizadas: PreguntaRealizada[]
   objeciones_manejadas: string[]
   punto_de_dolor_principal: string | null
+  source_context?: string | null
 }
 
 export interface EntradaSDR {

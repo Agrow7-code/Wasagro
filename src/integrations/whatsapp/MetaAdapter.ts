@@ -57,6 +57,7 @@ export class MetaAdapter implements IWhatsAppAdapter {
       from: message.from.replace(/\D/g, ''),
       timestamp: new Date(Number(message.timestamp) * 1000),
       rawPayload: payload,
+      source_context: message.referral ? `headline: ${message.referral.headline || ''} | body: ${message.referral.body || ''} | url: ${message.referral.source_url || ''}` : undefined,
     }
 
     if (message.type === 'text' && message.text) {

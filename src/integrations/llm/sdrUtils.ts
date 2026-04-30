@@ -12,6 +12,7 @@ export function buildSDRContexto(entrada: EntradaSDR): string {
     `- Narrativa: ${entrada.narrativa}`,
     `- Turno: ${entrada.turno}`,
     `- Score actual: ${entrada.score_actual}/100`,
+    `- Source Context (CTWA): ${p.source_context ?? 'ninguno'}`,
     `- Scores: eudr_urgency=${p.scores_por_dimension.eudr_urgency}/25, tamano_cartera=${p.scores_por_dimension.tamano_cartera}/20, calidad_dato=${p.scores_por_dimension.calidad_dato}/20, champion=${p.scores_por_dimension.champion}/15, timeline_decision=${p.scores_por_dimension.timeline_decision}/10, presupuesto=${p.scores_por_dimension.presupuesto}/10`,
   ]
   if (p.preguntas_realizadas.length > 0) {

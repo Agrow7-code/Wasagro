@@ -17,6 +17,7 @@ export const NormalizedMessageSchema = z.object({
   documentoMimetype: z.string().optional(),
   mediaBase64: z.string().optional(),
   mediaMimetype: z.string().optional(),
+  source_context: z.string().optional(),
 })
 
 export type NormalizedMessage = z.infer<typeof NormalizedMessageSchema>

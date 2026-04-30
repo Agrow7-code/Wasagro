@@ -483,6 +483,7 @@ export interface SDRProspectoInsertDB {
   nombre?: string | null
   empresa?: string | null
   segmento_icp?: string
+  source_context?: string | null
 }
 
 export async function createSDRProspecto(insert: SDRProspectoInsertDB, client: SupabaseClient = defaultClient): Promise<Record<string, unknown>> {
@@ -494,6 +495,7 @@ export async function createSDRProspecto(insert: SDRProspectoInsertDB, client: S
       nombre: insert.nombre ?? null,
       empresa: insert.empresa ?? null,
       segmento_icp: insert.segmento_icp ?? 'desconocido',
+      source_context: insert.source_context ?? null,
     })
     .select('*')
     .single()

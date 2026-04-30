@@ -25,7 +25,7 @@ import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } 
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
-import { RespuestaSDRSchema, type EntradaSDR, type RespuestaSDR } from '../../types/dominio/SDRTypes.js'
+import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
 import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 import { SupabaseTools } from '../../agents/mcp/SupabaseTools.js'
@@ -483,44 +483,51 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async atenderSDR(entrada: EntradaSDR, traceId: string): Promise<RespuestaSDR> {
-    const promptBase = await PromptManager.getPrompt('SP-SDR-01-master.md', 'sdr/prompts/SP-SDR-01-master.md', typeof traceId !== 'undefined' ? traceId : undefined)
-    const contexto = buildSDRContexto(entrada)
-    const userContent = `${contexto}\n\nMensaje del prospecto: ${entrada.mensaje}`
-
+  async extraerDatosSDR(textoMensaje: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
-      name: 'atender_sdr',
+      name: 'extraer_datos_sdr',
       model: 'wasagro-ai-agent',
-      input: { turno: entrada.turno, segmento: entrada.segmento_icp, narrativa: entrada.narrativa },
+      input: { mensaje: textoMensaje },
     })
 
     const inicio = Date.now()
     try {
-      const texto = await this.#adapter.generarTexto(userContent, { systemPrompt: promptBase, responseFormat: 'json_object', traceId, generationName: 'llamar' })
+      const prompt = await PromptManager.getPrompt('SP-SDR-02-extractor.md', 'sdr/prompts/SP-SDR-02-extractor.md', traceId)
+      const userContent = `Contexto Actual del Prospecto:\n${contextoActual}\n\nMensaje Actual: ${textoMensaje}`
+
+      const texto = await this.#adapter.generarTexto(userContent, { 
+        systemPrompt: prompt, 
+        responseFormat: 'json_object', 
+        traceId, 
+        generationName: 'extraer_sdr',
+        modelClass: 'fast', // Enrutamiento rápido
+        temperature: 0
+      })
       const latencia = Date.now() - inicio
 
       let json: unknown
       try {
-        json = JSON.parse(texto)
+        // Limpiar Markdown si existe
+        const cleanText = texto.replace(/```json/g, '').replace(/```/g, '').trim()
+        json = JSON.parse(cleanText)
       } catch {
         generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Adapter SDR devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
+        throw new LLMError('PARSE_ERROR', `Extractor SDR devolvió respuesta no-JSON: ${texto.slice(0, 100)}`)
       }
 
-      const parsed = RespuestaSDRSchema.safeParse(json)
+      const parsed = ExtraccionSDRSchema.safeParse(json)
       if (!parsed.success) {
         generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `SDR schema inválido: ${parsed.error.message}`)
+        throw new LLMError('PARSE_ERROR', `Extraccion SDR schema inválido: ${parsed.error.message}`)
       }
 
-      generation.end({ output: { action: parsed.data.action, score_delta: parsed.data.score_delta }, metadata: { latencia_ms: latencia } })
-      trace.event({ name: 'sdr_narrative_ab', input: { narrativa: entrada.narrativa, segmento: entrada.segmento_icp, turno: entrada.turno } })
+      generation.end({ output: parsed.data, metadata: { latencia_ms: latencia } })
       return parsed.data
     } catch (err) {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error en SDR: ${String(err)}`, err)
+      throw new LLMError('GROQ_ERROR', `Error en Extractor SDR: ${String(err)}`, err)
     }
   }
 

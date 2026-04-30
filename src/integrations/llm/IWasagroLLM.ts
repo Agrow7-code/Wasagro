@@ -2,7 +2,7 @@ import type { EntradaEvento, ExtraccionMultiEvento, ResultadoIntentGate } from '
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
 import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
-import type { EntradaSDR, RespuestaSDR } from '../../types/dominio/SDRTypes.js'
+import type { ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
 import type { ClasificacionExcel, EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 import type { DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import type { ResultadoOCR } from '../../types/dominio/OCR.js'
@@ -30,6 +30,6 @@ export interface IWasagroLLM {
   onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding>
   atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto>
   resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal>
-  atenderSDR(entrada: EntradaSDR, traceId: string): Promise<RespuestaSDR>
+  extraerDatosSDR(texto: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR>
   clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel>
 }
