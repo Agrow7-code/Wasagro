@@ -72,8 +72,6 @@ async function procesarIntencionWorker(
     const ext = multiExtraction.eventos[0] as EventoCampoExtraido
 
     // --- REGLA DETERMINISTA (Backend) ---
-    // En lugar de confiar en que el LLM decida si falta algo (alucinaciones),
-    // lo comprobamos en duro con código.
     if (ext.tipo_evento === 'plaga') {
       const c = ext.campos_extraidos as Record<string, unknown>
       const faltanIndividuos = !c['individuos_encontrados'] && !c['pct_afectado']
@@ -82,12 +80,18 @@ async function procesarIntencionWorker(
 
       if (faltanIndividuos || faltaMuestra || faltaOrgano) {
         ext.requiere_clarificacion = true
-        if (faltanIndividuos && faltaMuestra) {
-          ext.pregunta_sugerida = "¿Cuántos individuos encontraste y en cuántas plantas o área hiciste el muestreo?"
-        } else if (faltaMuestra || faltaOrgano) {
-          ext.pregunta_sugerida = "¿Cuántas plantas muestreaste y en qué parte de la planta viste la plaga (hojas, tallo, hijo, racimo)?"
+        if (faltanIndividuos && faltaMuestra && faltaOrgano) {
+          ext.pregunta_sugerida = "¿Cuántas plantas muestreaste, cuántos insectos encontraste y en qué parte estaban (hojas, tallo, hijo, racimo)?"
+        } else if (faltanIndividuos && faltaMuestra) {
+          ext.pregunta_sugerida = "¿En cuántas plantas hiciste el muestreo y cuántos individuos encontraste en total?"
+        } else if (faltaMuestra && faltaOrgano) {
+          ext.pregunta_sugerida = "¿Cuántas plantas muestreaste y en qué parte viste la plaga (hojas, tallo, hijo, racimo)?"
+        } else if (faltanIndividuos && faltaOrgano) {
+          ext.pregunta_sugerida = "¿Cuántos insectos encontraste en la muestra y en qué parte de la planta estaban?"
         } else if (faltanIndividuos) {
-          ext.pregunta_sugerida = "¿Cuántos insectos o plantas afectadas encontraste en esa muestra?"
+          ext.pregunta_sugerida = "¿Cuántos individuos (insectos o daño) contabilizaste en esa muestra?"
+        } else if (faltaMuestra) {
+          ext.pregunta_sugerida = "¿En cuántas plantas en total realizaste este muestreo?"
         } else {
           ext.pregunta_sugerida = "¿En qué parte específica de la planta la encontraste (hojas, tallo, hijo, racimo)?"
         }
@@ -267,13 +271,17 @@ async function procesarIntencionWorker(
     const errMsg = err instanceof Error ? err.message : String(err)
     const isServerError = errMsg.includes('50') || errMsg.includes('timeout') || errMsg.includes('ECONNREFUSED')
 
+    const sender = crearSenderWhatsApp()
+
     if (isServerError) {
       console.error(`[procesar-intencion] 🛑 STOP — Server error en job ${jobId}: ${errMsg}`)
       await marcarIntencionFallida(data.sessionId, jobId, `server_error:${errMsg}`)
+      if (data.phone) await sender.enviarTexto(data.phone, 'Tuve un problema técnico procesando tu reporte. Por favor intenta de nuevo en unos minutos. ⚠️').catch(()=>{})
       generation.end({ output: { status: 'server_error', error: errMsg }, level: 'ERROR' })
     } else {
       console.error(`[procesar-intencion] Error en job ${jobId}:`, err)
       await marcarIntencionFallida(data.sessionId, jobId, `error:${errMsg}`)
+      if (data.phone) await sender.enviarTexto(data.phone, 'No pude extraer todos los datos de tu mensaje. Por favor revisa y envía un nuevo reporte. ⚠️').catch(()=>{})
       generation.end({ output: { status: 'error', error: errMsg }, level: 'ERROR' })
     }
 
