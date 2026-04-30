@@ -4,6 +4,31 @@ import { EventoItem } from '../components/EventoItem'
 import { LoteCard } from '../components/LoteCard'
 import { AlertaPanel } from '../components/AlertaBadge'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
+import { PlagasModule } from '../modules/PlagasModule'
+
+// Datos de prueba para demostrar el cálculo de valor real
+const mockEventosPlaga = [
+  {
+    id: '1',
+    lote_nombre: 'Lote 1',
+    plaga_nombre: 'Trips de la mancha roja',
+    plaga_individuos: 30,
+    plaga_muestra: 100,
+    plaga_organo: 'racimo',
+    plaga_severidad_pct: 30.0,
+    fecha_evento: '2026-04-29'
+  },
+  {
+    id: '2',
+    lote_nombre: 'Lote 2',
+    plaga_nombre: 'Gusano cogollero',
+    plaga_individuos: 15,
+    plaga_muestra: 50,
+    plaga_organo: 'hijo',
+    plaga_severidad_pct: 30.0,
+    fecha_evento: '2026-04-29'
+  }
+]
 
 const TIPO_COLOR: Record<string, string> = {
   insumo: '#2A50D4', plaga: '#D45828', cosecha: '#3EBB6A',
@@ -14,8 +39,8 @@ export function AdminFinca() {
   return (
     <>
       <Topbar
-        title="Resumen"
-        badge="HOY"
+        title="Admin Finca"
+        badge="VALOR"
         avatarInitials="CM"
         rightSlot={
           <>
@@ -28,21 +53,24 @@ export function AdminFinca() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
               </svg>
-              Finca El Progreso
+              Finca El Progreso (Banano)
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
-            <TopbarPeriod>25 Abr 2026</TopbarPeriod>
+            <TopbarPeriod>29 Abr 2026</TopbarPeriod>
           </>
         }
       />
 
-      <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 40 }}>
+
+        {/* MÓDULO DE PLAGAS: VALOR REAL */}
+        <PlagasModule eventos={mockEventosPlaga} cultivoPrincipal="Banano" />
 
         {/* KPIs */}
         <section>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)' }}>
-              Métricas del día
+              Actividad del día
             </span>
             <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'rgba(13,15,12,0.45)' }}>
               Última actualización · 14:31
@@ -57,7 +85,7 @@ export function AdminFinca() {
         <section>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
             <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)' }}>
-              Actividad reciente
+              Alertas y Novedades
             </span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '70fr 30fr', gap: 16 }}>

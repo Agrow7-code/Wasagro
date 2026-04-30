@@ -186,7 +186,7 @@ export function AgricultorIndividual() {
             <div style={{ fontSize: 11, color: 'rgba(245,241,232,0.55)', marginTop: 2 }}>Envía un mensaje por WhatsApp · solo habla</div>
           </div>
           <a
-            href="https://wa.me/593999999999?text=Hola%20Wasagro"
+            href="https://wa.me/50672134878?text=Hola%20Wasagro"
             target="_blank"
             rel="noopener noreferrer"
             style={{

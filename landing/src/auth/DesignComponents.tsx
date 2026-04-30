@@ -23,7 +23,7 @@ export const DotGrid = () => (
   />
 )
 
-export const WA_LINK = 'https://wa.me/593999999999?text=Hola%2C%20no%20tengo%20acceso%20a%20Wasagro%20y%20me%20gustar%C3%ADA%20adquirir%20el%20servicio'
+export const WA_LINK = 'https://wa.me/50672134878?text=Hola%2C%20no%20tengo%20acceso%20a%20Wasagro%20y%20me%20gustar%C3%ADA%20adquirir%20el%20servicio'
 
 export const LogoMark = ({ size = 32 }: { size?: number }) => {
   const w = Math.round(size * 0.6)

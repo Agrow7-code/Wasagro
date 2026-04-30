@@ -20,7 +20,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-const WA_LINK = 'https://wa.me/593999999999?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
+const WA_LINK = 'https://wa.me/50672134878?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
 
 // ─────────────────────────────────────────────────────────────
 // LOGO — isotipo v3: W condensada + señal GPS (dot centrado)

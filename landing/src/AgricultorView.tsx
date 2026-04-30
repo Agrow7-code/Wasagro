@@ -373,7 +373,7 @@ export default function AgricultorView() {
           ¿Hiciste algo en el campo hoy? Registralo con un mensaje de voz.
         </div>
         <a
-          href="https://wa.me/1234567890"
+          href="https://wa.me/50672134878"
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-2.5 px-7 py-3.5 bg-wa-signal border-2 border-wa-tierra shadow-[4px_4px_0_0_#0D0F0C] text-[15px] font-bold tracking-[0.03em] text-wa-tierra no-underline transition-all hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0_0_#0D0F0C] active:translate-x-0 active:translate-y-0 active:shadow-[4px_4px_0_0_#0D0F0C]"
