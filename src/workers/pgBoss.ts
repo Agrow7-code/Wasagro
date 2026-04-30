@@ -71,6 +71,31 @@ async function procesarIntencionWorker(
 
     const ext = multiExtraction.eventos[0] as EventoCampoExtraido
 
+    // --- REGLA DETERMINISTA (Backend) ---
+    // En lugar de confiar en que el LLM decida si falta algo (alucinaciones),
+    // lo comprobamos en duro con código.
+    if (ext.tipo_evento === 'plaga') {
+      const c = ext.campos_extraidos as Record<string, unknown>
+      const faltanIndividuos = !c['individuos_encontrados'] && !c['pct_afectado']
+      const faltaMuestra = !c['tamano_muestra']
+      const faltaOrgano = !c['organo_afectado']
+
+      if (faltanIndividuos || faltaMuestra || faltaOrgano) {
+        ext.requiere_clarificacion = true
+        if (faltanIndividuos && faltaMuestra) {
+          ext.pregunta_sugerida = "¿Cuántos individuos encontraste y en cuántas plantas o área hiciste el muestreo?"
+        } else if (faltaMuestra || faltaOrgano) {
+          ext.pregunta_sugerida = "¿Cuántas plantas muestreaste y en qué parte de la planta viste la plaga (hojas, tallo, hijo, racimo)?"
+        } else if (faltanIndividuos) {
+          ext.pregunta_sugerida = "¿Cuántos insectos o plantas afectadas encontraste en esa muestra?"
+        } else {
+          ext.pregunta_sugerida = "¿En qué parte específica de la planta la encontraste (hojas, tallo, hijo, racimo)?"
+        }
+      } else {
+        ext.requiere_clarificacion = false
+      }
+    }
+
     const { supabase } = await import('../integrations/supabase.js')
     const { data: sData } = await supabase.from('sesiones_activas').select('*').eq('session_id', data.sessionId).single()
 

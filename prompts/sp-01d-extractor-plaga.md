@@ -167,21 +167,14 @@ Nunca preguntes algo que ya esté en ESTADO_PARCIAL.
 | 0.0–0.29 | No extraíble → `null` |
 
 ## REGLA ESTRICTA DE MUESTREO (CRÍTICO)
-Para un reporte de plaga, la severidad se calculará posteriormente en el sistema basado en los datos de muestreo. El LLM SOLO debe extraer los datos crudos del muestreo.
+Para un reporte de plaga, la severidad se calculará posteriormente en el sistema basado en los datos de muestreo. El LLM SOLO debe extraer los datos crudos del muestreo. No inventes datos ni generes preguntas de clarificación si faltan (el backend se encargará de esto).
 
-Es **VITAL** extraer:
+Es **VITAL** extraer si existen en el texto:
 1. `individuos_encontrados` (ej: "20 trips", "5 gusanos")
 2. `tamano_muestra` (ej: "en 10 plantas", "muestreamos 50 hijos")
 3. `organo_afectado` (ej: "hijo", "racimo", "tallo")
 
-Si en el mensaje original (y en el ESTADO_PARCIAL) falta información clave sobre la metodología de muestreo (como el tamaño de la muestra o el órgano afectado) O faltan los conteos básicos (individuos encontrados):
-
-**DEBES OBLIGATORIAMENTE** marcar `"requiere_clarificacion": true` y formular una `"pregunta_sugerida"`.
-La pregunta debe ser conversacional, directa y natural, agrupando los datos faltantes en una sola oración sin usar conjunciones robóticas.
-EJEMPLOS:
-- Si falta cantidad de insectos y tamaño de muestra: "¿Cuántos insectos encontraste y en cuántas plantas hiciste el muestreo?"
-- Si falta tamaño de muestra y órgano: "¿Cuántas plantas muestreaste y en qué parte de la planta estaba el daño (hojas, tallo, hijo, racimo)?"
-- Si solo falta el órgano: "¿En qué parte de la planta encontraste la plaga (tallo, hojas, fruto)?"
+Si un dato falta, déjalo en `null`. **NO** marques `requiere_clarificacion` ni inventes una `pregunta_sugerida` por datos de muestreo faltantes.
 
 ## MANEJO DE CORRECCIONES Y META-COMENTARIOS
 Si el agricultor te dice algo como "No me preguntaste cuántas" o "Te faltó preguntarme la severidad", NO intentes adivinar el dato ni cambies los datos previos (como el nombre de la plaga). 
