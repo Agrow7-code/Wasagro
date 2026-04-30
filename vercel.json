@@ -1,9 +1,7 @@
 {
   "version": 2,
-  "name": "wasagro-landing",
-  "buildCommand": "cd landing && npm install && npm run build",
+  "public": true,
   "outputDirectory": "landing/dist",
-  "framework": "vite",
   "rewrites": [
     {
       "source": "/auth/(.*)",
