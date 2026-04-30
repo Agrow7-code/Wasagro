@@ -1,8 +1,18 @@
 {
   "version": 2,
+  "name": "wasagro-landing",
   "buildCommand": "cd landing && npm install && npm run build",
   "outputDirectory": "landing/dist",
+  "framework": "vite",
   "rewrites": [
+    {
+      "source": "/auth/(.*)",
+      "destination": "/api/auth/$1"
+    },
+    {
+      "source": "/webhook/(.*)",
+      "destination": "/api/webhook/$1"
+    },
     {
       "source": "/(login|dashboard|gerente|exportadora|agricultor)(.*)",
       "destination": "/index.html"
