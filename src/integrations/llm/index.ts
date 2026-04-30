@@ -67,10 +67,15 @@ export function crearAdapterLLM(): ILLMAdapter {
   // TIERED ROUTING POOL (Control activo de cuota y capacidades)
     const poolConfig: Array<{ name: string; key: string; provider: string; tier: ModelClass }> = [
     // TIER 1 (Fast): Extracción simple, clasificación rápida, sin penalización por fallos masivos
+    { name: 'GLM-5.1', key: 'NVIDIA_GLM_KEY', provider: 'glm', tier: 'fast' },
+    { name: 'Deepseek', key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'fast' },
+    { name: 'Minimax', key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax', tier: 'fast' },
     { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast' },
     { name: 'Groq', key: 'GROQ_API_KEY', provider: 'groq', tier: 'fast' },
 
     // TIER 2 (Reasoning): Reflexión profunda, PDR/SR (ReAct)
+    { name: 'Qwen', key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'reasoning' },
+    { name: 'Gemma-4', key: 'NVIDIA_GEMMA_KEY', provider: 'gemma', tier: 'reasoning' },
     { name: 'Deepseek', key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'reasoning' },
     { name: 'GLM-5.1', key: 'NVIDIA_GLM_KEY', provider: 'glm', tier: 'reasoning' },
     { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'reasoning' },
