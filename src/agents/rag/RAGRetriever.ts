@@ -41,7 +41,7 @@ export class RAGRetriever {
 
       return this.#formatear(data as EventoSimilar[])
     } catch (err) {
-      console.error('[RAGRetriever] Error recuperando contexto:', err)
+      console.warn('[RAGRetriever] Advertencia: Fallo en API de embeddings, degradando a sin-contexto. Error:', String(err).split('\n')[0])
       return ''
     }
   }
