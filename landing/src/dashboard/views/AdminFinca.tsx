@@ -5,29 +5,18 @@ import { LoteCard } from '../components/LoteCard'
 import { AlertaPanel } from '../components/AlertaBadge'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
 import { PlagasModule } from '../modules/PlagasModule'
+import { CostosModule } from '../modules/CostosModule'
 
 // Datos de prueba para demostrar el cálculo de valor real
 const mockEventosPlaga = [
-  {
-    id: '1',
-    lote_nombre: 'Lote 1',
-    plaga_nombre: 'Trips de la mancha roja',
-    plaga_individuos: 30,
-    plaga_muestra: 100,
-    plaga_organo: 'racimo',
-    plaga_severidad_pct: 30.0,
-    fecha_evento: '2026-04-29'
-  },
-  {
-    id: '2',
-    lote_nombre: 'Lote 2',
-    plaga_nombre: 'Gusano cogollero',
-    plaga_individuos: 15,
-    plaga_muestra: 50,
-    plaga_organo: 'hijo',
-    plaga_severidad_pct: 30.0,
-    fecha_evento: '2026-04-29'
-  }
+  { id: '1', lote_nombre: 'Lote 1', plaga_nombre: 'Trips de la mancha roja', plaga_individuos: 30, plaga_muestra: 100, plaga_organo: 'racimo', plaga_severidad_pct: 30.0, fecha_evento: '2026-04-29' },
+  { id: '2', lote_nombre: 'Lote 2', plaga_nombre: 'Gusano cogollero', plaga_individuos: 15, plaga_muestra: 50, plaga_organo: 'hijo', plaga_severidad_pct: 30.0, fecha_evento: '2026-04-29' }
+]
+
+const mockEventosCosto = [
+  { id: 'c1', lote_nombre: 'Lote 1', costo_monto: 1200, costo_categoria: 'insumos', fecha_evento: '2026-04-28' },
+  { id: 'c2', lote_nombre: 'Lote 2', costo_monto: 450, costo_categoria: 'mano de obra', fecha_evento: '2026-04-29' },
+  { id: 'c3', lote_nombre: 'Lote 1', costo_monto: 300, costo_categoria: 'mano de obra', fecha_evento: '2026-04-29' }
 ]
 
 const TIPO_COLOR: Record<string, string> = {
@@ -35,12 +24,13 @@ const TIPO_COLOR: Record<string, string> = {
   labor: '#0D0F0C', clima: '#9C9080', gasto: '#C9F03B',
 }
 
+// Re-deploy para actualizar validación de Argentina 🇦🇷
 export function AdminFinca() {
   return (
     <>
       <Topbar
-        title="Admin Finca"
-        badge="VALOR"
+        title="Gestión de Valor"
+        badge="H0-R"
         avatarInitials="CM"
         rightSlot={
           <>
@@ -61,10 +51,13 @@ export function AdminFinca() {
         }
       />
 
-      <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 40 }}>
+      <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 48 }}>
 
-        {/* MÓDULO DE PLAGAS: VALOR REAL */}
+        {/* 1. MÓDULO DE PLAGAS: SEVERIDAD Y RIESGO */}
         <PlagasModule eventos={mockEventosPlaga} cultivoPrincipal="Banano" />
+
+        {/* 2. MÓDULO DE COSTOS: EFICIENCIA FINANCIERA */}
+        <CostosModule eventos={mockEventosCosto} />
 
         {/* KPIs */}
         <section>
