@@ -13,7 +13,7 @@ export const countries: Country[] = [
   { name: 'Colombia',          code: '57',  isoCode: 'CO', flag: '🇨🇴', maxLength: 10, placeholder: '310 555 5555' },
   { name: 'México',            code: '52',  isoCode: 'MX', flag: '🇲🇽', maxLength: 10, placeholder: '551 234 5678' },
   { name: 'Perú',              code: '51',  isoCode: 'PE', flag: '🇵🇪', maxLength: 9,  placeholder: '987 654 321' },
-  { name: 'Argentina',         code: '54',  isoCode: 'AR', flag: '🇦🇷', maxLength: 10, placeholder: '11 2345 6789' },
+  { name: 'Argentina',         code: '54',  isoCode: 'AR', flag: '🇦🇷', maxLength: 11, placeholder: '9 11 2345 6789' },
   { name: 'Chile',             code: '56',  isoCode: 'CL', flag: '🇨🇱', maxLength: 9,  placeholder: '9 8765 4321' },
   { name: 'Bolivia',           code: '591', isoCode: 'BO', flag: '🇧🇴', maxLength: 8,  placeholder: '7123 4567'   },
   { name: 'Costa Rica',        code: '506', isoCode: 'CR', flag: '🇨🇷', maxLength: 8,  placeholder: '8888 8888'   },
