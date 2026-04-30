@@ -178,7 +178,7 @@ export function StepTelefono({ selectedCountry, setSelectedCountry, onContinue }
         onClick={handleSubmit}
         style={{ marginTop: 20, opacity: !isValid ? 0.5 : 1 }}
       >
-        Continuar →
+        Verificar número →
       </PrimaryBtn>
 
       <div className="text-center text-[13px] mt-6" style={{ color: DesignConfig.colors.tierraSuave }}>
