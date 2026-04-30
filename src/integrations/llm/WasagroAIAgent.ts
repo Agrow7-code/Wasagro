@@ -531,6 +531,35 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
+  async redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string): Promise<string> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: 'redactar_mensaje_sdr',
+      model: 'wasagro-ai-agent',
+      input: { directiva },
+    })
+
+    try {
+      const prompt = await PromptManager.getPrompt('SP-SDR-03-writer.md', 'sdr/prompts/SP-SDR-03-writer.md', traceId)
+      const userContent = `Contexto del Prospecto:\n${contextoActual}\n\nÚltimo mensaje del usuario: "${mensajeUsuario}"\n\n=== DIRECTIVA OBLIGATORIA ===\n${directiva}`
+
+      const texto = await this.#adapter.generarTexto(userContent, { 
+        systemPrompt: prompt, 
+        responseFormat: 'text', 
+        traceId, 
+        generationName: 'redactar_sdr',
+        modelClass: 'fast',
+      })
+
+      generation.end({ output: texto })
+      return texto.trim()
+    } catch (err) {
+      if (err instanceof LLMError) throw err
+      generation.end({ output: String(err), level: 'ERROR' })
+      throw new LLMError('GROQ_ERROR', `Error en Redactor SDR: ${String(err)}`, err)
+    }
+  }
+
   async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({

@@ -52,7 +52,7 @@ const mockSender = {
 
 const mockLLM = {
   extraerDatosSDR: vi.fn(),
-  // ... mock other methods if needed, but only extraerDatosSDR is used here
+  redactarMensajeSDR: vi.fn().mockResolvedValue('Mensaje redactado por el LLM'),
 } as any
 
 const prospectoBase = {
@@ -94,7 +94,7 @@ describe('handleSDRSession (Extracción Determinista)', () => {
     await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
 
     expect(queries.createSDRProspecto).toHaveBeenCalled()
-    expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('¿cuántas hectáreas o fincas'))
+    expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('Mensaje redactado por el LLM'))
     expect(queries.updateSDRProspecto).toHaveBeenCalledWith(
       prospectoBase.id,
       expect.objectContaining({ status: 'en_discovery', turns_total: 1 }),
@@ -135,7 +135,7 @@ describe('handleSDRSession (Extracción Determinista)', () => {
 
     await handleSDRSession(mockMsg, 'msg-1', 'trace-1', mockSender, mockLLM)
 
-    expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('¿Qué tipo de cultivo principal'))
+    expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('Mensaje redactado por el LLM'))
   })
 
   it('agrupa 3 datos y cierra inmediatamente con propose_pilot', async () => {
@@ -169,7 +169,7 @@ describe('handleSDRSession (Extracción Determinista)', () => {
       undefined
     )
     
-    expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('Me parece que Wasagro es ideal para ti'))
+    expect(mockSender.enviarTexto).toHaveBeenCalledWith('593987654321', expect.stringContaining('Mensaje redactado por el LLM'))
     expect(mockResendSend).toHaveBeenCalled()
   })
 

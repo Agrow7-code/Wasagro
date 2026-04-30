@@ -131,7 +131,7 @@ Sistema Actual: ${prospecto['sistema_actual'] ?? 'Desconocido'}
     let nuevoStatus = prospecto['status'] === 'new' ? 'en_discovery' : (prospecto['status'] as string)
     updateData.turns_total = nuevoTurno
     
-    // 3. Enrutamiento Lógico (TypeScript)
+    // 3. Enrutamiento Lógico (TypeScript + LLM Writer)
     let respuesta = ''
     let action = 'continue_discovery'
     let requires_founder_approval = false
@@ -155,26 +155,31 @@ Sistema Actual: ${prospecto['sistema_actual'] ?? 'Desconocido'}
       if (combinedProspecto['pais'] != null) datosConocidos++
       if (combinedProspecto['sistema_actual'] != null) datosConocidos++
 
+      let directiva = ''
+
       if (datosConocidos >= 3 || nuevoTurno >= MAX_SDR_TURNS) {
         action = 'propose_pilot'
         requires_founder_approval = true
-        respuesta = 'Me parece que Wasagro es ideal para ti. Para mostrarte cómo funciona y no darte más vueltas por aquí, agendemos una breve videollamada de 15 minutos. 🚜'
+        directiva = 'El prospecto ya está calificado. Menciona muy brevemente que Wasagro es ideal para ellos y propón agendar una videollamada de 15 minutos para mostrarles cómo funciona.'
       } else {
-        // Seleccionar pregunta faltante
-        if (combinedProspecto['fincas_en_cartera'] == null) {
-          respuesta = '¡Genial! Para entender mejor tu operación, ¿cuántas hectáreas o fincas administras actualmente?'
+        if (nuevoTurno === 1) {
+          directiva = 'Saluda diciendo literalmente: "Hola, bienvenido a Wasagro. Soy el asistente digital de Wasagro y estoy aquí para ayudarte a simplificar la captura de datos en tu finca. Para empezar, ¿podrías contarme qué tipo de operación agrícola tienes y cuántas hectáreas o fincas gestionas?" (Si la fuente o el mensaje incluye contexto de un anuncio, puedes adaptarlo, pero esa es la intención).'
+        } else if (combinedProspecto['fincas_en_cartera'] == null) {
+          directiva = 'Haz una pregunta corta sobre cuántas hectáreas o fincas administran actualmente.'
         } else if (combinedProspecto['cultivo_principal'] == null) {
-          respuesta = 'Perfecto. ¿Qué tipo de cultivo principal tienen en la finca?'
+          directiva = 'Haz una pregunta corta sobre qué tipo de cultivo principal tienen en la finca.'
         } else if (combinedProspecto['pais'] == null) {
-          respuesta = 'Entendido. ¿En qué país está ubicada tu operación agrícola?'
+          directiva = 'Haz una pregunta corta para saber en qué país está ubicada su operación agrícola.'
         } else if (combinedProspecto['sistema_actual'] == null) {
-          respuesta = 'Excelente. ¿Cómo registran actualmente las labores o aplicaciones de insumos? ¿Usan papel, Excel u otra herramienta?'
+          directiva = 'Haz una pregunta corta sobre cómo registran actualmente las labores o aplicaciones de insumos (ej. papel, Excel).'
         } else {
           action = 'propose_pilot'
           requires_founder_approval = true
-          respuesta = 'Excelente. Agendemos una breve videollamada para mostrarte cómo Wasagro te ayuda a registrar todo desde WhatsApp.'
+          directiva = 'Propón agendar una breve videollamada para mostrarles cómo Wasagro les ayuda a registrar todo desde WhatsApp.'
         }
       }
+
+      respuesta = await llm.redactarMensajeSDR(texto, contextoActual, directiva, traceId)
     }
 
     // 4. Ejecución de Acción
