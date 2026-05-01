@@ -1,38 +1,23 @@
-import OpenAI from 'openai'
-import { openai as defaultOpenai, STT_MODEL } from '../integrations/openai.js'
+import { DeepgramClient } from '@deepgram/sdk'
 import { langfuse } from '../integrations/langfuse.js'
-
-const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1'
 
 export async function transcribirAudio(
   audioUrl: string,
   traceId: string,
-  deps: { fetchClient?: typeof fetch; openaiClient?: OpenAI } = {},
+  deps: { fetchClient?: typeof fetch } = {},
 ): Promise<string> {
   const fetchClient = deps.fetchClient ?? globalThis.fetch
   
-  // Decidir qué cliente usar
-  let openaiClient = deps.openaiClient
-  let model = STT_MODEL
+  const deepgramKey = process.env['DEEPGRAM_API_KEY']
+  if (!deepgramKey) throw new Error('DEEPGRAM_API_KEY no configurada en el servidor')
 
-  if (!openaiClient) {
-    const nvidiaKey = process.env['NVIDIA_STT_KEY']
-    if (nvidiaKey) {
-      openaiClient = new OpenAI({ apiKey: nvidiaKey, baseURL: NVIDIA_BASE_URL })
-      // Si usamos NVIDIA, el modelo por defecto suele ser parakeet-ctc-1.1b-asr
-      // pero permitimos configurarlo vía env
-      model = process.env['NVIDIA_STT_MODEL'] ?? 'nvidia/parakeet-ctc-1.1b-asl'
-    } else {
-      openaiClient = defaultOpenai as OpenAI
-    }
-  }
-
-  if (!openaiClient) throw new Error('STT_NO_DISPONIBLE')
+  // Deepgram SDK v5: Constructor espera un objeto con apiKey
+  const deepgram = new DeepgramClient({ apiKey: deepgramKey })
 
   const trace = langfuse.trace({ id: traceId })
   const generation = trace.generation({
     name: 'transcribir_audio',
-    model: model,
+    model: 'nova-2-general', 
     input: { audio_url: audioUrl },
   })
 
@@ -44,17 +29,23 @@ export async function transcribirAudio(
     }
 
     const buffer = await audioRes.arrayBuffer()
-    // NVIDIA y OpenAI esperan un archivo real o un objeto compatible
-    const file = new File([new Uint8Array(buffer)], 'audio.ogg', { type: 'audio/ogg; codecs=opus' })
 
-    const transcription = await openaiClient.audio.transcriptions.create({
-      model: model,
-      file: file as unknown as File,
-      language: 'es',
-    })
+    // Usar SDK v5 API: client.listen.v1.media.transcribeFile
+    // Documentación Multilingual: https://developers.deepgram.com/docs/multilingual-code-switching
+    const result = await deepgram.listen.v1.media.transcribeFile(
+      Buffer.from(buffer),
+      {
+        model: 'nova-2-general',
+        language: 'multi', // Habilita la detección multi-idioma
+        smart_format: true,
+      }
+    )
 
-    generation.end({ output: transcription.text, metadata: { latencia_ms: Date.now() - inicio } })
-    return transcription.text
+    // En v5, result es directamente la respuesta (ListenV1Response | ListenV1AcceptedResponse)
+    const transcription = (result as any)?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? ''
+
+    generation.end({ output: transcription, metadata: { latencia_ms: Date.now() - inicio, deepgram_result: result } })
+    return transcription
   } catch (err) {
     generation.end({ output: String(err), level: 'ERROR' })
     throw err
