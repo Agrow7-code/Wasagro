@@ -160,7 +160,7 @@ Sistema Actual: ${prospecto['sistema_actual'] ?? 'Desconocido'}
       if (datosConocidos >= 3 || nuevoTurno >= MAX_SDR_TURNS) {
         action = 'propose_pilot'
         requires_founder_approval = true
-        directiva = 'El prospecto ya está calificado. Menciona muy brevemente que Wasagro es ideal para ellos y propón agendar una videollamada de 15 minutos para mostrarles cómo funciona.'
+        directiva = 'El prospecto ya está calificado. Usa la información que tenemos (ej. si usa Excel, si tiene X hectáreas de Y cultivo) para redactar un argumento persuasivo de 3 o 4 oraciones. Explícale exactamente cómo Wasagro le va a resolver la vida eliminando el papel/Excel mediante registros por audios de WhatsApp. Termina el mensaje proponiendo agendar una breve videollamada de 15 minutos para mostrarle cómo se adapta a su finca específica.'
       } else {
         if (nuevoTurno === 1) {
           directiva = 'Saluda diciendo literalmente: "Hola, bienvenido a Wasagro. Soy el asistente digital de Wasagro y estoy aquí para ayudarte a simplificar la captura de datos en tu finca. Para empezar, ¿podrías contarme qué tipo de operación agrícola tienes y cuántas hectáreas o fincas gestionas?" (Si la fuente o el mensaje incluye contexto de un anuncio, puedes adaptarlo, pero esa es la intención).'
