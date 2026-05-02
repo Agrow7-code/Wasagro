@@ -74,23 +74,37 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
   }
 
   parsearMensaje(payload: unknown): NormalizedMessage | null {
-    const parsed = EvolutionPayloadSchema.safeParse(payload)
+    const baseParsed = EvolutionPayloadSchema.safeParse(payload)
+    if (!baseParsed.success) {
+      return null
+    }
+
+    const { event, data } = baseParsed.data
+
+    // Ignorar eventos que no sean de mensajes nuevos
+    if (event && event !== 'messages.upsert') {
+      return null
+    }
+
+    // Evolution API v2 a veces envía data como un array de mensajes
+    const rawData = Array.isArray(data) ? data[0] : data
+
+    const parsed = MessageDataSchema.safeParse(rawData)
     if (!parsed.success) {
-      // Log detallado para Railway — muestra exactamente qué campo falló
       console.error('[EvolutionAdapter] Schema parse failed:', JSON.stringify(parsed.error.issues))
       return null
     }
 
-    const { data } = parsed.data
+    const msgData = parsed.data
 
     // Ignorar mensajes enviados por el bot (evita auto-procesamiento en loop)
-    if (data.key.fromMe) {
-      console.log(`[EvolutionAdapter] fromMe ignorado: ${data.key.id}`)
+    if (msgData.key.fromMe) {
+      console.log(`[EvolutionAdapter] fromMe ignorado: ${msgData.key.id}`)
       return null
     }
 
     // Ignorar chats grupales, broadcast y newsletter — solo procesar chats individuales
-    const jid = data.key.remoteJid
+    const jid = msgData.key.remoteJid
     if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('newsletter')) {
       console.log(`[EvolutionAdapter] JID no individual ignorado: ${jid}`)
       return null
@@ -98,13 +112,13 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
 
     const from = jid.replace(/@.*$/, '')
     const base = {
-      wamid: data.key.id,
+      wamid: msgData.key.id,
       from,
-      timestamp: new Date(data.messageTimestamp * 1000),
+      timestamp: new Date(msgData.messageTimestamp * 1000),
       rawPayload: payload,
     }
 
-    const msg = data.message
+    const msg = msgData.message
     if (!msg) return null
 
     // Texto simple
