@@ -4,45 +4,47 @@ import type { Context } from 'hono'
 import type { IWhatsAppAdapter } from './IWhatsAppAdapter.js'
 import type { NormalizedMessage } from './NormalizedMessage.js'
 
-const EvolutionPayloadSchema = z.object({
-  event: z.string(),
-  instance: z.string(),
-  data: z.object({
-    key: z.object({
-      remoteJid: z.string(),
-      fromMe: z.boolean(),
-      id: z.string(),
-    }),
-    message: z.object({
-      conversation: z.string().optional(),
-      extendedTextMessage: z.object({
-        text: z.string(),
-      }).optional(),
-      audioMessage: z.object({
-        url: z.string(),
-        mimetype: z.string(),
-        seconds: z.number().optional(),
-      }).optional(),
-      imageMessage: z.object({
-        url: z.string(),
-        mimetype: z.string(),
-        caption: z.string().optional(),
-      }).optional(),
-      locationMessage: z.object({
-        degreesLatitude: z.number(),
-        degreesLongitude: z.number(),
-        name: z.string().optional(),
-      }).optional(),
-      documentMessage: z.object({
-        url: z.string(),
-        mimetype: z.string().optional(),
-        fileName: z.string().optional(),
-      }).optional(),
-    }).optional(),
-    // z.coerce.number() acepta tanto número como string — Evolution API varía entre versiones
-    messageTimestamp: z.coerce.number(),
-    pushName: z.string().optional(),
+const MessageDataSchema = z.object({
+  key: z.object({
+    remoteJid: z.string(),
+    fromMe: z.boolean(),
+    id: z.string(),
   }),
+  message: z.object({
+    conversation: z.string().optional(),
+    extendedTextMessage: z.object({
+      text: z.string(),
+    }).optional(),
+    audioMessage: z.object({
+      url: z.string(),
+      mimetype: z.string(),
+      seconds: z.number().optional(),
+    }).optional(),
+    imageMessage: z.object({
+      url: z.string(),
+      mimetype: z.string(),
+      caption: z.string().optional(),
+    }).optional(),
+    locationMessage: z.object({
+      degreesLatitude: z.number(),
+      degreesLongitude: z.number(),
+      name: z.string().optional(),
+    }).optional(),
+    documentMessage: z.object({
+      url: z.string(),
+      mimetype: z.string().optional(),
+      fileName: z.string().optional(),
+    }).optional(),
+  }).optional(),
+  // z.coerce.number() acepta tanto número como string — Evolution API varía entre versiones
+  messageTimestamp: z.coerce.number(),
+  pushName: z.string().optional(),
+})
+
+const EvolutionPayloadSchema = z.object({
+  event: z.string().optional(),
+  instance: z.string().optional(),
+  data: z.any(),
 })
 
 interface EvolutionAdapterConfig {
