@@ -1,8 +1,11 @@
 -- Migration: Add sdr_node state column to sdr_prospectos
 ALTER TABLE "public"."sdr_prospectos"
-ADD COLUMN "sdr_node" TEXT NOT NULL DEFAULT 'triage';
+ADD COLUMN IF NOT EXISTS "sdr_node" TEXT NOT NULL DEFAULT 'triage';
 
 -- Optional: constraint on valid nodes
+ALTER TABLE "public"."sdr_prospectos"
+DROP CONSTRAINT IF EXISTS check_sdr_node_values;
+
 ALTER TABLE "public"."sdr_prospectos"
 ADD CONSTRAINT check_sdr_node_values 
 CHECK (sdr_node IN ('triage', 'discovery', 'pitch', 'close'));
