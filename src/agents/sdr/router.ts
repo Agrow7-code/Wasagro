@@ -186,10 +186,10 @@ ${cachedSDRContext ? `Contexto Reciente: ${cachedSDRContext}` : ''}
       directiva = 'Pregunta cómo registran actualmente las labores o aplicaciones de insumos (ej. papel, Excel). MÁXIMO 3 oraciones o 90 palabras.'
     }
   } else if (currentNode === 'pitch') {
-    directiva = 'Usa los datos recopilados (ej. cultivo, hectáreas, cómo toman datos) para redactar un argumento persuasivo de máximo 3 oraciones explicando el valor de Wasagro. ESTRICTO: NO PIDAS AGENDAR REUNIÓN TODAVÍA. MÁXIMO 90 palabras.'
+    directiva = `Usa los datos recopilados para redactar un argumento persuasivo que genere un "aha moment". En lugar de solo describir funciones, enfócate en el problema de usar ${combinedProspecto['sistema_actual']} y cómo Wasagro les ahorrará horas de trabajo en sus ${combinedProspecto['fincas_en_cartera']} hectáreas/fincas de ${combinedProspecto['cultivo_principal']}, evitando pérdidas con alertas tempranas y tableros automáticos por WhatsApp. ESTRICTO: NO PIDAS AGENDAR REUNIÓN TODAVÍA. MÁXIMO 3 oraciones y 90 palabras.`
   } else if (currentNode === 'close') {
     requires_founder_approval = true
-    directiva = 'El cliente no tiene objeciones fuertes. Cierra el trato pidiendo una demostración mediante una pregunta cerrada. ESTRICTO: Termina obligatoriamente con algo como "¿Te parece si agendamos 10 min o prefieres un PDF?". MÁXIMO 3 oraciones o 90 palabras.'
+    directiva = 'El cliente no tiene objeciones fuertes. Cierra el trato pidiendo una demostración mediante una pregunta cerrada ofreciendo dos opciones de bajo compromiso. ESTRICTO: Termina obligatoriamente con algo como "¿Te parece si agendamos 10 minutitos para mostrarte cómo se ve, o prefieres que te envíe un PDF con casos de éxito?". MÁXIMO 3 oraciones o 90 palabras.'
   }
 
   const respuesta = await llm.redactarMensajeSDR(textoOriginal, contextoActual, directiva, traceId)

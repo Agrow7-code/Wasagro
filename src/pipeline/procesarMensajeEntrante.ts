@@ -79,7 +79,7 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
     const usuario = await getUserByPhone(msg.from)
 
     if (!usuario) {
-      const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!)
+      const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!, _llm!)
       if (meetingHandled) return
       await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!)
       return

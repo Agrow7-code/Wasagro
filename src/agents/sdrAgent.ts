@@ -236,6 +236,7 @@ export async function handleMeetingConfirmation(
   mensajeId: string,
   traceId: string,
   sender: IWhatsAppSender,
+  llm: IWasagroLLM,
   client?: SupabaseClient,
 ): Promise<boolean> {
   try {
@@ -244,9 +245,20 @@ export async function handleMeetingConfirmation(
 
     const trace = langfuse.trace({ id: traceId })
     const texto = (msg.texto ?? '').trim()
-    const isMeetingConfirmed = detectarConfirmacionReunion(texto)
+    
+    // Clasificar intención post-pitch
+    const directiva = 'El usuario acaba de recibir una invitación a agendar una videollamada o recibir un PDF. Clasifica su respuesta. Devuelve SOLO JSON: {"intencion": "wants_pdf" | "booked" | "will_book_later" | "declined" | "other"}'
+    let intencion = 'other'
+    try {
+      const classifStr = await llm.redactarMensajeSDR(texto, 'Estado: Pendiente de agenda', directiva, traceId)
+      intencion = JSON.parse(classifStr).intencion
+    } catch (e) {
+      console.warn('Failed to parse meeting confirmation intent:', e)
+    }
 
-    if (isMeetingConfirmed) {
+    let actionTaken = 'meeting_pending'
+    
+    if (intencion === 'booked') {
       const reunionAgendadaAt = new Date().toISOString()
       await updateSDRProspecto(prospecto['id'] as string, {
         status: 'reunion_agendada',
@@ -255,19 +267,31 @@ export async function handleMeetingConfirmation(
 
       trace.event({
         name: 'sdr_meeting_scheduled',
-        input: {
-          prospecto_id: prospecto['id'],
-          narrativa: prospecto['narrativa_asignada'],
-          phone: prospecto['phone'],
-        },
+        input: { prospecto_id: prospecto['id'], narrativa: prospecto['narrativa_asignada'], phone: prospecto['phone'] },
       })
 
       await sender.enviarTexto(msg.from, '¡Perfecto! Quedamos confirmados. Te escribimos antes para recordarte. ✅')
+      actionTaken = 'meeting_confirmed'
+    } else if (intencion === 'wants_pdf') {
+      const pdfUrl = process.env['WASAGRO_PDF_URL'] ?? 'https://wasagro.com/brochure.pdf'
+      await sender.enviarTexto(msg.from, `¡Claro que sí! Aquí tienes nuestro brochure con casos de éxito y más detalles: ${pdfUrl}\n\nÉchale un vistazo y si te surge alguna duda, me avisas por aquí.`)
+      actionTaken = 'pdf_sent'
+      
+      // Mover a estado 'dormant' o mantener 'piloto_propuesto' pero con anotación
+      await updateSDRProspecto(prospecto['id'] as string, { status: 'dormant' }, client)
+    } else if (intencion === 'declined') {
+      await sender.enviarTexto(msg.from, 'Entiendo, no hay problema. Si en algún momento quieres simplificar tu operación agrícola, aquí estaremos. ¡Un saludo! 👋')
+      actionTaken = 'graceful_exit'
+      await updateSDRProspecto(prospecto['id'] as string, { status: 'descartado' }, client)
+    } else if (intencion === 'will_book_later') {
+      await sender.enviarTexto(msg.from, '¡Perfecto, quedo a la espera! Cuando tengas un ratito, me avisas o usas el link que te mandé. ⏰')
+      actionTaken = 'meeting_pending'
     } else {
+      // Intent 'other' - Respuesta conversacional amigable con el link
       const bookingUrl = process.env['DEMO_BOOKING_URL']
       const followUp = bookingUrl
-        ? `Puedes elegir el horario aquí: ${bookingUrl} ⏰`
-        : '¿Cuándo tienes 20 minutos disponibles? Dime el día y la hora que mejor te quede.'
+        ? `No estoy seguro de haberte entendido. Si quieres agendar la demostración, puedes elegir el horario directamente aquí: ${bookingUrl} ⏰`
+        : '¿Cuándo tienes 10 minutos disponibles? Dime el día y la hora que mejor te quede.'
       await sender.enviarTexto(msg.from, followUp)
     }
 
@@ -277,7 +301,7 @@ export async function handleMeetingConfirmation(
       turno: (prospecto['turns_total'] as number) + 1,
       tipo: 'meeting_confirmation',
       contenido: texto,
-      action_taken: isMeetingConfirmed ? 'meeting_confirmed' : 'meeting_pending',
+      action_taken: actionTaken,
       langfuse_trace_id: traceId,
     }, client)
 
