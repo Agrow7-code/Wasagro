@@ -1084,6 +1084,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/brochure" element={<Brochure />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/dashboard"

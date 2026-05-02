@@ -273,7 +273,7 @@ export async function handleMeetingConfirmation(
       await sender.enviarTexto(msg.from, '¡Perfecto! Quedamos confirmados. Te escribimos antes para recordarte. ✅')
       actionTaken = 'meeting_confirmed'
     } else if (intencion === 'wants_pdf') {
-      const pdfUrl = process.env['WASAGRO_PDF_URL'] ?? 'https://wasagro.com/brochure.pdf'
+      const pdfUrl = process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'
       await sender.enviarTexto(msg.from, `¡Claro que sí! Aquí tienes nuestro brochure con casos de éxito y más detalles: ${pdfUrl}\n\nÉchale un vistazo y si te surge alguna duda, me avisas por aquí.`)
       actionTaken = 'pdf_sent'
       
