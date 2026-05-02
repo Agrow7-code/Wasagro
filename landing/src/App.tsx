@@ -12,6 +12,7 @@ import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
 import { AgricultorIndividual } from './dashboard/views/AgricultorIndividual'
 import LoginPage from './auth/LoginPage'
+import Brochure from './Brochure'
 import { useAuth } from './auth/useAuth'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {

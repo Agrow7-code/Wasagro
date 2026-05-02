@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { ArrowRight, FileText, CheckCircle, BarChart3, Cloud, Droplets, Grid3x3, Leaf, Zap } from 'lucide-react'
+import { ArrowRight, FileText, CheckCircle, BarChart3, Cloud, Droplets, Grid3x3, Leaf, Zap, AlertTriangle } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────
 // ANIMATION HELPERS
