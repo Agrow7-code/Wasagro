@@ -15,6 +15,7 @@ import {
   actualizarMensaje
 } from '../supabaseQueries.js'
 import { _sender, _llm } from '../procesarMensajeEntrante.js'
+import { transcribirAudio } from '../sttService.js'
 
 // TODO: Extraer a un archivo de constantes compartidas
 const CONSENT_TEXT_ADMIN = 'Para guardar los reportes de tu finca necesito tu autorización. Tus datos son tuyos — solo se usan para generar tus reportes. Nadie más los ve sin tu permiso. ¿Aceptas?'
@@ -30,7 +31,16 @@ export async function handleOnboardingAdmin(
   traceId: string,
 ): Promise<void> {
   const session = await getOrCreateSession(msg.from, 'onboarding')
-  const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
+  
+  let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
+  if (msg.tipo === 'audio' && msg.audioUrl) {
+    try {
+      texto = await transcribirAudio(msg.audioUrl, traceId)
+    } catch (err) {
+      console.error('[Onboarding] Error transcribiendo audio:', err)
+      // Fallback a texto vacío si falla la transcripción
+    }
+  }
 
   const contexto = {
     historial: (session.contexto_parcial['historial'] as Array<{ rol: 'usuario' | 'agente'; contenido: string }>) ?? [],
@@ -118,7 +128,15 @@ export async function handleOnboardingAgricultor(
   traceId: string,
 ): Promise<void> {
   const session = await getOrCreateSession(msg.from, 'onboarding')
-  const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
+
+  let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
+  if (msg.tipo === 'audio' && msg.audioUrl) {
+    try {
+      texto = await transcribirAudio(msg.audioUrl, traceId)
+    } catch (err) {
+      console.error('[Onboarding Agr] Error transcribiendo audio:', err)
+    }
+  }
 
   const historialPrevio = (session.contexto_parcial['historial'] as Array<{ rol: 'usuario' | 'agente'; contenido: string }>) ?? []
   const datosPrevios = (session.contexto_parcial['datos'] as Record<string, unknown>) ?? {}
