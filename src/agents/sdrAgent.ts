@@ -273,8 +273,9 @@ export async function handleMeetingConfirmation(
       await sender.enviarTexto(msg.from, '¡Perfecto! Quedamos confirmados. Te escribimos antes para recordarte. ✅')
       actionTaken = 'meeting_confirmed'
     } else if (intencion === 'wants_pdf') {
-      const pdfUrl = process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'
-      await sender.enviarTexto(msg.from, `¡Claro que sí! Aquí tienes nuestro brochure con casos de éxito y más detalles: ${pdfUrl}\n\nÉchale un vistazo y si te surge alguna duda, me avisas por aquí.`)
+      const segment = (prospecto['segmento_icp'] as string) || 'exportadora'
+      const pdfUrl = `${process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'}?segment=${segment}`
+      await sender.enviarTexto(msg.from, `¡Claro que sí! Aquí tienes nuestro brochure interactivo con casos de uso y detalles específicos para tu perfil: ${pdfUrl}\n\nÉchale un vistazo y si te surge alguna duda, me avisas por aquí.`)
       actionTaken = 'pdf_sent'
       
       // Mover a estado 'dormant' o mantener 'piloto_propuesto' pero con anotación
