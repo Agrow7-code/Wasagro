@@ -21,18 +21,17 @@ export async function sdrChaserHandler(job: Job<{ prospecto_id: string, expected
   }
 
   const sender = crearSenderWhatsApp()
-  const mensaje = "Hola, ¿pudiste revisar la información de Wasagro? Sigo por aquí si tienes alguna duda sobre cómo podemos ayudarte con tu operación. 🚜"
   
-  console.log(`[sdr-chaser] Enviando seguimiento a ${prospecto['phone']} (prospecto_id: ${prospecto_id})`)
+  console.log(`[sdr-chaser] Enviando HSM de seguimiento a ${prospecto['phone']} (prospecto_id: ${prospecto_id})`)
   
-  await sender.enviarTexto(prospecto['phone'] as string, mensaje)
+  await sender.enviarTemplate(prospecto['phone'] as string, 'sdr_reenganche_24h', 'es')
   
   await saveSDRInteraccion({
     prospecto_id: prospecto['id'],
     phone: prospecto['phone'],
     turno: (prospecto['turns_total'] as number), // Se mantiene en el mismo turno lógico pero es un outbound
     tipo: 'outbound',
-    contenido: mensaje,
+    contenido: '[HSM sdr_reenganche_24h enviado]',
     action_taken: 'chaser_sequence_1'
   })
 }

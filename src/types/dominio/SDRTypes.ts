@@ -76,9 +76,12 @@ export interface DealBrief {
   source_context?: string | null
 }
 
+export type SDRNode = 'triage' | 'discovery' | 'pitch' | 'close' | 'global_fallback'
+
 export interface SDRProspectoRow {
   id: string
   phone: string
+  sdr_node: SDRNode
   nombre: string | null
   empresa: string | null
   cargo: string | null

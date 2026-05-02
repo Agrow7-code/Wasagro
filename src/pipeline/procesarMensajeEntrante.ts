@@ -49,16 +49,25 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
     return
   }
 
-  const tipoMensaje = msg.tipo === 'texto' ? 'text' : msg.tipo === 'audio' ? 'audio' : 'image'
-  const mensajeId = await registrarMensaje({
-    wa_message_id: msg.wamid,
-    phone: msg.from,
-    tipo_mensaje: tipoMensaje,
-    contenido_raw: msg.texto ?? null,
-    media_ref: msg.mediaId ?? msg.audioUrl ?? null,
-    langfuse_trace_id: traceId,
-    status: 'processing',
-  })
+  let mensajeId: string
+  try {
+    const tipoMensaje = msg.tipo === 'texto' ? 'text' : msg.tipo === 'audio' ? 'audio' : 'image'
+    mensajeId = await registrarMensaje({
+      wa_message_id: msg.wamid,
+      phone: msg.from,
+      tipo_mensaje: tipoMensaje,
+      contenido_raw: msg.texto ?? null,
+      media_ref: msg.mediaId ?? msg.audioUrl ?? null,
+      langfuse_trace_id: traceId,
+      status: 'processing',
+    })
+  } catch (err: any) {
+    if (err.code === '23505' || err.message?.includes('duplicate key value') || err.message?.includes('23505')) {
+      trace.event({ name: 'webhook_idempotency_hit', level: 'DEFAULT', input: { wamid: msg.wamid } })
+      return // Silently ignore duplicate webhook
+    }
+    throw err
+  }
 
   try {
     const founderPhone = process.env['FOUNDER_PHONE']

@@ -38,4 +38,29 @@ export class MetaSender implements IWhatsAppSender {
       throw new Error(`[MetaSender] HTTP ${res.status} al enviar mensaje: ${detail}`)
     }
   }
+
+  async enviarTemplate(to: string, templateName: string, language = 'es'): Promise<void> {
+    const url = `https://graph.facebook.com/v21.0/${this.#phoneNumberId}/messages`
+    const res = await this.#fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.#accessToken}`,
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: language }
+        }
+      }),
+    })
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw new Error(`[MetaSender] HTTP ${res.status} al enviar template: ${detail}`)
+    }
+  }
 }
