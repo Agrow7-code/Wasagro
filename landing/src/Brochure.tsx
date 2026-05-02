@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { 
   ArrowRight, FileText, CheckCircle, BarChart3, Cloud, 
   Droplets, Grid3x3, Leaf, Zap, AlertTriangle, 
-  ShieldCheck, Banknote, Building2, Users, User
+  ShieldCheck, Banknote, Building2, Users, User, DollarSign, Mic
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────
