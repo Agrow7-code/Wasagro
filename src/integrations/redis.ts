@@ -7,6 +7,8 @@ export function getRedisClient(): Redis {
     const connectionUrl = process.env['REDIS_URL'] ?? 'redis://localhost:6379'
     redisClient = new Redis(connectionUrl, {
       maxRetriesPerRequest: 3,
+      enableOfflineQueue: false,
+      connectTimeout: 5000,
     })
     
     redisClient.on('error', (err) => {
