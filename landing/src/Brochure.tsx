@@ -689,47 +689,23 @@ export default function Brochure() {
               </span>
             </div>
 
-            {/* Mobile: flex col — chat then horizontal proof numbers. Desktop: side-by-side grid */}
             <div className="flex flex-col gap-6">
-              {/* Chat — full width on all sizes */}
               <WAChatSimulator messages={demoMessages} key={segmentKey} />
 
-              {/* Proof numbers — horizontal row on mobile, hidden on md (shown in side column below) */}
-              <div className="grid grid-cols-3 md:hidden gap-3">
+              <div className="grid grid-cols-3 gap-3 md:gap-5">
                 {content.proof.map((p, i) => (
                   <motion.div
                     key={i}
-                    className="border-2 border-negro rounded-xl p-3 bg-white shadow-hard text-center"
+                    className="border-2 border-negro rounded-xl md:rounded-2xl p-3 md:p-5 bg-white shadow-hard text-center"
                     initial={{ opacity: 0, y: 10 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.45, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
                   >
-                    <p className="font-bold text-[18px] leading-none tracking-tight text-campo mb-1">{p.value}</p>
-                    <p className="text-[10px] text-n700 leading-snug">{p.label}</p>
+                    <p className="font-bold text-[18px] md:text-[28px] leading-none tracking-tight text-campo mb-1">{p.value}</p>
+                    <p className="text-[10px] md:text-[12px] text-n700 leading-snug">{p.label}</p>
                   </motion.div>
                 ))}
-              </div>
-
-              {/* Desktop side-by-side layout */}
-              <div className="hidden md:grid md:grid-cols-[1fr_200px] gap-6 items-start -mt-6">
-                {/* Spacer to align with the chat above */}
-                <div />
-                <div className="flex flex-col gap-4">
-                  {content.proof.map((p, i) => (
-                    <motion.div
-                      key={i}
-                      className="border-2 border-negro rounded-2xl p-5 bg-white shadow-hard text-center"
-                      initial={{ opacity: 0, y: 10 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true }}
-                      transition={{ duration: 0.45, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
-                    >
-                      <p className="font-bold text-[28px] leading-none tracking-tight text-campo mb-1">{p.value}</p>
-                      <p className="text-[12px] text-n700 leading-snug">{p.label}</p>
-                    </motion.div>
-                  ))}
-                </div>
               </div>
             </div>
           </div>
@@ -799,28 +775,6 @@ export default function Brochure() {
                 <p className="text-[13px] text-n700 leading-relaxed">{f.desc}</p>
               </div>
             ))}
-          </div>
-        </FadeUp>
-
-        {/* SOCIAL PROOF STRIP */}
-        <FadeUp delay={0.1}>
-          <div className="mb-20">
-            <p className="font-mono text-[11px] text-n400 uppercase tracking-widest mb-4">Compatible con</p>
-            <div className="flex flex-wrap gap-3">
-              {[
-                'EUDR',
-                'WhatsApp Business API',
-                'Deepgram STT',
-                'Supabase',
-              ].map((badge) => (
-                <span
-                  key={badge}
-                  className="border border-negro/20 rounded-lg px-4 py-2.5 text-[12px] font-bold text-n700 bg-white"
-                >
-                  {badge}
-                </span>
-              ))}
-            </div>
           </div>
         </FadeUp>
 
