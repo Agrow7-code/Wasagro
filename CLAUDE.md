@@ -246,6 +246,15 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Por qué no esperar:** El costo de NO tener contexto histórico en H0-R es falsos negativos en plagas recurrentes y preguntas de clarificación innecesarias sobre datos que ya están en el sistema.
 - **Revisar cuando:** Latencia de RAG retrieval > 1s en producción (actualmente <300ms en Supabase pgvector). Si el volumen de eventos supera 10K por finca, evaluar índice HNSW dedicado. Si `_ragRetriever` devuelve context irrelevante frecuentemente (>20% de queries), ajustar similarity threshold.
 
+### D17. Acceso live a Supabase durante el loop ReAct de extracción
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** El extractor de intenciones necesitaba resolver ambigüedades (lotes con nombres coloquiales, productos en inventario) sin preguntar al agricultor. Sin datos reales, la única opción era marcar como `requiere_clarificacion` o inventar el `lote_id` — ambas inaceptables (P1, P2).
+- **Decisión:** El LLM tiene acceso durante el ReAct loop a un conjunto fijo y cerrado de herramientas de solo lectura contra Supabase: `obtener_lotes_finca` y `consultar_inventario_insumos`. El `finca_id` siempre se inyecta desde el contexto del usuario — el LLM no puede consultar datos de otra finca. Doom-loop guard detecta llamadas repetidas a la misma herramienta con los mismos args y fuerza la extracción final.
+- **Implementación:** `src/agents/mcp/SupabaseTools.ts` (definición de herramientas), `src/integrations/llm/WasagroAIAgent.ts` (`#extraerEspecializado` — loop ReAct con tool dispatch). ADR: `docs/decisions/008-react-supabase-live-query.md`.
+- **Guardrails activos:** Solo SELECT, scoped por `finca_id`, conjunto cerrado, doom-loop guard, LangFuse events en cada tool call y cada error.
+- **Revisar cuando:** Latencia de queries supera 500ms en producción. Si se necesita agregar una nueva herramienta, requiere actualización del prompt del extractor + evaluación de impacto en latencia.
+
 ### D16. Onboarding conversacional de admin y agricultor
 
 - **Fecha:** Abril 2026
