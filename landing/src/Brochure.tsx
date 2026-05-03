@@ -1,6 +1,6 @@
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence, useMotionValue, useTransform } from 'motion/react'
 import { useSearchParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   ArrowRight, FileText, CheckCircle, BarChart3, Cloud,
   Droplets, Grid3x3, Leaf, Zap, AlertTriangle,
@@ -387,6 +387,27 @@ const SEGMENTS: Record<string, SegmentContent> = {
 const DEFAULT_SEGMENT_KEY = 'exportadora'
 
 // ─────────────────────────────────────────────────────────────
+// HOOKS
+// ─────────────────────────────────────────────────────────────
+
+function useScrollProgress() {
+  const scrollYProgress = useMotionValue(0)
+
+  useEffect(() => {
+    const updateProgress = () => {
+      const scrollTop = window.scrollY
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight
+      scrollYProgress.set(docHeight > 0 ? scrollTop / docHeight : 0)
+    }
+    window.addEventListener('scroll', updateProgress, { passive: true })
+    updateProgress()
+    return () => window.removeEventListener('scroll', updateProgress)
+  }, [scrollYProgress])
+
+  return scrollYProgress
+}
+
+// ─────────────────────────────────────────────────────────────
 // SHARED COMPONENTS
 // ─────────────────────────────────────────────────────────────
 
@@ -583,6 +604,26 @@ const HOW_STEPS = [
 ]
 
 // ─────────────────────────────────────────────────────────────
+// SCROLL PROGRESS BAR
+// ─────────────────────────────────────────────────────────────
+
+function ScrollProgressBar() {
+  const scrollYProgress = useScrollProgress()
+  const scaleX = useTransform(scrollYProgress, [0, 1], [0, 1])
+
+  return (
+    <motion.div
+      className="fixed top-0 left-0 right-0 h-[3px] z-[60] origin-left"
+      style={{
+        scaleX,
+        transformOrigin: 'left',
+        background: '#C9F03B',
+      }}
+    />
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 
@@ -594,6 +635,9 @@ export default function Brochure() {
 
   return (
     <div className="min-h-screen dot-grid" style={{ background: '#F5F1E8', fontFamily: 'Space Grotesk, sans-serif' }}>
+      {/* SCROLL PROGRESS BAR */}
+      <ScrollProgressBar />
+
       {/* HEADER */}
       <header className="border-b-2 border-negro py-5 sticky top-0 bg-[#F5F1E8]/90 backdrop-blur-md z-50">
         <div className="max-w-4xl mx-auto px-6 flex justify-between items-center">
@@ -605,7 +649,7 @@ export default function Brochure() {
             href={content.ctaHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard-sm hover:translate-y-[-2px] transition-transform"
+            className="hidden md:flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard-sm hover:translate-y-[-2px] transition-transform"
           >
             {content.ctaLabel}
             <ArrowRight size={13} strokeWidth={2.5} />
@@ -613,7 +657,7 @@ export default function Brochure() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-14">
+      <main className="max-w-4xl mx-auto px-6 py-14 pb-20 md:pb-14">
 
         {/* HERO */}
         <FadeUp>
@@ -623,40 +667,70 @@ export default function Brochure() {
             </div>
           </div>
           <h1
-            className="font-bold leading-[1.05] tracking-[-0.03em] text-negro mb-6"
-            style={{ fontSize: 'clamp(32px, 5.5vw, 56px)' }}
+            className="font-bold leading-[1.05] tracking-[-0.04em] text-negro mb-6"
+            style={{ fontSize: 'clamp(32px, 5.5vw, 56px)', fontFeatureSettings: "'ss01'" }}
           >
             {content.title}
           </h1>
-          <p className="text-[18px] text-n700 leading-[1.65] mb-12 max-w-2xl">
+          <p className="text-[17px] md:text-[19px] text-n700 leading-[1.65] mb-12 max-w-2xl">
             {content.subtitle}
           </p>
         </FadeUp>
 
         {/* DEMO SECTION — WhatsApp simulator + proof numbers */}
         <FadeUp delay={0.08}>
-          <div className="grid md:grid-cols-[1fr_200px] gap-6 items-start mb-20">
-            {/* Chat */}
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <MessageSquare size={14} className="text-n400" />
-                <span className="font-mono text-[11px] text-n400 uppercase tracking-widest">Demo en vivo</span>
-                <span className="flex items-center gap-1 ml-auto">
-                  <span className="w-2 h-2 rounded-full bg-ok animate-pulse" />
-                  <span className="font-mono text-[11px] text-ok">procesando</span>
-                </span>
-              </div>
-              <WAChatSimulator messages={demoMessages} key={segmentKey} />
+          <div className="mb-20">
+            <div className="flex items-center gap-2 mb-4">
+              <MessageSquare size={14} className="text-n400" />
+              <span className="font-mono text-[11px] text-n400 uppercase tracking-widest">Demo en vivo</span>
+              <span className="flex items-center gap-1 ml-auto">
+                <span className="w-2 h-2 rounded-full bg-ok animate-pulse" />
+                <span className="font-mono text-[11px] text-ok">procesando</span>
+              </span>
             </div>
 
-            {/* Proof numbers */}
-            <div className="flex flex-col gap-4">
-              {content.proof.map((p, i) => (
-                <div key={i} className="border-2 border-negro rounded-2xl p-5 bg-white shadow-hard text-center">
-                  <p className="font-bold text-[28px] leading-none tracking-tight text-campo mb-1">{p.value}</p>
-                  <p className="text-[12px] text-n700 leading-snug">{p.label}</p>
+            {/* Mobile: flex col — chat then horizontal proof numbers. Desktop: side-by-side grid */}
+            <div className="flex flex-col gap-6">
+              {/* Chat — full width on all sizes */}
+              <WAChatSimulator messages={demoMessages} key={segmentKey} />
+
+              {/* Proof numbers — horizontal row on mobile, hidden on md (shown in side column below) */}
+              <div className="grid grid-cols-3 md:hidden gap-3">
+                {content.proof.map((p, i) => (
+                  <motion.div
+                    key={i}
+                    className="border-2 border-negro rounded-xl p-3 bg-white shadow-hard text-center"
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.45, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <p className="font-bold text-[18px] leading-none tracking-tight text-campo mb-1">{p.value}</p>
+                    <p className="text-[10px] text-n700 leading-snug">{p.label}</p>
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* Desktop side-by-side layout */}
+              <div className="hidden md:grid md:grid-cols-[1fr_200px] gap-6 items-start -mt-6">
+                {/* Spacer to align with the chat above */}
+                <div />
+                <div className="flex flex-col gap-4">
+                  {content.proof.map((p, i) => (
+                    <motion.div
+                      key={i}
+                      className="border-2 border-negro rounded-2xl p-5 bg-white shadow-hard text-center"
+                      initial={{ opacity: 0, y: 10 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.45, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <p className="font-bold text-[28px] leading-none tracking-tight text-campo mb-1">{p.value}</p>
+                      <p className="text-[12px] text-n700 leading-snug">{p.label}</p>
+                    </motion.div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           </div>
         </FadeUp>
@@ -685,6 +759,9 @@ export default function Brochure() {
           </div>
         </FadeUp>
 
+        {/* SECTION DIVIDER */}
+        <div className="border-t border-negro/10 mb-20" />
+
         {/* PROBLEM / SOLUTION */}
         <div className="grid sm:grid-cols-2 gap-6 mb-20">
           <FadeUp delay={0.1}>
@@ -703,6 +780,9 @@ export default function Brochure() {
           </FadeUp>
         </div>
 
+        {/* SECTION DIVIDER */}
+        <div className="border-t border-negro/10 mb-20" />
+
         {/* FEATURES */}
         <FadeUp delay={0.15}>
           <p className="font-mono text-[11px] text-n400 uppercase tracking-widest mb-4">Qué obtenés</p>
@@ -710,9 +790,9 @@ export default function Brochure() {
             {content.features.map((f, i) => (
               <div
                 key={i}
-                className="p-6 border-2 border-negro rounded-2xl bg-white shadow-hard hover:translate-y-[-4px] transition-transform duration-200"
+                className="group p-6 border-2 border-negro rounded-2xl bg-white shadow-hard hover:translate-y-[-4px] transition-transform duration-200"
               >
-                <div className="w-11 h-11 rounded-xl bg-negro flex items-center justify-center mb-5">
+                <div className="w-11 h-11 rounded-xl bg-negro group-hover:bg-campo flex items-center justify-center mb-5 transition-colors duration-200">
                   <f.icon size={20} color="#C9F03B" strokeWidth={2} />
                 </div>
                 <h4 className="font-bold text-[16px] mb-2.5 text-negro leading-snug">{f.title}</h4>
@@ -722,13 +802,36 @@ export default function Brochure() {
           </div>
         </FadeUp>
 
+        {/* SOCIAL PROOF STRIP */}
+        <FadeUp delay={0.1}>
+          <div className="mb-20">
+            <p className="font-mono text-[11px] text-n400 uppercase tracking-widest mb-4">Compatible con</p>
+            <div className="flex flex-wrap gap-3">
+              {[
+                'EUDR',
+                'WhatsApp Business API',
+                'Deepgram STT',
+                'Supabase',
+              ].map((badge) => (
+                <span
+                  key={badge}
+                  className="border border-negro/20 rounded-lg px-4 py-2.5 text-[12px] font-bold text-n700 bg-white"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+          </div>
+        </FadeUp>
+
         {/* FINAL CTA */}
         <FadeUp delay={0.2}>
           <div className="bg-[#1B3D24] text-pergamino border-2 border-negro rounded-3xl p-10 sm:p-14 text-center relative overflow-hidden">
             <div className="absolute inset-0 dot-grid-light opacity-10 pointer-events-none" />
             <div className="relative z-10">
               <h2 className="font-bold leading-tight mb-5" style={{ fontSize: 'clamp(28px, 4vw, 40px)' }}>
-                Cada día sin datos del campo es un día tomando decisiones a ciegas.
+                Cada día sin datos del campo es un día{' '}
+                <span className="text-senal">tomando decisiones a ciegas.</span>
               </h2>
               <p className="text-[17px] text-pergamino/70 mb-10 max-w-xl mx-auto leading-relaxed">
                 Empezar toma menos de 10 minutos. No hay hardware, no hay instalaciones, no hay capacitación técnica.
@@ -749,8 +852,30 @@ export default function Brochure() {
       </main>
 
       <footer className="border-t-2 border-negro py-8 text-center bg-white">
+        <div className="flex gap-6 justify-center mb-4">
+          <a href="#" className="text-n400 hover:text-negro text-[12px] font-mono transition-colors">Política de privacidad</a>
+          <a href="#" className="text-n400 hover:text-negro text-[12px] font-mono transition-colors">Términos de uso</a>
+        </div>
         <p className="font-mono text-[12px] text-n400 tracking-wider">© 2026 WASAGRO AGTECH · LATAM</p>
       </footer>
+
+      {/* FLOATING MOBILE CTA */}
+      <motion.div
+        className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t-2 border-negro bg-[#F5F1E8]/95 backdrop-blur-md px-4 py-3"
+        initial={{ y: 80 }}
+        animate={{ y: 0 }}
+        transition={{ duration: 0.5, delay: 1.5, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <a
+          href={content.ctaHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 w-full px-6 py-3 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-xl shadow-hard-sm"
+        >
+          {content.ctaLabel}
+          <ArrowRight size={16} strokeWidth={2.5} />
+        </a>
+      </motion.div>
     </div>
   )
 }
