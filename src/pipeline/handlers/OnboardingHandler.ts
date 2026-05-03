@@ -16,6 +16,7 @@ import {
 } from '../supabaseQueries.js'
 import { _sender, _llm } from '../procesarMensajeEntrante.js'
 import { transcribirAudio } from '../sttService.js'
+import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 
 // TODO: Extraer a un archivo de constantes compartidas
 const CONSENT_TEXT_ADMIN = 'Para guardar los reportes de tu finca necesito tu autorización. Tus datos son tuyos — solo se usan para generar tus reportes. Nadie más los ve sin tu permiso. ¿Aceptas?'
@@ -33,12 +34,23 @@ export async function handleOnboardingAdmin(
   const session = await getOrCreateSession(msg.from, 'onboarding')
   
   let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
-  if (msg.tipo === 'audio' && msg.audioUrl) {
+  if (msg.tipo === 'audio') {
+    let audioInput: string | Buffer = msg.audioUrl ?? ''
+    const evApiUrl = process.env['EVOLUTION_API_URL']
+    const evApiKey = process.env['EVOLUTION_API_KEY']
+    const evInstance = process.env['EVOLUTION_INSTANCE']
+    if (evApiUrl && evApiKey && evInstance) {
+      try {
+        const media = await downloadEvolutionMedia(msg.rawPayload, evApiUrl, evApiKey, evInstance)
+        audioInput = Buffer.from(media.base64, 'base64')
+      } catch (downloadErr) {
+        langfuse.trace({ id: traceId }).event({ name: 'audio_download_failed', level: 'WARNING', input: { error: String(downloadErr), wamid: msg.wamid } })
+      }
+    }
     try {
-      texto = await transcribirAudio(msg.audioUrl, traceId)
+      texto = await transcribirAudio(audioInput, traceId)
     } catch (err) {
-      console.error('[Onboarding] Error transcribiendo audio:', err)
-      // Fallback a texto vacío si falla la transcripción
+      langfuse.trace({ id: traceId }).event({ name: 'stt_error', level: 'ERROR', input: { audio_ref: typeof audioInput === 'string' ? audioInput : '[buffer]', wamid: msg.wamid, error: String(err) } })
     }
   }
 
@@ -130,11 +142,23 @@ export async function handleOnboardingAgricultor(
   const session = await getOrCreateSession(msg.from, 'onboarding')
 
   let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
-  if (msg.tipo === 'audio' && msg.audioUrl) {
+  if (msg.tipo === 'audio') {
+    let audioInput: string | Buffer = msg.audioUrl ?? ''
+    const evApiUrl = process.env['EVOLUTION_API_URL']
+    const evApiKey = process.env['EVOLUTION_API_KEY']
+    const evInstance = process.env['EVOLUTION_INSTANCE']
+    if (evApiUrl && evApiKey && evInstance) {
+      try {
+        const media = await downloadEvolutionMedia(msg.rawPayload, evApiUrl, evApiKey, evInstance)
+        audioInput = Buffer.from(media.base64, 'base64')
+      } catch (downloadErr) {
+        langfuse.trace({ id: traceId }).event({ name: 'audio_download_failed', level: 'WARNING', input: { error: String(downloadErr), wamid: msg.wamid } })
+      }
+    }
     try {
-      texto = await transcribirAudio(msg.audioUrl, traceId)
+      texto = await transcribirAudio(audioInput, traceId)
     } catch (err) {
-      console.error('[Onboarding Agr] Error transcribiendo audio:', err)
+      langfuse.trace({ id: traceId }).event({ name: 'stt_error', level: 'ERROR', input: { audio_ref: typeof audioInput === 'string' ? audioInput : '[buffer]', wamid: msg.wamid, error: String(err) } })
     }
   }
 

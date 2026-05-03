@@ -103,9 +103,26 @@ export async function handleEvento(
 
   if (msg.tipo === 'audio') {
     await _sender!.enviarTexto(msg.from, '✅ Recibí tu audio, lo estoy procesando...')
-    const audioRef = msg.audioUrl ?? msg.mediaId ?? ''
+    // CDN URLs de Evolution API requieren auth Bearer — igual que D8 para imágenes
+    let audioInput: string | Buffer = msg.audioUrl ?? msg.mediaId ?? ''
+    const evApiUrl = process.env['EVOLUTION_API_URL']
+    const evApiKey = process.env['EVOLUTION_API_KEY']
+    const evInstance = process.env['EVOLUTION_INSTANCE']
+    if (evApiUrl && evApiKey && evInstance) {
+      try {
+        const media = await downloadEvolutionMedia(msg.rawPayload, evApiUrl, evApiKey, evInstance)
+        audioInput = Buffer.from(media.base64, 'base64')
+      } catch (downloadErr) {
+        langfuse.trace({ id: traceId }).event({
+          name: 'audio_download_failed',
+          level: 'WARNING',
+          input: { error: String(downloadErr), wamid: msg.wamid },
+        })
+      }
+    }
+    const audioRef = typeof audioInput === 'string' ? audioInput : '[buffer]'
     try {
-      transcripcion = await transcribirAudio(audioRef, traceId)
+      transcripcion = await transcribirAudio(audioInput, traceId)
     } catch (err) {
       if (err instanceof Error && err.message === 'STT_NO_DISPONIBLE') {
         langfuse.trace({ id: traceId }).event({
@@ -464,6 +481,27 @@ export async function handleEvento(
       // Validar si requiere clarificación (ej. falta cantidad de plaga)
       const eventoAClarificar = eventosValidos.find(e => e.requiere_clarificacion && e.pregunta_sugerida)
       if (eventoAClarificar) {
+        // P2: máximo 2 preguntas — si ya se preguntó 2 veces, registrar como nota_libre
+        if (session.clarification_count >= 2) {
+          langfuse.trace({ id: traceId }).event({ name: 'max_clarifications_reached', level: 'WARNING', input: { count: session.clarification_count, wamid: msg.wamid } })
+          for (const ext of eventosValidos) {
+            await saveEvento({
+              finca_id: usuario.finca_id!,
+              lote_id: ext.lote_id,
+              tipo_evento: 'nota_libre',
+              descripcion_raw: transcripcionMerged,
+              datos_evento: { ...ext.campos_extraidos, _meta: { campos_faltantes: ext.campos_faltantes } },
+              confidence_score: ext.confidence_score,
+              status: 'requires_review',
+              requiere_validacion: true,
+              created_by: usuario.id,
+            })
+          }
+          await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+          await _sender!.enviarTexto(msg.from, 'No pude completar todos los datos. Guardé tu reporte para que tu asesor lo revise. ⚠️')
+          await actualizarMensaje(mensajeId, { status: 'processed' })
+          return
+        }
         await updateSession(session.session_id, {
           status: 'pending_confirmation',
           clarification_count: session.clarification_count + 1,

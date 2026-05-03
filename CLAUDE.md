@@ -218,17 +218,31 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Resultado:** Si Railway mata el proceso mientras el worker de "gasto" se ejecuta, pg-boss solo reintenta la tarea de "gasto". La tarea de "aplicación" que terminó milisegundos antes y guardó su estado queda intacta.
 - **Revisar cuando:** Latencia del IntentGate > 2s (debería ser <1s con Tier fast). Errores de coordinación en sesión cuando >5 intenciones simultáneas (edge case extremo).
 
-### D4. STT: GPT-4o Mini Transcribe
+### D4. STT: Deepgram nova-2-general
 
-- **Fecha:** Abril 2026
-- **Cumple:** CR4 parcial — $0.003/min, .opus, latencia ok. WER en campo no validado aún (H-TEC-02).
-- **Revisar cuando:** Resultados de H-TEC-02 (20 audios, 4 modelos). Si Voxtral demuestra mejor WER, migrar. Si Whisper self-hosted alcanza WER comparable a <$0.001/min, migrar en H1.
+- **Fecha:** Mayo 2026 (actualizado — reemplaza GPT-4o Mini Transcribe)
+- **Reemplaza:** GPT-4o Mini Transcribe (OpenAI). La decisión inicial fue de papel — en H0-R se consiguió acceso al API de Deepgram, que resuelve tres limitaciones concretas de OpenAI Transcribe: (1) soporte nativo `.opus` sin conversión previa, (2) modo `language: 'multi'` para español LATAM + inglés mezclado en un mismo audio, (3) integración directa con Buffer en memoria sin archivo temporal en disco.
+- **Modelo activo:** `nova-2-general` con `language: 'multi'`, `smart_format: true`.
+- **Cumple:** CR4 parcial — $0.0043/min, `.opus` nativo, latencia <5s para 45s de audio, vocabulario personalizable. WER en campo no validado aún (H-TEC-02 pendiente).
+- **Implementación:** `src/pipeline/sttService.ts`. Variable requerida: `DEEPGRAM_API_KEY` en Railway. SDK: `@deepgram/sdk` v5 — `client.listen.v1.media.transcribeFile(buffer, options)`. Respuesta es `HttpResponsePromise<ListenV1Response | ListenV1AcceptedResponse>` → acceder via `.data.results`.
+- **Revisar cuando:** Resultados de H-TEC-02 (20 audios, 4 modelos). Si Voxtral demuestra WER superior en español agrícola LATAM, migrar. Si `nova-3` mejora accuracy sin incremento significativo de costo, actualizar modelo.
 
 ### D5. Observabilidad: LangFuse self-hosted
 
 - **Fecha:** Abril 2026
 - **Cumple:** CR5 — trazabilidad completa, evals, $0/mes (Postgres compartido con Supabase).
 - **Revisar cuando:** Volumen de traces sature el Postgres compartido. Alternativa: LangFuse Cloud (free tier 50K traces/mes).
+
+### D12. RAG contextual + Embeddings semánticos para diagnóstico agrícola
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** El diagnóstico de plagas (V2VK) y la extracción multi-intento operaban sin memoria histórica. Un colega enviaba una foto de trips — el sistema no podía saber si esa misma finca había reportado la misma plaga la semana anterior, si ya se había aplicado un insumo específico, o qué cultivo tiene ese lote. Sin contexto histórico, el diagnóstico era genérico e ignoraba patrones de la finca.
+- **Decisión:** Dos mecanismos paralelos de contexto:
+  1. **Embeddings por evento:** Cada evento de campo confirmado se convierte en embedding semántico (`svc.generarEmbedding(descripcion_raw)`) y se persiste via `guardarEmbeddingEnEvento`. Esto construye una memoria vectorial de la finca a lo largo del tiempo.
+  2. **RAG retrieval en tiempo real:** Antes de la extracción de intenciones (texto) y antes del diagnóstico V2VK (imagen), se recuperan los N eventos más similares de la finca (`_ragRetriever.recuperarContexto(finca_id, query)`). El contexto recuperado se inyecta en el prompt del LLM.
+- **Implementación:** `src/integrations/llm/EmbeddingService.ts` (`IEmbeddingService`), `src/pipeline/supabaseQueries.ts` (`guardarEmbeddingEnEvento`), `src/pipeline/handlers/EventHandler.ts` (RAG en paths de texto e imagen). Variables: embedding model via `_embeddingService` singleton.
+- **Por qué no esperar:** El costo de NO tener contexto histórico en H0-R es falsos negativos en plagas recurrentes y preguntas de clarificación innecesarias sobre datos que ya están en el sistema.
+- **Revisar cuando:** Latencia de RAG retrieval > 1s en producción (actualmente <300ms en Supabase pgvector). Si el volumen de eventos supera 10K por finca, evaluar índice HNSW dedicado. Si `_ragRetriever` devuelve context irrelevante frecuentemente (>20% de queries), ajustar similarity threshold.
 
 ### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 
