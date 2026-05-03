@@ -36,8 +36,19 @@ export class NvidiaAdapter implements ILLMAdapter {
       if (opciones.systemPrompt) {
         messages.push({ role: 'system', content: opciones.systemPrompt })
       }
-      if (userContent) {
-        messages.push({ role: 'user', content: userContent })
+      if (userContent || opciones.imageBase64 || opciones.imageUrl) {
+        if (opciones.imageBase64 || opciones.imageUrl) {
+          const imageUrl = opciones.imageBase64
+            ? `data:${opciones.imageMimeType ?? 'image/jpeg'};base64,${opciones.imageBase64}`
+            : opciones.imageUrl!
+          const content: OpenAI.Chat.ChatCompletionContentPart[] = [
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ]
+          if (userContent) content.push({ type: 'text', text: userContent })
+          messages.push({ role: 'user', content })
+        } else {
+          messages.push({ role: 'user', content: userContent })
+        }
       }
 
       const body: any = {

@@ -8,7 +8,7 @@ import { LLMRouter } from './LLMRouter.js'
 import { WasagroAIAgent } from './WasagroAIAgent.js'
 import { langfuse } from '../langfuse.js'
 
-export type LLMProvider = 'auto' | 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'deepseek-ocr' | 'internvl' | 'glm' | 'minimax' | 'qwen' | 'gemma'
+export type LLMProvider = 'auto' | 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'deepseek-ocr' | 'internvl' | 'glm' | 'minimax' | 'qwen' | 'gemma' | 'nemotron-ocr' | 'kimi-k2'
 
 function buildAdapter(provider: string): ILLMAdapter {
   if (provider === 'gemini') {
@@ -56,6 +56,16 @@ function buildAdapter(provider: string): ILLMAdapter {
     if (!apiKey) throw new Error('gemma requiere NVIDIA_GEMMA_KEY')
     return new NvidiaAdapter({ apiKey, model: 'google/gemma-4-31b-it', extraParams: { top_p: 0.95, chat_template_kwargs: { enable_thinking: true, clear_thinking: true } } })
   }
+  if (provider === 'nemotron-ocr') {
+    const apiKey = process.env['NVIDIA_API_KEY']
+    if (!apiKey) throw new Error('nemotron-ocr requiere NVIDIA_API_KEY')
+    return new NvidiaAdapter({ apiKey, model: 'nvidia/nemotron-ocr-v1', extraParams: { temperature: 0, top_p: 0.1, max_tokens: 8192 } })
+  }
+  if (provider === 'kimi-k2') {
+    const apiKey = process.env['KIMI_K2_API_KEY'] ?? process.env['NVIDIA_API_KEY']
+    if (!apiKey) throw new Error('kimi-k2 requiere KIMI_K2_API_KEY o NVIDIA_API_KEY')
+    return new NvidiaAdapter({ apiKey, model: 'moonshotai/kimi-k2.6', extraParams: { max_tokens: 16384, temperature: 1.0, top_p: 1.0, chat_template_kwargs: { thinking: true } } })
+  }
   if (provider === 'ollama') return new OllamaAdapter()
   throw new Error(`Provider desconocido: ${provider}`)
 }
@@ -87,6 +97,8 @@ export function crearAdapterLLM(): ILLMAdapter {
     { name: 'Qwen', key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'ultra' },
 
     // TIER 4 (OCR): Procesamiento de documentos manuscritos, box-free parsing
+    { name: 'Nemotron-OCR-v1', key: 'NVIDIA_API_KEY', provider: 'nemotron-ocr', tier: 'ocr' },
+    { name: 'Kimi-K2.6', key: 'KIMI_K2_API_KEY', provider: 'kimi-k2', tier: 'ocr' },
     { name: 'DeepSeek-OCR', key: 'NVIDIA_OCR_KEY', provider: 'deepseek-ocr', tier: 'ocr' },
     { name: 'InternVL', key: 'NVIDIA_INTERVL_KEY', provider: 'internvl', tier: 'ocr' },
     ]

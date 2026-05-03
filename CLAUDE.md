@@ -182,6 +182,8 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
   5. **Fallback graceful** — Si el tier `ocr` no tiene adapters configurados (sin NVIDIA_API_KEY), el router hace fallback a `ultra` (Gemini Pro) con warning en logs.
 - **Implementación:** `src/integrations/llm/ILLMAdapter.ts` (ModelClass extendido), `src/integrations/llm/NvidiaAdapter.ts` (reutilizado para DeepSeek-OCR vía NVIDIA API), `src/integrations/llm/index.ts` (pool config con tier `ocr`), `src/types/dominio/OCR.ts` (ResultadoOCRSchema), `prompts/sp-03d-ocr-documento.md` (reescrito para OCR especializado), `src/integrations/llm/WasagroAIAgent.ts` (modelClass actualizados).
 - **Cumple:** CR3 (JSON extraction con validación Zod <10ms), CR5 (LangFuse en ambos paths), D3 (router tiered), AGENTS.md Regla 1 (no inventar datos — Zod bloquea formatos incorrectos).
+- **Pool OCR activo (Mayo 2026):** Nemotron-OCR-v1 (`nvidia/nemotron-ocr-v1`, temp=0, top_p=0.1, max_tokens=8192) como modelo primario; Kimi-K2.6 (`moonshotai/kimi-k2.6`, max_tokens=16384, thinking=true) como segundo; DeepSeek-OCR (`deepseek-ai/deepseek-ocr-v2`) y InternVL 3.0 como fallbacks. Nemotron y Kimi se añadieron por su especialización en box-free parsing — DeepSeek-OCR era la única opción y tenía timeouts frecuentes en documentos densos.
+- **Loop de auto-corrección (Mayo 2026):** Si Zod rechaza el output del modelo, se reintenta hasta MAX_OCR_RETRIES=2 pasando los errores específicos + imagen nuevamente. Si se agotan los intentos, `construirFallbackOCR()` aplica coerción determinista + marca como requires_review. LangFuse events: `ocr_zod_retry`, `ocr_zod_exhausted`.
 - **Revisar cuando:** Field-level accuracy en OCR < 85%. Si InternVL 3.0 supera a DeepSeek-OCR en benchmarks de handwritten, hacer swap. Si se añade `recibo_de_pago` a TipoImagen, necesita su propio prompt y schema de validación.
 
 ### D8. Descarga de media de Evolution API como base64
@@ -243,6 +245,30 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Implementación:** `src/integrations/llm/EmbeddingService.ts` (`IEmbeddingService`), `src/pipeline/supabaseQueries.ts` (`guardarEmbeddingEnEvento`), `src/pipeline/handlers/EventHandler.ts` (RAG en paths de texto e imagen). Variables: embedding model via `_embeddingService` singleton.
 - **Por qué no esperar:** El costo de NO tener contexto histórico en H0-R es falsos negativos en plagas recurrentes y preguntas de clarificación innecesarias sobre datos que ya están en el sistema.
 - **Revisar cuando:** Latencia de RAG retrieval > 1s en producción (actualmente <300ms en Supabase pgvector). Si el volumen de eventos supera 10K por finca, evaluar índice HNSW dedicado. Si `_ragRetriever` devuelve context irrelevante frecuentemente (>20% de queries), ajustar similarity threshold.
+
+### D13. SDR — Pipeline de ventas via WhatsApp
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** El equipo necesitaba demostrar Wasagro a exportadoras potenciales. El canal natural es WhatsApp (mismo que usan los agricultores), pero el flujo de prospecting/ventas es completamente distinto al flujo de captura de campo: el interlocutor es un ejecutivo, no un trabajador; el objetivo es calificar y convertir, no estructurar datos agronómicos.
+- **Decisión:** Pipeline SDR independiente del pipeline de campo, activado por número de WhatsApp diferenciado o por flag en la sesión. Tres fases: (1) `atenderProspecto` — saludo y calificación con `sp-00-prospecto.md`; (2) `extraerDatosSDR` — extracción de empresa/cultivo/hectáreas/problema con `SP-SDR-02-extractor.md`; (3) `redactarMensajeSDR` — propuesta personalizada con `SP-SDR-03-writer.md`. Usa `modelClass: 'fast'` para latencia mínima.
+- **Implementación:** `src/integrations/llm/WasagroAIAgent.ts` — métodos `atenderProspecto`, `extraerDatosSDR`, `redactarMensajeSDR`. Prompts en `prompts/sp-00-prospecto.md`, `prompts/SP-SDR-02-extractor.md`, `prompts/SP-SDR-03-writer.md`.
+- **Revisar cuando:** Se construya CRM propio. Si el volumen de prospectos supera 50/mes, evaluar Inngest para queue de follow-ups automáticos.
+
+### D14. Resumen semanal por finca
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** Las exportadoras necesitan visibilidad semanal consolidada de la actividad de cada finca — insumos aplicados, costos acumulados, plagas detectadas, eventos pendientes de revisión. Sin esto, el valor de Wasagro no es visible para quien paga.
+- **Decisión:** Generación de resumen estructurado por finca a partir de los eventos de la semana. El método `resumirSemana(fincaId, eventos, traceId)` toma el array de eventos del periodo y genera un JSON con secciones: actividades, alertas, costos, recomendaciones. Usa `modelClass: 'reasoning'` porque requiere síntesis de múltiples eventos con inferencia de prioridades.
+- **Implementación:** `src/integrations/llm/WasagroAIAgent.ts` — método `resumirSemana`. Prompt: `prompts/sp-05-resumen-semanal.md`.
+- **Revisar cuando:** Si el resumen se envía proactivamente (fuera de ventana 24h de WhatsApp), requiere templates de Meta (D6). Considerar schedule via pg-boss para envío automático cada lunes.
+
+### D15. Clasificación y normalización de archivos Excel
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** Algunas fincas llevan registros en planillas Excel (cosecha, aplicaciones, inventario). En lugar de obligarlas a reentrar datos manualmente por WhatsApp, Wasagro debe poder ingerir estos archivos directamente.
+- **Decisión:** `clasificarExcel(contenidoTexto, traceId)` recibe el contenido textual extraído de un Excel (columnas + filas como texto) y devuelve el tipo de planilla detectado y los registros normalizados al mismo formato que produce el OCR de documentos (`ResultadoOCR`). Usa `modelClass: 'fast'` — el texto ya está estructurado, no requiere visión. Prompt: `sp-06-clasificar-excel.md`.
+- **Implementación:** `src/integrations/llm/WasagroAIAgent.ts` — método `clasificarExcel`. El canal WhatsApp puede recibir documentos `.xlsx` vía Evolution API (D6); la extracción de texto del Excel es pre-procesada antes de llamar al método.
+- **Revisar cuando:** Si agricultores empiezan a enviar PDFs (planillas escaneadas), el path correcto es OCR (D11), no este método. Si el volumen de Excels supera 100/semana por finca, evaluar procesamiento batch offline.
 
 ### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 

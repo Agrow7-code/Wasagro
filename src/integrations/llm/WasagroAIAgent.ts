@@ -53,7 +53,50 @@ const ResultadoClasificacionSchema = z.object({
 
 type ResultadoClasificacion = z.infer<typeof ResultadoClasificacionSchema>
 
-  import type { ILLMAdapter } from './ILLMAdapter.js'
+import type { ILLMAdapter } from './ILLMAdapter.js'
+
+// ── OCR helpers — barrera determinista sobre la respuesta del modelo ──────────
+
+function validarReglasDominio(ocr: ResultadoOCR): string[] {
+  const warnings: string[] = []
+  for (const r of ocr.registros) {
+    if (r.monto !== null && r.monto > 10_000) warnings.push(`fila ${r.fila}: monto ${r.monto} sospechosamente alto`)
+    if (r.cantidad !== null && r.cantidad < 0) warnings.push(`fila ${r.fila}: cantidad negativa (${r.cantidad})`)
+    if (r.trabajadores !== null && r.trabajadores > 500) warnings.push(`fila ${r.fila}: trabajadores ${r.trabajadores} fuera de rango`)
+  }
+  return warnings
+}
+
+function construirFallbackOCR(json: unknown, zodErrors: string | null): ResultadoOCR {
+  const j = json as any ?? {}
+  return {
+    tipo_documento: j.tipo_documento ?? 'otro',
+    fecha_documento: j.fecha_documento ?? null,
+    registros: Array.isArray(j.registros) ? j.registros.map((r: any, idx: number) => ({
+      fila: typeof r.fila === 'number' ? r.fila : idx + 1,
+      lote_raw: r.lote_raw ?? null,
+      lote_id: r.lote_id ?? null,
+      actividad: r.actividad ?? null,
+      producto: r.producto ?? null,
+      cantidad: typeof r.cantidad === 'number' ? r.cantidad
+        : typeof r.cantidad === 'string' ? (isNaN(Number(r.cantidad)) ? null : Number(r.cantidad))
+        : null,
+      unidad: r.unidad ?? null,
+      trabajadores: typeof r.trabajadores === 'number' ? r.trabajadores
+        : typeof r.trabajadores === 'string' ? (isNaN(Number(r.trabajadores)) ? null : Number(r.trabajadores))
+        : null,
+      monto: typeof r.monto === 'number' ? r.monto
+        : typeof r.monto === 'string' ? (isNaN(parseFloat(r.monto.replace(/[^0-9.-]/g, ''))) ? null : parseFloat(r.monto.replace(/[^0-9.-]/g, '')))
+        : null,
+      fecha_raw: r.fecha_raw ?? null,
+      notas: r.notas ?? null,
+      ilegible: r.ilegible ?? true,
+    })) : [],
+    texto_completo_visible: j.texto_completo_visible ?? '',
+    confianza_lectura: typeof j.confianza_lectura === 'number' ? j.confianza_lectura : 0,
+    advertencia: [j.advertencia, zodErrors ? `requires_review: ${zodErrors}` : null].filter(Boolean).join(' | ') || 'requires_review',
+  }
+}
 
 export class WasagroAIAgent implements IWasagroLLM {
   readonly #adapter: ILLMAdapter
@@ -286,72 +329,78 @@ export class WasagroAIAgent implements IWasagroLLM {
     contexto: ContextoOCR,
     traceId: string,
   ): Promise<ResultadoOCR> {
+    const MAX_OCR_RETRIES = 2
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ocr-tier', input: { tipo_contexto: contexto.cultivo_principal } })
-    try {
-      const prompt = injectarVariables(
-        await PromptManager.getPrompt('sp-03d-ocr-documento.md', 'prompts/sp-03d-ocr-documento.md', traceId),
-        {
-          FINCA_NOMBRE: contexto.finca_nombre ?? 'No especificada',
-          CULTIVO_PRINCIPAL: contexto.cultivo_principal ?? 'No especificado',
-          LISTA_LOTES: contexto.lista_lotes ?? 'No hay lotes registrados',
-        },
-      )
-      const raw = await this.#adapter.generarTexto('Extrae los datos de este documento.', {
-        systemPrompt: prompt,
-        responseFormat: 'json_object',
-        imageBase64: base64,
-        imageMimeType: mimeType,
-        traceId,
-        generationName: 'ocr_documento',
-        modelClass: 'ocr',
-      })
-      const texto = raw.replace(/```json|```/g, '').trim()
-      let json: unknown
-      try { json = JSON.parse(texto) } catch {
-        generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `OCR devolvió no-JSON: ${texto.slice(0, 100)}`)
-      }
 
-      const { ResultadoOCRSchema } = await import('../../types/dominio/OCR.js')
-      const parsed = ResultadoOCRSchema.safeParse(json)
-      if (!parsed.success) {
-        const issues = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
-        console.warn(`[WasagroAIAgent] OCR Zod validation issues: ${issues}`)
-        trace.event({ name: 'ocr_zod_fallback', level: 'WARNING', input: { issues } })
+    const prompt = injectarVariables(
+      await PromptManager.getPrompt('sp-03d-ocr-documento.md', 'prompts/sp-03d-ocr-documento.md', traceId),
+      {
+        FINCA_NOMBRE: contexto.finca_nombre ?? 'No especificada',
+        CULTIVO_PRINCIPAL: contexto.cultivo_principal ?? 'No especificado',
+        LISTA_LOTES: contexto.lista_lotes ?? 'No hay lotes registrados',
+      },
+    )
 
-        const result: ResultadoOCR = {
-          tipo_documento: (json as any).tipo_documento ?? 'otro',
-          fecha_documento: (json as any).fecha_documento ?? null,
-          registros: Array.isArray((json as any).registros) ? (json as any).registros.map((r: any) => ({
-            fila: r.fila ?? 0,
-            lote_raw: r.lote_raw ?? null,
-            lote_id: r.lote_id ?? null,
-            actividad: r.actividad ?? null,
-            producto: r.producto ?? null,
-            cantidad: typeof r.cantidad === 'number' ? r.cantidad : (typeof r.cantidad === 'string' ? (isNaN(Number(r.cantidad)) ? null : Number(r.cantidad)) : null),
-            unidad: r.unidad ?? null,
-            trabajadores: typeof r.trabajadores === 'number' ? r.trabajadores : (typeof r.trabajadores === 'string' ? (isNaN(Number(r.trabajadores)) ? null : Number(r.trabajadores)) : null),
-            monto: typeof r.monto === 'number' ? r.monto : (typeof r.monto === 'string' ? (isNaN(parseFloat(r.monto.replace(/[^0-9.-]/g, ''))) ? null : parseFloat(r.monto.replace(/[^0-9.-]/g, ''))) : null),
-            fecha_raw: r.fecha_raw ?? null,
-            notas: r.notas ?? null,
-            ilegible: r.ilegible ?? false,
-          })) : [],
-          texto_completo_visible: (json as any).texto_completo_visible ?? '',
-          confianza_lectura: typeof (json as any).confianza_lectura === 'number' ? (json as any).confianza_lectura : 0,
-          advertencia: [(json as any).advertencia, `zod_validation_issues: ${issues}`].filter(Boolean).join(' | '),
+    let lastJson: unknown = null
+    let lastZodErrors: string | null = null
+
+    for (let attempt = 0; attempt <= MAX_OCR_RETRIES; attempt++) {
+      // En intentos de corrección: feedback explícito + imagen nuevamente (adapters son stateless)
+      const userContent = attempt === 0
+        ? 'Extrae los datos de este documento agrícola.'
+        : `Corrección requerida (intento ${attempt}/${MAX_OCR_RETRIES}). Tu respuesta anterior falló la validación de esquema. Errores específicos: ${lastZodErrors}. Devuelve el JSON COMPLETO corregido siguiendo estrictamente el esquema del system prompt.`
+
+      try {
+        const raw = await this.#adapter.generarTexto(userContent, {
+          systemPrompt: prompt,
+          responseFormat: 'json_object',
+          imageBase64: base64,
+          imageMimeType: mimeType,
+          traceId,
+          generationName: `ocr_documento_attempt_${attempt}`,
+          modelClass: 'ocr',
+        })
+
+        const texto = raw.replace(/```json|```/g, '').trim()
+        let json: unknown
+        try { json = JSON.parse(texto) } catch {
+          lastZodErrors = `JSON inválido: ${texto.slice(0, 120)}`
+          trace.event({ name: 'ocr_parse_error', level: 'WARNING', input: { attempt, raw: texto.slice(0, 120) } })
+          continue
         }
-        generation.end({ output: { tipo_documento: result.tipo_documento, n_registros: result.registros.length, confianza: result.confianza_lectura, zod_valid: false } })
-        return result
-      }
 
-      generation.end({ output: { tipo_documento: parsed.data.tipo_documento, n_registros: parsed.data.registros.length, confianza: parsed.data.confianza_lectura, zod_valid: true } })
-      return parsed.data
-    } catch (err) {
-      console.error('[WasagroAIAgent] Error en OCR de documento:', err)
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error en OCR de documento: ${String(err)}`, err)
+        lastJson = json
+        const parsed = ResultadoOCRSchema.safeParse(json)
+
+        if (parsed.success) {
+          // Validación de reglas de negocio (capa determinista sobre Zod)
+          const warnings = validarReglasDominio(parsed.data)
+          if (warnings.length > 0) {
+            trace.event({ name: 'ocr_business_rules_warning', level: 'WARNING', input: { warnings } })
+            parsed.data.advertencia = [parsed.data.advertencia, warnings.join(' | ')].filter(Boolean).join(' | ')
+          }
+          generation.end({ output: { tipo_documento: parsed.data.tipo_documento, n_registros: parsed.data.registros.length, confianza: parsed.data.confianza_lectura, zod_valid: true, attempts: attempt + 1 } })
+          return parsed.data
+        }
+
+        lastZodErrors = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+        trace.event({ name: 'ocr_zod_retry', level: 'WARNING', input: { attempt, errors: lastZodErrors } })
+
+      } catch (err) {
+        trace.event({ name: 'ocr_attempt_error', level: 'ERROR', input: { attempt, error: String(err) } })
+        if (attempt === MAX_OCR_RETRIES) {
+          generation.end({ output: String(err), level: 'ERROR' })
+          throw new LLMError('GROQ_ERROR', `Error en OCR de documento tras ${MAX_OCR_RETRIES + 1} intentos: ${String(err)}`, err)
+        }
+      }
     }
+
+    // Agotados los reintentos — fallback determinista con los datos que se pudieron rescatar
+    trace.event({ name: 'ocr_zod_exhausted', level: 'ERROR', input: { final_errors: lastZodErrors } })
+    const fallback = construirFallbackOCR(lastJson, lastZodErrors)
+    generation.end({ output: { tipo_documento: fallback.tipo_documento, n_registros: fallback.registros.length, confianza: fallback.confianza_lectura, zod_valid: false, attempts: MAX_OCR_RETRIES + 1 } })
+    return fallback
   }
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
