@@ -165,7 +165,7 @@ export async function handleEvento(
     const lista_lotes = lotes.map(l => `- ${l.lote_id}: "${l.nombre_coloquial}"`).join('\n') || 'Sin lotes'
 
     try {
-      const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId)
+      const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId, msg.texto ?? undefined)
 
       langfuse.trace({ id: traceId }).event({ name: 'imagen_clasificada', input: { tipo: tipoImagen } })
 

@@ -19,7 +19,7 @@ import {
   type ContextoOnboardingAgricultor,
   type RespuestaOnboarding,
 } from '../../types/dominio/Onboarding.js'
-import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
+import { RespuestaProspectoSchema, type ContextoProspecto, type RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
@@ -296,30 +296,33 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async clasificarTipoImagen(base64: string, mimeType: string, traceId: string): Promise<import('./IWasagroLLM.js').TipoImagen> {
+  async clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string): Promise<import('./IWasagroLLM.js').TipoImagen> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'clasificar_imagen', model: 'wasagro-ai-agent' })
+    const generation = trace.generation({ name: 'clasificar_imagen', model: 'wasagro-ai-agent', input: { caption: caption ?? null } })
     try {
-      const prompt = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
-    const raw = await this.#adapter.generarTexto('Clasifica esta imagen.', {
-      systemPrompt: prompt,
-      responseFormat: 'json_object',
-      imageBase64: base64,
-      imageMimeType: mimeType,
-      traceId,
-      generationName: 'clasificar_imagen',
-      modelClass: 'fast',
-    })
+      const promptRaw = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
+      const prompt = promptRaw.replace(
+        '{{CAPTION}}',
+        caption ? `El agricultor escribió junto con la imagen: "${caption}"` : 'El agricultor no escribió texto junto con la imagen.',
+      )
+      const raw = await this.#adapter.generarTexto('Clasifica esta imagen.', {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        traceId,
+        generationName: 'clasificar_imagen',
+        modelClass: 'fast',
+      })
       const json = JSON.parse(raw.replace(/```json|```/g, '').trim())
       const tipos = ['plaga_cultivo', 'documento_tabla', 'otro'] as const
-      const tipo = tipos.includes(json.tipo) ? json.tipo : 'plaga_cultivo'
+      const tipo = tipos.includes(json.tipo) ? json.tipo : 'otro'
       generation.end({ output: { tipo, confianza: json.confianza } })
       return tipo
     } catch (err) {
-      console.error('[WasagroAIAgent] Error clasificando imagen:', err)
       generation.end({ output: String(err), level: 'ERROR' })
       trace.event({ name: 'clasificar_imagen_error', level: 'ERROR', input: { error: String(err) } })
-      return 'plaga_cultivo'
+      return 'otro'
     }
   }
 
@@ -492,8 +495,14 @@ export class WasagroAIAgent implements IWasagroLLM {
         }
       }
 
-      generation.end({ output: json })
-      return json as RespuestaProspecto
+      const parsed = RespuestaProspectoSchema.safeParse(json)
+      if (!parsed.success) {
+        generation.end({ output: json, level: 'ERROR' })
+        throw new LLMError('PARSE_ERROR', `Schema prospecto inválido: ${parsed.error.message}`)
+      }
+
+      generation.end({ output: parsed.data })
+      return parsed.data
     } catch (err) {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
@@ -782,7 +791,7 @@ export class WasagroAIAgent implements IWasagroLLM {
               const result = await tool.execute(safeArgs)
               toolResultStr = JSON.stringify(result, null, 2)
             } catch (toolErr: any) {
-              // Smart Nudge: Devolver el error al LLM en lugar de fallar
+              trace.event({ name: 'mcp_tool_execute_error', level: 'ERROR', input: { tool: name, args, error: toolErr.message } })
               toolResultStr = `Error ejecutando herramienta: ${toolErr.message}`
             }
           }

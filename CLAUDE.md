@@ -246,6 +246,17 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Por qué no esperar:** El costo de NO tener contexto histórico en H0-R es falsos negativos en plagas recurrentes y preguntas de clarificación innecesarias sobre datos que ya están en el sistema.
 - **Revisar cuando:** Latencia de RAG retrieval > 1s en producción (actualmente <300ms en Supabase pgvector). Si el volumen de eventos supera 10K por finca, evaluar índice HNSW dedicado. Si `_ragRetriever` devuelve context irrelevante frecuentemente (>20% de queries), ajustar similarity threshold.
 
+### D16. Onboarding conversacional de admin y agricultor
+
+- **Fecha:** Abril 2026
+- **Problema que motivó la decisión:** El sistema necesita identificar quién es el usuario antes de procesar eventos. Un número de WhatsApp nuevo puede ser el administrador de la exportadora configurando la finca, o un trabajador de campo reportando por primera vez. Sin un flujo de onboarding guiado, el sistema no tiene finca_id, lote_id ni rol para procesar ningún mensaje.
+- **Decisión:** Dos flujos conversacionales independientes según el rol detectado:
+  1. **`onboardarAdmin`** — Guía al administrador para registrar la finca (nombre, cultivo, país, lotes). Prompt `sp-02a-onboarding-admin.md`. Usa `modelClass: 'fast'` — es diálogo estructurado, no razonamiento complejo.
+  2. **`onboardarAgricultor`** — Guía al trabajador de campo para registrarse (nombre, finca asignada). Prompt `sp-02b-onboarding-agricultor.md`. Usa `modelClass: 'fast'`.
+  Ambos flujos retornan `RespuestaOnboarding` validada con `RespuestaOnboardingSchema` (Zod). El estado conversacional se mantiene en `sesiones_activas.contexto_parcial` en Supabase (D1).
+- **Implementación:** `src/integrations/llm/WasagroAIAgent.ts` — métodos `onboardarAdmin`, `onboardarAgricultor`. Handlers: `src/pipeline/handlers/OnboardingHandler.ts`.
+- **Revisar cuando:** Se implemente login via OTP para admin (reduce dependencia del flujo conversacional). Si >30% de sesiones de onboarding quedan incompletas después de 2 intercambios, revisar la longitud del flujo.
+
 ### D13. SDR — Pipeline de ventas via WhatsApp
 
 - **Fecha:** Mayo 2026

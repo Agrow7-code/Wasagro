@@ -24,7 +24,7 @@ export interface IWasagroLLM {
   corregirTranscripcion(raw: string, traceId: string): Promise<string>
   describirImagenVisual(imageUrl: string, traceId: string): Promise<string>
   diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string): Promise<DiagnosticoV2VK>
-  clasificarTipoImagen(base64: string, mimeType: string, traceId: string): Promise<TipoImagen>
+  clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string): Promise<TipoImagen>
   extraerDocumentoOCR(base64: string, mimeType: string, contexto: ContextoOCR, traceId: string): Promise<ResultadoOCR>
   onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding>
   onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding>
