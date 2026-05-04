@@ -290,6 +290,32 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Implementación:** `src/integrations/llm/WasagroAIAgent.ts` — método `clasificarExcel`. El canal WhatsApp puede recibir documentos `.xlsx` vía Evolution API (D6); la extracción de texto del Excel es pre-procesada antes de llamar al método.
 - **Revisar cuando:** Si agricultores empiezan a enviar PDFs (planillas escaneadas), el path correcto es OCR (D11), no este método. Si el volumen de Excels supera 100/semana por finca, evaluar procesamiento batch offline.
 
+### D19. Alertas de clima por finca
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** Las fincas en zonas tropicales necesitan alertas anticipadas de lluvia intensa, heladas, o sequía para tomar decisiones de aplicación de insumos (no aplicar fungicidas antes de lluvia) y protección de cultivos. Sin alertas proactivas, el agricultor solo reacciona después del daño.
+- **Decisión:** Cron diario (6am Ecuador, 11:00 UTC) que consulta OpenMeteo por finca y envía alertas por WhatsApp cuando el pronóstico supera umbrales configurables (mm de lluvia, temperatura mínima, velocidad de viento).
+- **Implementación:** `src/pipeline/alertaClima.ts`, `src/integrations/weather/OpenMeteoClient.ts`. Trigger manual: `POST /alertas/clima` (protegido por `REPORTE_SECRET`). Cron en `src/index.ts`.
+- **Revisar cuando:** Si las fincas en Costa Rica/Guatemala tienen umbrales distintos a Ecuador, parametrizar por `pais` en la finca. Si OpenMeteo tiene outages frecuentes, añadir fallback a WeatherAPI.
+
+### D20. Alertas de precio de banano
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** Las exportadoras necesitan visibilidad de cambios en el precio de referencia del banano (FOB Guayaquil / Precio BANA) para ajustar estrategia de negociación y comunicar a fincas. Sin alertas de precio, los cambios se enteran tarde.
+- **Decisión:** Cron semanal (lunes 6:30am Ecuador, 11:30 UTC) que consulta BananaTradersClient y envía alerta por WhatsApp a los admins de finca y gerentes cuando el precio cambia más de un umbral fijo.
+- **Implementación:** `src/pipeline/alertaPrecio.ts`, `src/integrations/market/BananaTradersClient.ts`. Cron en `src/index.ts`.
+- **Revisar cuando:** Si se añaden otros cultivos (cacao, café), generalizar a `alertaPrecio(cultivo)` con cliente de mercado propio por cultivo.
+
+### D18. Calculadora de métricas y análisis por finca
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** Cada finca opera bajo condiciones distintas — una densidad de 5 trips/hijo es riesgo bajo en Ecuador pero riesgo medio en Costa Rica. El sistema capturaba datos de campo pero no permitía que cada finca los analizara con sus propios umbrales y fórmulas. Los dashboards mostraban datos estáticos que no generaban decisiones.
+- **Decisión:** Motor de cálculo configurable por finca. Tres capas: (1) `metricas_finca` — definición de fórmula en JSONB (campos capturados + operadores + números manuales); (2) `umbrales_metrica` — umbrales por nivel (bajo/medio/alto/crítico) específicos por finca; (3) `resultados_metricas` — caché de resultados calculados. El agricultor puede construir cálculos ad-hoc desde la UI (sin guardar) o guardarlos como métricas permanentes con umbrales que activan alertas. El AI puede sugerir métricas cuando una finca tiene ≥10 eventos con campos de muestreo.
+- **Implementación:** `src/pipeline/metricaEngine.ts` (engine de resolución de fórmulas), `src/agents/metricas/router.ts` (9 endpoints Hono), `landing/src/dashboard/modules/Calculadora.tsx` (UI del constructor), `supabase/migrations/20260101000034_metricas-calculadora.sql` (schema).
+- **Endpoints:** `POST /api/metricas/calcular` (ad-hoc), `POST /api/metricas/calcular/lotes` (por lote), `GET/POST /api/metricas`, `PUT /api/metricas/:id/umbrales`, `GET /api/metricas/:id/resultados`, `POST /api/metricas/:id/recalcular`.
+- **Diferenciador:** La misma métrica tiene umbrales distintos por finca. El dashboard del gerente muestra el semáforo de cada finca según sus propios criterios, no una vara universal.
+- **Revisar cuando:** Si el volumen de eventos supera 10K por finca, evaluar precálculo batch en pg-boss en vez de on-demand. Cuando el AI suggestion layer esté listo, dispararlo desde el worker de pg-boss al completar el evento N+1 con campos de muestreo.
+
 ### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 
 - **Fecha:** Abril 2026 (actualizado desde Meta Cloud API directo — ver ADR 002)

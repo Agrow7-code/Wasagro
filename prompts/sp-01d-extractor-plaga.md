@@ -69,6 +69,12 @@ Busca el lote en `{{LISTA_LOTES}}`:
 | "punta de cigarro" | Síntoma de nematodos o deficiencia |
 | "corazón muerto" | Daño en el cogollo del banano — picudo negro |
 
+## REGLA DE NOMBRES — CRÍTICA
+
+`nombre_comun` y `plaga_tipo` deben usar el nombre exacto de la tabla de abajo (columna "Nombre común") cuando el cultivo coincide.
+NO uses el término del agricultor en esos campos. Si el agricultor dijo "escoba", `nombre_comun` = "Escoba de bruja".
+Si no puedes identificar la plaga con certeza, deja ambos campos en `null`.
+
 ## Plagas y enfermedades por cultivo
 
 ### Cacao

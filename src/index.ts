@@ -16,6 +16,7 @@ import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 
 import { cors } from 'hono/cors'
 import { authRouter } from './auth/router.js'
+import { metricasRouter } from './agents/metricas/router.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
 function validarEnvVars(): void {
@@ -155,8 +156,9 @@ app.get('/health', (c) => c.json({
 
 app.route('/webhook', webhookRouter)
 app.route('/auth', authRouter)
-app.route('/api/auth', authRouter) 
+app.route('/api/auth', authRouter)
 app.route('/api/webhook', webhookRouter)
+app.route('/api/metricas', metricasRouter)
 
 // POST /reportes/semanal — trigger manual de reportes (protegido por secret)
 app.post('/reportes/semanal', async (c) => {

@@ -4,6 +4,7 @@ import type { EntradaEvento, EventoCampoExtraido } from '../../types/dominio/Eve
 import type { IEmbeddingService } from '../../integrations/llm/EmbeddingService.js'
 import { guardarEmbeddingEnEvento } from '../supabaseQueries.js'
 import { enriquecerDatosEventoInfraestructura } from '../derivadorInfraestructura.js'
+import { buildFeedbackRecibo } from '../feedbackBuilder.js'
 import {
   getUserByPhone,
   getFincaById,
@@ -254,9 +255,8 @@ export async function handleEvento(
 
       await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId })
 
-      let respuesta = `*Diagnóstico*: ${diagnostico.diagnostico_final}\n`
-      if (diagnostico.severidad) respuesta += `*Severidad*: ${diagnostico.severidad}\n`
-      if (diagnostico.recomendacion_tecnica) respuesta += `\n*Recomendación*: ${diagnostico.recomendacion_tecnica}`
+      let respuesta = `*Diagnóstico*: ${diagnostico.diagnostico_final}`
+      if (diagnostico.recomendacion_tecnica) respuesta += `\n\n*Recomendación*: ${diagnostico.recomendacion_tecnica}`
 
       await _sender!.enviarTexto(msg.from, respuesta)
     } catch (err) {
@@ -524,14 +524,7 @@ export async function handleEvento(
         },
       })
       
-      const bloquesCorr = eventosValidos.map(e => buildResumenParaConfirmar(e, lotes))
-      let mensajeCorr: string
-      if (bloquesCorr.length === 1) {
-        mensajeCorr = `Esto es lo que entendí:\n\n${bloquesCorr[0]}\n\nResponde *sí* para guardar o corrígeme si algo está mal.`
-      } else {
-        const numeradosCorr = bloquesCorr.map((b, i) => `${i + 1}. ${b}`).join('\n\n')
-        mensajeCorr = `Esto es lo que entendí de tu corrección:\n\n${numeradosCorr}\n\nResponde *sí* para guardar todo, o corrígeme si algo está mal.`
-      }
+      const mensajeCorr = buildFeedbackRecibo(eventosValidos, lotes)
 
       await _sender!.enviarTexto(msg.from, mensajeCorr)
       await actualizarMensaje(mensajeId, { status: 'processing' })
@@ -667,55 +660,6 @@ async function handleAprobacion(
   await _sender!.enviarTexto(msg.from, `✅ ${target.nombre ?? target.phone} ya está activo en la finca.`)
   await _sender!.enviarTexto(target.phone, `✅ Ya te activaron. Puedes mandar tus reportes de campo.`)
   await actualizarMensaje(mensajeId, { status: 'processed' })
-}
-
-function buildResumenParaConfirmar(
-  extracted: EventoCampoExtraido,
-  lotes: Array<{ lote_id: string; nombre_coloquial: string }>,
-): string {
-  const etiquetas: Record<string, string> = {
-    labor: '🌾 Labor de campo',
-    insumo: '🧪 Aplicación de insumo',
-    plaga: '🐛 Plaga reportada',
-    clima: '🌧️ Evento climático',
-    cosecha: '📦 Cosecha',
-    gasto: '💰 Gasto',
-    infraestructura: '🔧 Infraestructura',
-    observacion: '📝 Observación',
-    nota_libre: '📝 Nota',
-  }
-
-  const tipo = etiquetas[extracted.tipo_evento] ?? '📋 Reporte'
-  const loteNombre = extracted.lote_id
-    ? (lotes.find(l => l.lote_id === extracted.lote_id)?.nombre_coloquial ?? null)
-    : null
-  const loteLinea = loteNombre ? `• Lote: ${loteNombre}\n` : ''
-  const fechaLinea = extracted.fecha_evento ? `• Fecha: ${extracted.fecha_evento}\n` : ''
-
-  // Campos técnicos/internos que no tienen valor para el agricultor en la confirmación
-  const SKIP = new Set([
-    'lote_detectado_raw', '_meta', 'requiere_accion', 'urgencia',
-    'nombre_cientifico',       // agronómico, no conversacional
-    'pct_afectado',            // porcentaje técnico raramente mencionado por el agricultor
-    'dosis_litros_equivalente', // conversión interna, el agricultor habla en bombadas/sacos
-    'kg_equivalente',          // ídem
-    'clasificacion_sugerida',  // metadato del extractor, no dato del campo
-  ])
-  const lineas: string[] = []
-  for (const [k, v] of Object.entries(extracted.campos_extraidos)) {
-    if (SKIP.has(k) || v === null || v === undefined) continue
-    if (typeof v === 'object' && !Array.isArray(v)) {
-      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
-        if (SKIP.has(k2) || v2 === null || v2 === undefined) continue
-        lineas.push(`• ${k2}: ${v2}`)
-      }
-    } else {
-      lineas.push(`• ${k}: ${v}`)
-    }
-  }
-
-  // Returns only the event block — header/footer are assembled by the caller
-  return `${tipo}\n${loteLinea}${fechaLinea}${lineas.join('\n')}`
 }
 
 async function guardarEmbeddingEvento(

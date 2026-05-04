@@ -6,6 +6,7 @@ import { AlertaPanel } from '../components/AlertaBadge'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
 import { PlagasModule } from '../modules/PlagasModule'
 import { CostosModule } from '../modules/CostosModule'
+import { Calculadora } from '../modules/Calculadora'
 
 // Datos de prueba para demostrar el cálculo de valor real
 const mockEventosPlaga = [
@@ -58,6 +59,12 @@ export function AdminFinca() {
 
         {/* 2. MÓDULO DE COSTOS: EFICIENCIA FINANCIERA */}
         <CostosModule eventos={mockEventosCosto} />
+
+        {/* 3. CALCULADORA DE DATOS */}
+        <Calculadora
+          finca_id="F001"
+          apiBase={import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}
+        />
 
         {/* KPIs */}
         <section>

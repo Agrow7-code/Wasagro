@@ -608,7 +608,9 @@ export async function marcarIntencionCompletada(
         intenciones_pendientes: actualizadas,
         completadas,
         fallidas,
-        extracted_data: actualizadas.filter(i => i.status === 'completed').map(i => i.evento_extraido),
+        extracted_data: actualizadas
+          .filter(i => i.status === 'completed' && !((i.evento_extraido as Record<string, unknown>)?.['_es_clarificacion']))
+          .map(i => i.evento_extraido),
         transaccion_original: transaccionOriginal,
       },
       status: newStatus,

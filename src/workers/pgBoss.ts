@@ -5,10 +5,10 @@ import { langfuse } from '../integrations/langfuse.js'
 import { crearLLM } from '../integrations/llm/index.js'
 import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/EventoCampo.js'
-import { saveEvento, marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
-import { enriquecerDatosEventoInfraestructura } from '../pipeline/derivadorInfraestructura.js'
+import { marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
-import { getUserByPhone } from '../pipeline/supabaseQueries.js'
+import { buildFeedbackRecibo } from '../pipeline/feedbackBuilder.js'
+import { normalizarPlaga } from '../pipeline/plagaNormalizer.js'
 
 let boss: PgBoss
 
@@ -158,8 +158,29 @@ async function procesarIntencionWorker(
       return
     }
 
-    const tipo_evento = (ext.requiere_clarificacion && maxClarificationsReached) ? ext.tipo_evento : ext.tipo_evento
-    const evStatus = (ext.confidence_score < 0.5 || (ext.requiere_clarificacion && maxClarificationsReached)) ? 'requires_review' : 'complete'
+    // Normalizar nombre de plaga al canónico del cultivo (determinista, no depende del LLM)
+    if (ext.tipo_evento === 'plaga') {
+      const c = ext.campos_extraidos as Record<string, unknown>
+      const normalizado = normalizarPlaga(
+        (c['plaga_tipo'] ?? c['nombre_comun']) as string | null,
+        data.entrada.cultivo_principal ?? null,
+      )
+      if (normalizado) {
+        ext.campos_extraidos = {
+          ...c,
+          plaga_tipo: normalizado.plaga_tipo,
+          nombre_comun: normalizado.nombre_comun,
+          nombre_cientifico: normalizado.nombre_cientifico,
+        }
+        if (normalizado.alerta_cuarentena) {
+          ext.alerta_urgente = true
+        }
+        langfuse.trace({ id: data.traceId }).event({
+          name: 'plaga_normalizada',
+          input: { original: c['plaga_tipo'], normalizado: normalizado.plaga_tipo, cultivo: data.entrada.cultivo_principal },
+        })
+      }
+    }
 
     if (ext.alerta_urgente) {
       langfuse.trace({ id: data.traceId }).event({
@@ -169,79 +190,58 @@ async function procesarIntencionWorker(
       })
     }
 
-    const eventoId = await saveEvento({
-      finca_id: data.fincaId,
-      lote_id: ext.lote_id,
-      tipo_evento,
-      status: evStatus,
-      datos_evento: enriquecerDatosEventoInfraestructura({
-        ...ext.campos_extraidos,
-        ...(ext.lote_detectado_raw != null ? { lote_detectado_raw: ext.lote_detectado_raw } : {}),
-        _meta: {
-          confidence_por_campo: ext.confidence_por_campo,
-          campos_faltantes: ext.campos_faltantes,
-        },
-      }),
-      descripcion_raw: data.transaccionOriginal,
-      confidence_score: ext.confidence_score,
-      requiere_validacion: ext.requiere_validacion || ext.confidence_score < 0.5,
-      fecha_evento: ext.fecha_evento,
-      created_by: data.usuarioId,
-      mensaje_id: data.mensajeId,
-    })
-
+    // No guardar en DB todavía — esperamos confirmación del agricultor
     const { todas_completas, intenciones, transaccion_original } = await marcarIntencionCompletada(
       data.sessionId,
       jobId,
       ext as unknown as Record<string, unknown>,
-      eventoId ?? '',
+      '',
     )
 
     generation.end({
-      output: { status: 'checkpoint_saved', evento_id: eventoId, todas_completas },
+      output: { status: 'pending_confirmation', todas_completas },
       metadata: { tipo_evento: data.tipo_evento, confidence: ext.confidence_score },
     })
 
     consecutive429Count = 0
 
     if (todas_completas) {
-      const completadas = intenciones.filter(i => i.status === 'completed')
-      const fallidas = intenciones.filter(i => i.status === 'failed')
+      const completadasReales = intenciones.filter(i =>
+        i.status === 'completed' &&
+        !((i.evento_extraido as Record<string, unknown>)?.['_es_clarificacion']),
+      )
 
-      if (completadas.length > 0) {
+      if (completadasReales.length > 0) {
         const sender = crearSenderWhatsApp()
-        const confirmaciones = completadas.map(i => {
-          const extData = i.evento_extraido as unknown as EventoCampoExtraido
-          const labels: Record<string, string> = {
-            labor: 'labor de campo',
-            insumo: 'aplicación',
-            plaga: 'reporte de plaga',
-            clima: 'evento climático',
-            cosecha: 'cosecha',
-            gasto: 'gasto',
-            infraestructura: 'reporte de infraestructura',
-            observacion: 'observación',
-            nota_libre: 'nota',
-          }
-          const label = labels[extData?.tipo_evento ?? ''] ?? 'reporte'
-          const isReview = extData?.confidence_score != null && extData.confidence_score < 0.5
-          if (isReview) return 'Registré tu reporte. Lo revisa tu asesor pronto. ✅'
-          return `✅ Registré tu ${label}.`
-        })
+        const { supabase } = await import('../integrations/supabase.js')
 
-        const msg = confirmaciones.length > 1
-          ? `¡Listo! Guardé tus reportes:\n\n${confirmaciones.map(c => `• ${c.replace('✅ ', '')}`).join('\n')}\n\n✅`
-          : (confirmaciones[0] ?? '✅ Registrado.')
+        const { data: lotesData } = await supabase
+          .from('lotes')
+          .select('lote_id, nombre_coloquial')
+          .eq('finca_id', data.fincaId)
+        const lotes = (lotesData ?? []) as Array<{ lote_id: string; nombre_coloquial: string }>
 
-        // El teléfono viene en la carga útil del job desde el orquestador
-        const destinatario = data.phone
+        const eventosExtraidos = completadasReales.map(i => i.evento_extraido as unknown as EventoCampoExtraido)
 
-        if (destinatario) {
-          await sender.enviarTexto(destinatario, msg).catch((err) => {
-            console.error('[procesar-intencion] Error enviando WhatsApp:', err)
+        // Poner sesión en pending_confirmation — EventHandler guarda cuando el agricultor dice "sí"
+        await supabase
+          .from('sesiones_activas')
+          .update({
+            status: 'pending_confirmation',
+            clarification_count: 0,
+            contexto_parcial: {
+              extracted_data: eventosExtraidos,
+              transcripcion_original: transaccion_original,
+            },
+          })
+          .eq('session_id', data.sessionId)
+
+        const feedback = buildFeedbackRecibo(eventosExtraidos, lotes)
+        if (data.phone) {
+          await sender.enviarTexto(data.phone, feedback).catch((err) => {
+            console.error('[procesar-intencion] Error enviando feedback de confirmación:', err)
           })
         }
-
       }
     }
   } catch (err: unknown) {
