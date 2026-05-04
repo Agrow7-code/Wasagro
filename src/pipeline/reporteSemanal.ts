@@ -104,7 +104,7 @@ async function procesarReporteFinca(
     })
   }
 
-  const entrada: EntradaResumenSemanal & { forecast?: ForecastSemanal | null; pais: string } = {
+  const entrada: EntradaResumenSemanal = {
     finca_id:          fincaId,
     finca_nombre:      fincaNombre,
     cultivo_principal: cultivoPrincipal,
@@ -114,7 +114,7 @@ async function procesarReporteFinca(
     eventos,
     forecast,
     plagasPorNivel,
-  } as EntradaResumenSemanal
+  }
 
   let resumen
   try {

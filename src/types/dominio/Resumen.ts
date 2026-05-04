@@ -33,7 +33,7 @@ export interface EntradaResumenSemanal {
   finca_id:          string
   finca_nombre:      string
   cultivo_principal: string
-  pais?:             string
+  pais:              string
   fecha_inicio:      string
   fecha_fin:         string
   eventos:           EventoResumenRow[]
