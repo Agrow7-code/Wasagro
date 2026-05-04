@@ -68,7 +68,11 @@ async function resolverBloqueCampo(
   if (lote_id) query = query.eq('lote_id', lote_id)
 
   const { data, error } = await query
-  if (error || !data?.length) return null
+  if (error) {
+    console.error('[metricaEngine] Error en query de campo', { campo: bloque.campo, finca_id, error: error.message })
+    return null
+  }
+  if (!data?.length) return null
 
   const valores: number[] = []
   for (const row of data) {

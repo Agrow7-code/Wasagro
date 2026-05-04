@@ -46,33 +46,60 @@ CREATE INDEX IF NOT EXISTS idx_eventos_requiere_revision
     WHERE status = 'requires_review';
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 4. FK FALTANTE EN plan_de_cuentas
---    org_id era TEXT NOT NULL sin REFERENCES — integridad referencial rota.
+-- 4. FK + updated_at EN plan_de_cuentas (solo si la tabla existe)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-ALTER TABLE plan_de_cuentas
-    ADD CONSTRAINT fk_plan_cuentas_org
-    FOREIGN KEY (org_id) REFERENCES organizaciones(org_id);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'plan_de_cuentas') THEN
+        -- FK faltante
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name = 'fk_plan_cuentas_org'
+        ) THEN
+            ALTER TABLE plan_de_cuentas
+                ADD CONSTRAINT fk_plan_cuentas_org
+                FOREIGN KEY (org_id) REFERENCES organizaciones(org_id);
+        END IF;
+
+        -- updated_at
+        ALTER TABLE plan_de_cuentas
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+        -- Trigger
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.triggers
+            WHERE trigger_name = 'trg_plan_cuentas_updated_at'
+        ) THEN
+            CREATE TRIGGER trg_plan_cuentas_updated_at
+                BEFORE UPDATE ON plan_de_cuentas
+                FOR EACH ROW
+                EXECUTE FUNCTION wasagro_set_updated_at();
+        END IF;
+    END IF;
+END;
+$$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 5. ÍNDICE FALTANTE EN mensajes_entrada.evento_id (FK sin índice)
---    Partial: la mayoría de mensajes tienen evento_id NULL durante procesamiento.
---    El índice solo cubre los que ya generaron un evento.
+-- 5. ÍNDICE FALTANTE EN mensajes_entrada.evento_id (solo si la tabla existe)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-CREATE INDEX IF NOT EXISTS idx_mensajes_evento_id
-    ON mensajes_entrada(evento_id)
-    WHERE evento_id IS NOT NULL;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'mensajes_entrada') THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mensajes_evento_id') THEN
+            CREATE INDEX idx_mensajes_evento_id
+                ON mensajes_entrada(evento_id)
+                WHERE evento_id IS NOT NULL;
+        END IF;
+    END IF;
+END;
+$$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 6. AGREGAR updated_at A plan_de_cuentas
---    Todas las demás tablas tienen audit trail de modificación.
+-- 6. FUNCIÓN GENÉRICA updated_at (reutilizable en toda la DB)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-ALTER TABLE plan_de_cuentas
-    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-
--- Trigger genérico de updated_at (reutilizable)
 CREATE OR REPLACE FUNCTION wasagro_set_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -82,11 +109,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-CREATE TRIGGER trg_plan_cuentas_updated_at
-    BEFORE UPDATE ON plan_de_cuentas
-    FOR EACH ROW
-    EXECUTE FUNCTION wasagro_set_updated_at();
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 7. FUNCIÓN DE CLEANUP PARA REGISTROS EXPIRADOS
