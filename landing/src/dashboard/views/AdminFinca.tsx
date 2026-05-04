@@ -1,35 +1,45 @@
-import { kpisAdmin, eventosHoy, alertas, lotes, eventosTabla } from '../mock/data'
-import { KPICard } from '../components/KPICard'
+import { kpisAdmin, eventosHoy, alertas } from '../mock/data'
 import { EventoItem } from '../components/EventoItem'
-import { LoteCard } from '../components/LoteCard'
 import { AlertaPanel } from '../components/AlertaBadge'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
-import { PlagasModule } from '../modules/PlagasModule'
-import { CostosModule } from '../modules/CostosModule'
-import { Calculadora } from '../modules/Calculadora'
-
-// Datos de prueba para demostrar el cálculo de valor real
-const mockEventosPlaga = [
-  { id: '1', lote_nombre: 'Lote 1', plaga_nombre: 'Trips de la mancha roja', plaga_individuos: 30, plaga_muestra: 100, plaga_organo: 'racimo', plaga_severidad_pct: 30.0, fecha_evento: '2026-04-29' },
-  { id: '2', lote_nombre: 'Lote 2', plaga_nombre: 'Gusano cogollero', plaga_individuos: 15, plaga_muestra: 50, plaga_organo: 'hijo', plaga_severidad_pct: 30.0, fecha_evento: '2026-04-29' }
-]
-
-const mockEventosCosto = [
-  { id: 'c1', lote_nombre: 'Lote 1', costo_monto: 1200, costo_categoria: 'insumos', fecha_evento: '2026-04-28' },
-  { id: 'c2', lote_nombre: 'Lote 2', costo_monto: 450, costo_categoria: 'mano de obra', fecha_evento: '2026-04-29' },
-  { id: 'c3', lote_nombre: 'Lote 1', costo_monto: 300, costo_categoria: 'mano de obra', fecha_evento: '2026-04-29' }
-]
 
 const TIPO_COLOR: Record<string, string> = {
-  insumo: '#2A50D4', plaga: '#D45828', cosecha: '#3EBB6A',
-  labor: '#0D0F0C', clima: '#9C9080', gasto: '#C9F03B',
+  insumo:  '#2A50D4',
+  plaga:   '#D45828',
+  cosecha: '#3EBB6A',
+  labor:   '#0D0F0C',
+  clima:   '#9C9080',
+  gasto:   '#C9F03B',
 }
+
+const TIPO_LABEL: Record<string, string> = {
+  insumo:  'Insumo',
+  plaga:   'Plaga',
+  cosecha: 'Cosecha',
+  labor:   'Labor',
+  clima:   'Clima',
+  gasto:   'Gasto',
+}
+
+// Actividad de los últimos 7 días por tipo (mock)
+const ACTIVIDAD_SEMANA = [
+  { dia: 'Lun', insumo: 4, labor: 3, cosecha: 2, plaga: 1, gasto: 1, clima: 0 },
+  { dia: 'Mar', insumo: 5, labor: 4, cosecha: 3, plaga: 0, gasto: 2, clima: 1 },
+  { dia: 'Mié', insumo: 2, labor: 2, cosecha: 1, plaga: 2, gasto: 0, clima: 1 },
+  { dia: 'Jue', insumo: 6, labor: 5, cosecha: 4, plaga: 1, gasto: 1, clima: 1 },
+  { dia: 'Vie', insumo: 4, labor: 3, cosecha: 3, plaga: 2, gasto: 1, clima: 1 },
+  { dia: 'Sáb', insumo: 1, labor: 2, cosecha: 1, plaga: 0, gasto: 1, clima: 0 },
+  { dia: 'Hoy', insumo: 5, labor: 3, cosecha: 4, plaga: 2, gasto: 2, clima: 0 },
+]
+
+const TIPOS = ['insumo', 'labor', 'cosecha', 'plaga', 'gasto', 'clima'] as const
+const maxTotal = Math.max(...ACTIVIDAD_SEMANA.map(d => TIPOS.reduce((s, t) => s + d[t], 0)))
 
 export function AdminFinca() {
   return (
     <>
       <Topbar
-        title="Gestión de Valor"
+        title="Resumen"
         badge="H0-R"
         avatarInitials="CM"
         rightSlot={
@@ -51,177 +61,82 @@ export function AdminFinca() {
         }
       />
 
-      <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 48 }}>
+      <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 32 }}>
 
-        {/* 1. MÓDULO DE PLAGAS: SEVERIDAD Y RIESGO */}
-        <PlagasModule eventos={mockEventosPlaga} cultivoPrincipal="Banano" />
+        {/* 1. KPIs — 4 métricas clave, nada más */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          {kpisAdmin.map(k => (
+            <div key={k.label} style={{
+              background: k.variant === 'alert' ? '#FFF4F0' : '#F5F1E8',
+              border: `2px solid ${k.variant === 'alert' ? '#D45828' : '#0D0F0C'}`,
+              boxShadow: `3px 3px 0 0 ${k.variant === 'alert' ? '#D45828' : '#0D0F0C'}`,
+              padding: '16px 18px',
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(13,15,12,0.45)', marginBottom: 6 }}>{k.label}</div>
+              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, color: k.variant === 'alert' ? '#D45828' : '#0D0F0C' }}>{k.value}</div>
+              <div style={{ fontSize: 11, marginTop: 6, color: k.deltaType === 'negative' ? '#D45828' : k.deltaType === 'positive' ? '#1B3D24' : 'rgba(13,15,12,0.45)', fontWeight: 600 }}>{k.delta}</div>
+            </div>
+          ))}
+        </div>
 
-        {/* 2. MÓDULO DE COSTOS: EFICIENCIA FINANCIERA */}
-        <CostosModule eventos={mockEventosCosto} />
-
-        {/* 3. CALCULADORA DE DATOS */}
-        <Calculadora
-          finca_id="F001"
-          apiBase={import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}
-        />
-
-        {/* KPIs */}
+        {/* 2. Actividad por tipo — últimos 7 días */}
         <section>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ marginBottom: 14 }}>
             <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)' }}>
-              Actividad del día
-            </span>
-            <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'rgba(13,15,12,0.45)' }}>
-              Última actualización · 14:31
+              Actividad por tipo · últimos 7 días
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-            {kpisAdmin.map((k) => <KPICard key={k.label} kpi={k} />)}
+          <div style={{ background: '#F5F1E8', border: '2px solid #0D0F0C', boxShadow: '4px 4px 0 0 #0D0F0C', padding: '20px 24px' }}>
+            {/* Leyenda */}
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
+              {TIPOS.map(t => (
+                <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div style={{ width: 10, height: 10, background: TIPO_COLOR[t], border: '1px solid rgba(13,15,12,0.2)' }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'rgba(13,15,12,0.6)' }}>{TIPO_LABEL[t]}</span>
+                </div>
+              ))}
+            </div>
+            {/* Barras por día */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 100 }}>
+              {ACTIVIDAD_SEMANA.map(d => {
+                const total = TIPOS.reduce((s, t) => s + d[t], 0)
+                const pct = total / maxTotal
+                return (
+                  <div key={d.dia} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(13,15,12,0.4)', fontFamily: 'monospace' }}>{total}</span>
+                    <div style={{ width: '100%', height: 72 * pct, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                      {TIPOS.filter(t => d[t] > 0).map(t => (
+                        <div key={t} style={{
+                          width: '100%',
+                          height: `${(d[t] / total) * 100}%`,
+                          background: TIPO_COLOR[t],
+                          minHeight: 3,
+                        }} />
+                      ))}
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: d.dia === 'Hoy' ? 800 : 600, color: d.dia === 'Hoy' ? '#0D0F0C' : 'rgba(13,15,12,0.45)' }}>{d.dia}</span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </section>
 
-        {/* Feed + Alertas */}
+        {/* 3. Últimos eventos + alertas */}
         <section>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)' }}>
-              Alertas y Novedades
-            </span>
-          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '70fr 30fr', gap: 16 }}>
-            {/* Feed */}
+            {/* Feed reciente */}
             <div style={{ background: '#F5F1E8', border: '2px solid #0D0F0C', boxShadow: '4px 4px 0 0 #0D0F0C', overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 20px', borderBottom: '2px solid #0D0F0C' }}>
-                <span style={{ fontSize: 15, fontWeight: 700 }}>Eventos de hoy</span>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, padding: '2px 7px', background: '#0D0F0C', color: '#F5F1E8' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 20px', borderBottom: '2px solid #0D0F0C' }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>Últimos eventos</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700, padding: '2px 7px', background: '#0D0F0C', color: '#F5F1E8' }}>
                   {eventosHoy.length}
                 </span>
-                <span style={{ flex: 1 }} />
-                <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.45)', fontFamily: "'JetBrains Mono', monospace" }}>
-                  Actualizado · 14:31
-                </span>
               </div>
-              <div style={{ display: 'flex', gap: 6, padding: '12px 20px', borderBottom: '1px solid rgba(13,15,12,0.12)', flexWrap: 'wrap' }}>
-                {['Todos', 'Labor', 'Plaga', 'Cosecha', 'Insumo', 'Gasto'].map((f, i) => (
-                  <button
-                    key={f}
-                    style={{
-                      fontSize: 11, fontWeight: 600,
-                      padding: '4px 10px',
-                      border: i === 0 ? '1.5px solid #0D0F0C' : '1.5px solid rgba(13,15,12,0.25)',
-                      cursor: 'pointer',
-                      letterSpacing: '0.03em',
-                      background: i === 0 ? '#0D0F0C' : 'transparent',
-                      color: i === 0 ? '#F5F1E8' : 'rgba(13,15,12,0.45)',
-                    }}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-              <div>
-                {eventosHoy.map((e) => <EventoItem key={e.id} evento={e} />)}
-              </div>
+              {eventosHoy.slice(0, 5).map(e => <EventoItem key={e.id} evento={e} />)}
             </div>
             {/* Alertas */}
             <AlertaPanel alertas={alertas} />
-          </div>
-        </section>
-
-        {/* Lotes */}
-        <section>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)' }}>
-              Estado de lotes
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-            {lotes.slice(0, 8).map((l) => <LoteCard key={l.id} lote={l} />)}
-          </div>
-        </section>
-
-        {/* Tabla eventos */}
-        <section>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)' }}>
-              Todos los eventos
-            </span>
-          </div>
-          <div style={{ background: '#F5F1E8', border: '2px solid #0D0F0C', boxShadow: '4px 4px 0 0 #0D0F0C', overflow: 'hidden' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #0D0F0C' }}>
-                    {['ID', 'Tipo', 'Descripción', 'Lote', 'Trabajador', 'Hora', 'Fuente', 'Confianza'].map((h) => (
-                      <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(13,15,12,0.45)', whiteSpace: 'nowrap' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {eventosTabla.map((e) => (
-                    <tr key={e.id} style={{ borderBottom: '1px solid rgba(13,15,12,0.1)', cursor: 'pointer' }}
-                      onMouseEnter={ev => (ev.currentTarget.style.background = 'rgba(13,15,12,0.03)')}
-                      onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
-                    >
-                      <td style={{ padding: '11px 14px', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(13,15,12,0.45)' }}>{e.id}</td>
-                      <td style={{ padding: '11px 14px' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, padding: '3px 8px', border: '1.5px solid #0D0F0C', color: TIPO_COLOR[e.tipo] }}>
-                          {e.tipo.toUpperCase()}
-                        </span>
-                      </td>
-                      <td style={{ padding: '11px 14px', fontSize: 13, fontWeight: 600 }}>{e.titulo}</td>
-                      <td style={{ padding: '11px 14px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{e.lote}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 13 }}>{e.trabajador}</td>
-                      <td style={{ padding: '11px 14px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{e.hora}</td>
-                      <td style={{ padding: '11px 14px' }}>
-                        <span style={{
-                          fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700,
-                          padding: '2px 6px', letterSpacing: '0.05em', border: '1.5px solid',
-                          background: e.fuente === 'voz' ? 'rgba(27,61,36,0.1)' : e.fuente === 'imagen' ? 'rgba(43,78,160,0.1)' : 'rgba(13,15,12,0.07)',
-                          color: e.fuente === 'voz' ? '#1B3D24' : e.fuente === 'imagen' ? '#2B4EA0' : 'rgba(13,15,12,0.55)',
-                          borderColor: e.fuente === 'voz' ? '#1B3D24' : e.fuente === 'imagen' ? '#2B4EA0' : 'rgba(13,15,12,0.25)',
-                        }}>
-                          {e.fuente.toUpperCase()}
-                        </span>
-                      </td>
-                      <td style={{ padding: '11px 14px' }}>
-                        <span style={{
-                          fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
-                          padding: '3px 7px', border: '1.5px solid',
-                          background: e.confianza >= 95 ? '#1B3D24' : e.confianza >= 80 ? 'rgba(245,196,67,0.2)' : 'rgba(212,88,40,0.12)',
-                          color: e.confianza >= 95 ? '#C9F03B' : e.confianza >= 80 ? '#9C6B00' : '#D45828',
-                          borderColor: e.confianza >= 95 ? '#1B3D24' : e.confianza >= 80 ? '#F5C443' : '#D45828',
-                        }}>
-                          {e.confianza}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderTop: '2px solid #0D0F0C' }}>
-              <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: 'rgba(13,15,12,0.45)' }}>
-                Mostrando 1–5 de 23 eventos
-              </span>
-              <div style={{ display: 'flex' }}>
-                {['←', '1', '2', '3', '→'].map((p, i) => (
-                  <button key={p} style={{
-                    padding: '6px 14px',
-                    border: '2px solid #0D0F0C',
-                    background: i === 1 ? '#0D0F0C' : '#F5F1E8',
-                    color: i === 1 ? '#F5F1E8' : '#0D0F0C',
-                    fontSize: 12, fontWeight: 700,
-                    cursor: 'pointer',
-                    marginLeft: -2,
-                    fontFamily: "'Space Grotesk', sans-serif",
-                  }}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </section>
 

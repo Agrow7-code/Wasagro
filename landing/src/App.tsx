@@ -11,6 +11,7 @@ import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
 import { AgricultorIndividual } from './dashboard/views/AgricultorIndividual'
+import { CalculadoraView } from './dashboard/views/CalculadoraView'
 import LoginPage from './auth/LoginPage'
 import Brochure from './Brochure'
 import { useAuth } from './auth/useAuth'
@@ -1096,6 +1097,7 @@ export default function App() {
           }
         >
           <Route index element={<AdminFinca />} />
+          <Route path="calculadora" element={<CalculadoraView />} />
           <Route path="gerente" element={<GerenteAgricola />} />
           <Route path="exportadora" element={<Exportadora />} />
           <Route path="agricultor" element={<AgricultorIndividual />} />
