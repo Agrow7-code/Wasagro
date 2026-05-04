@@ -321,6 +321,88 @@ export async function getEventosByFincaRango(
   return (data ?? []) as EventoResumenRow[]
 }
 
+// ── Resumen de plagas por nivel de umbral para el reporte semanal ─────────────
+
+export interface PlaguaNivelResumen {
+  plaga_tipo:    string
+  bajo:          string[]   // nombres de lotes
+  medio:         string[]
+  alto:          string[]
+  critico:       string[]
+  sin_umbral:    string[]   // detectada pero sin métrica configurada
+}
+
+export async function getPlagasPorNivelSemanal(
+  fincaId: string,
+  desde: Date,
+  hasta: Date,
+  client: SupabaseClient = defaultClient,
+): Promise<PlaguaNivelResumen[]> {
+  const fechaInicio = desde.toISOString().slice(0, 10)
+  const fechaFin    = hasta.toISOString().slice(0, 10)
+
+  // 1. Eventos de plaga de la semana con nombre de lote
+  const { data: eventosPlaga, error: errEventos } = await client
+    .from('eventos_campo')
+    .select('lote_id, datos_evento, lotes(nombre_coloquial)')
+    .eq('finca_id', fincaId)
+    .eq('tipo_evento', 'plaga')
+    .gte('created_at', desde.toISOString())
+    .lt('created_at', hasta.toISOString())
+    .neq('status', 'draft')
+
+  if (errEventos) throw new Error(`[getPlagasPorNivelSemanal] query eventos_campo: ${errEventos.message}`)
+  if (!eventosPlaga?.length) return []
+
+  // 2. Resultados de métricas en el mismo periodo (D18)
+  const { data: resultados, error: errResultados } = await client
+    .from('resultados_metricas')
+    .select('lote_id, nivel_actual, metricas_finca(tipo_evento, nombre)')
+    .eq('finca_id', fincaId)
+    .eq('metricas_finca.tipo_evento', 'plaga')
+    .gte('fecha_inicio', fechaInicio)
+    .lte('fecha_fin', fechaFin)
+    .not('lote_id', 'is', null)
+
+  if (errResultados) throw new Error(`[getPlagasPorNivelSemanal] query resultados_metricas: ${errResultados.message}`)
+
+  // Mapa lote_id → nivel_actual (de la métrica más reciente)
+  const nivelPorLote = new Map<string, string>()
+  for (const r of resultados ?? []) {
+    if (r.lote_id && r.nivel_actual) {
+      nivelPorLote.set(r.lote_id, r.nivel_actual)
+    }
+  }
+
+  // 3. Agrupar por plaga_tipo → niveles → lotes
+  const mapa = new Map<string, PlaguaNivelResumen>()
+
+  for (const ev of eventosPlaga) {
+    const datos     = ev.datos_evento as Record<string, unknown>
+    const plagaTipo = (datos['plaga_tipo'] ?? datos['nombre_comun'] ?? 'Plaga desconocida') as string
+    const loteNombre = (ev as unknown as Record<string, unknown>)['lotes']
+      ? ((ev as unknown as Record<string, { nombre_coloquial: string }>)['lotes'] as { nombre_coloquial: string })?.nombre_coloquial
+      : ev.lote_id ?? 'Lote desconocido'
+
+    if (!mapa.has(plagaTipo)) {
+      mapa.set(plagaTipo, { plaga_tipo: plagaTipo, bajo: [], medio: [], alto: [], critico: [], sin_umbral: [] })
+    }
+
+    const grupo = mapa.get(plagaTipo)!
+    const nivel = ev.lote_id ? nivelPorLote.get(ev.lote_id) : undefined
+
+    switch (nivel) {
+      case 'bajo':    if (!grupo.bajo.includes(loteNombre))    grupo.bajo.push(loteNombre);    break
+      case 'medio':   if (!grupo.medio.includes(loteNombre))   grupo.medio.push(loteNombre);   break
+      case 'alto':    if (!grupo.alto.includes(loteNombre))    grupo.alto.push(loteNombre);    break
+      case 'critico': if (!grupo.critico.includes(loteNombre)) grupo.critico.push(loteNombre); break
+      default:        if (!grupo.sin_umbral.includes(loteNombre)) grupo.sin_umbral.push(loteNombre)
+    }
+  }
+
+  return Array.from(mapa.values())
+}
+
 export interface AdminRow {
   id: string
   phone: string

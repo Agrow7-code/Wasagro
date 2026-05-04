@@ -2,7 +2,7 @@ import { langfuse } from '../integrations/langfuse.js'
 import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
 import type { IWhatsAppSender } from '../integrations/whatsapp/IWhatsAppSender.js'
 import type { EntradaResumenSemanal } from '../types/dominio/Resumen.js'
-import { getEventosByFincaRango, getAdminsByFinca, getFincasConCoordenadas, getFincasActivas } from './supabaseQueries.js'
+import { getEventosByFincaRango, getAdminsByFinca, getFincasConCoordenadas, getFincasActivas, getPlagasPorNivelSemanal, type PlaguaNivelResumen } from './supabaseQueries.js'
 import { getForecastSemanal, type ForecastSemanal } from '../integrations/weather/OpenMeteoClient.js'
 
 function formatDate(date: Date): string {
@@ -24,8 +24,14 @@ export async function generarYEnviarReportes(
   const { desde, hasta } = rangoSemanaAnterior()
 
   // Obtener fincas con coordenadas (para clima) y sin (fallback)
-  const fincasConCoords = await getFincasConCoordenadas().catch(() => [])
-  const todasFincas     = await getFincasActivas().catch(() => [])
+  const fincasConCoords = await getFincasConCoordenadas().catch(err => {
+    console.error('[reporteSemanal] Error al obtener fincas con coordenadas:', err)
+    return []
+  })
+  const todasFincas = await getFincasActivas().catch(err => {
+    console.error('[reporteSemanal] Error al obtener fincas activas:', err)
+    return []
+  })
 
   // Mapa finca_id → lat/lng para lookup rápido
   const coordsMap = new Map(fincasConCoords.map(f => [f.finca_id, { lat: f.lat, lng: f.lng }]))
@@ -82,6 +88,13 @@ async function procesarReporteFinca(
     return false
   }
 
+  // Plagas por nivel de umbral (D18)
+  const plagasPorNivel = await getPlagasPorNivelSemanal(fincaId, desde, hasta).catch(err => {
+    trace.event({ name: 'plagasPorNivel_error', level: 'WARNING', input: { finca_id: fincaId, error: String(err) } })
+    console.error(`[reporteSemanal] Error al obtener plagas por nivel para finca ${fincaId}:`, err)
+    return [] as PlaguaNivelResumen[]
+  })
+
   // Pronóstico semanal — solo si tenemos coordenadas
   let forecast: ForecastSemanal | null = null
   if (coords) {
@@ -100,7 +113,8 @@ async function procesarReporteFinca(
     fecha_fin:         formatDate(hasta),
     eventos,
     forecast,
-  }
+    plagasPorNivel,
+  } as EntradaResumenSemanal
 
   let resumen
   try {

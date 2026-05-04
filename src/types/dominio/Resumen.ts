@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ForecastSemanal } from '../../integrations/weather/OpenMeteoClient.js'
+import type { PlaguaNivelResumen } from '../../pipeline/supabaseQueries.js'
 
 export const ResumenSemanalSchema = z.object({
   semana:            z.string(),
@@ -37,4 +38,5 @@ export interface EntradaResumenSemanal {
   fecha_fin:         string
   eventos:           EventoResumenRow[]
   forecast?:         ForecastSemanal | null
+  plagasPorNivel?:   PlaguaNivelResumen[]
 }

@@ -525,6 +525,21 @@ export class WasagroAIAgent implements IWasagroLLM {
           ].join('\n')
         : 'Sin pronóstico disponible para esta finca.'
 
+      // Plagas agrupadas por nivel de umbral — datos pre-calculados por el backend
+      type PlagaNivel = { plaga_tipo: string; bajo: string[]; medio: string[]; alto: string[]; critico: string[]; sin_umbral: string[] }
+      const plagasPorNivel = (entrada as EntradaResumenSemanal & { plagasPorNivel?: PlagaNivel[] }).plagasPorNivel ?? []
+      const plagasTexto = plagasPorNivel.length
+        ? plagasPorNivel.map(p => {
+            const lineas: string[] = [`${p.plaga_tipo}:`]
+            if (p.critico.length)    lineas.push(`  Umbral crítico: ${p.critico.join(', ')}`)
+            if (p.alto.length)       lineas.push(`  Umbral alto: ${p.alto.join(', ')}`)
+            if (p.medio.length)      lineas.push(`  Umbral medio: ${p.medio.join(', ')}`)
+            if (p.bajo.length)       lineas.push(`  Umbral bajo: ${p.bajo.join(', ')}`)
+            if (p.sin_umbral.length) lineas.push(`  Sin umbral configurado: ${p.sin_umbral.join(', ')}`)
+            return lineas.join('\n')
+          }).join('\n\n')
+        : 'Sin plagas registradas esta semana.'
+
       const prompt = injectarVariables((await PromptManager.getPrompt('sp-05-resumen-semanal.md', 'prompts/sp-05-resumen-semanal.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
         FINCA_NOMBRE:       entrada.finca_nombre,
         CULTIVO_PRINCIPAL:  entrada.cultivo_principal,
@@ -533,6 +548,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         FECHA_FIN:          entrada.fecha_fin,
         EVENTOS_AGREGADOS:  JSON.stringify(entrada.eventos, null, 2),
         FORECAST_SEMANAL:   forecastTexto,
+        PLAGAS_POR_NIVEL:   plagasTexto,
       })
       const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       let json: unknown

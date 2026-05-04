@@ -2,7 +2,7 @@
 # Archivo: prompts/sp-05-resumen-semanal.md
 # Modelo: Tier reasoning
 # Variables: {{FINCA_NOMBRE}}, {{CULTIVO_PRINCIPAL}}, {{PAIS}}, {{FECHA_INICIO}}, {{FECHA_FIN}},
-#            {{EVENTOS_AGREGADOS}}, {{FORECAST_SEMANAL}}
+#            {{EVENTOS_AGREGADOS}}, {{PLAGAS_POR_NIVEL}}, {{FORECAST_SEMANAL}}
 # Tokens estimados: ~450
 
 ---
@@ -20,6 +20,10 @@ Semana: {{FECHA_INICIO}} al {{FECHA_FIN}}
 
 {{EVENTOS_AGREGADOS}}
 
+## Estado de plagas por lote (agrupadas por umbral)
+
+{{PLAGAS_POR_NIVEL}}
+
 ## Pronóstico climático para esta semana
 
 {{FORECAST_SEMANAL}}
@@ -35,9 +39,10 @@ El mensaje tiene estas secciones, solo si hay datos reales para llenarlas:
 **1. Encabezado** (siempre)
 `Resumen — [Finca] · [fecha inicio] al [fecha fin]`
 
-**2. 🚨 Lo urgente** (solo si hay plagas severas o críticas, o acciones de infraestructura sin resolver)
+**2. 🚨 Lo urgente** (solo si hay plagas en umbral medio/alto/crítico, o acciones de infraestructura sin resolver)
+Usá los datos de `{{PLAGAS_POR_NIVEL}}` para listar plagas por nivel. Solo umbral medio, alto y crítico van aquí.
 Lista corta. Máx 3 ítems. Solo lo que requiere acción ESTA SEMANA.
-Incluí números concretos si los hay: "Trips 2.4/hijo en Lote 3 — sobre umbral medio".
+Incluí los lotes afectados: "Trips — umbral crítico: Lote 3, Lote 5 · umbral medio: Lote 1".
 Si no hay nada urgente, OMITIR esta sección.
 
 **3. ✅ Lo que se hizo**
