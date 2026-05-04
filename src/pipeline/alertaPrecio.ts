@@ -54,14 +54,20 @@ export async function enviarAlertasPrecio(
     return cultivo.includes('banano') || cultivo.includes('banana')
   })
 
+  // Deduplicar phones — un admin puede aparecer en varias fincas bananeras
+  const phonesSent = new Set<string>()
+
   for (const finca of fincasBanano) {
     try {
       const admins = await getAdminsByFinca(finca.finca_id)
       for (const admin of admins) {
+        if (phonesSent.has(admin.phone)) continue
+
         const mensaje = buildMensajePrecio(admin.nombre, ultimo.precio, anterior.precio, ultimo.fecha)
         if (!mensaje) continue
 
         await sender.enviarTexto(admin.phone, mensaje)
+        phonesSent.add(admin.phone)
         enviadas++
         trace.event({
           name: 'alerta_precio_enviada',

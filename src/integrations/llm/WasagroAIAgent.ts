@@ -514,12 +514,25 @@ export class WasagroAIAgent implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'resumir_semana', model: 'wasagro-ai-agent', input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
     try {
+      const forecastTexto = entrada.forecast
+        ? [
+            `Días con lluvia (>60%): ${entrada.forecast.dias_lluvia} de 7`,
+            `Lluvia acumulada estimada: ${entrada.forecast.mm_total}mm`,
+            `${entrada.forecast.ventana_aplicacion}`,
+            entrada.forecast.dias
+              .map(d => `  ${d.fecha}: ${d.precipitacion_pct}% lluvia, ${d.precipitacion_mm}mm, temp min ${d.temp_min}°C`)
+              .join('\n'),
+          ].join('\n')
+        : 'Sin pronóstico disponible para esta finca.'
+
       const prompt = injectarVariables((await PromptManager.getPrompt('sp-05-resumen-semanal.md', 'prompts/sp-05-resumen-semanal.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
-        FINCA_NOMBRE: entrada.finca_nombre,
-        CULTIVO_PRINCIPAL: entrada.cultivo_principal,
-        FECHA_INICIO: entrada.fecha_inicio,
-        FECHA_FIN: entrada.fecha_fin,
-        EVENTOS_AGREGADOS: JSON.stringify(entrada.eventos, null, 2),
+        FINCA_NOMBRE:       entrada.finca_nombre,
+        CULTIVO_PRINCIPAL:  entrada.cultivo_principal,
+        PAIS:               entrada.pais ?? 'EC',
+        FECHA_INICIO:       entrada.fecha_inicio,
+        FECHA_FIN:          entrada.fecha_fin,
+        EVENTOS_AGREGADOS:  JSON.stringify(entrada.eventos, null, 2),
+        FORECAST_SEMANAL:   forecastTexto,
       })
       const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
       let json: unknown
