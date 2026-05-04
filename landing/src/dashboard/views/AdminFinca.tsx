@@ -25,7 +25,6 @@ const TIPO_COLOR: Record<string, string> = {
   labor: '#0D0F0C', clima: '#9C9080', gasto: '#C9F03B',
 }
 
-// Re-deploy para actualizar validación de Argentina 🇦🇷
 export function AdminFinca() {
   return (
     <>

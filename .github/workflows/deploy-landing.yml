@@ -18,8 +18,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: landing/package-lock.json
 
+      - name: Install dependencies
+        working-directory: landing
+        run: npm ci
+
+      - name: Build
+        working-directory: landing
+        run: npm run build
+
       - name: Deploy to Vercel
-        run: npx vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: landing
+        run: npx vercel deploy --prebuilt --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: team_Ax1sJw5aoeX3PaqvjbKMUct1
           VERCEL_PROJECT_ID: prj_Ou2lJCOoYdyKrD0LdLF9eGb85cCa
