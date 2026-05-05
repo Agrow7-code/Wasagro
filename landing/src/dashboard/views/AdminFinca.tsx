@@ -1,9 +1,20 @@
+import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { kpisAdmin, eventosHoy, alertas, lotes } from '../mock/data'
 import { EventoItem } from '../components/EventoItem'
 import { AlertaPanel } from '../components/AlertaBadge'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
 import { useMetricas, type MetricaGuardada } from '../store/metricasStore'
+import { useAuth } from '../../auth/useAuth'
+
+const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+function fechaHoy(): string {
+  const d = new Date()
+  return `${d.getDate()} ${MESES[d.getMonth()]} ${d.getFullYear()}`
+}
+function getInitials(nombre: string): string {
+  return nombre.trim().split(/\s+/).slice(0, 2).map(n => n[0]?.toUpperCase() ?? '').join('')
+}
 
 // ── Paleta de tipos de evento ─────────────────────────────────────────────────
 
@@ -349,8 +360,10 @@ function ActividadYMetricas({ metricas, onCrearMetrica }: { metricas: MetricaGua
 // ── Vista principal ───────────────────────────────────────────────────────────
 
 export function AdminFinca() {
-  const navigate = useNavigate()
-  const metricas = useMetricas()
+  const navigate  = useNavigate()
+  const metricas  = useMetricas()
+  const { user }  = useAuth()
+  const initials  = user ? getInitials(user.nombre) : 'WA'
 
   // Detectar cultivos y dominante
   const cultivoCount: Record<string, number> = {}
@@ -369,7 +382,7 @@ export function AdminFinca() {
       <Topbar
         title="Resumen"
         badge="H0-R"
-        avatarInitials="CM"
+        avatarInitials={initials}
         rightSlot={
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', border: '2px solid #0D0F0C', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -379,7 +392,7 @@ export function AdminFinca() {
               Finca El Progreso
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
-            <TopbarPeriod>29 Abr 2026</TopbarPeriod>
+            <TopbarPeriod>{fechaHoy()}</TopbarPeriod>
           </>
         }
       />

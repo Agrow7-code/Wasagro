@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
 import { lotes } from '../mock/data'
 import { addMetrica } from '../store/metricasStore'
+import { useAuth } from '../../auth/useAuth'
+
+const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+function fechaHoy(): string {
+  const d = new Date()
+  return `${d.getDate()} ${MESES[d.getMonth()]} ${d.getFullYear()}`
+}
+function getInitials(nombre: string): string {
+  return nombre.trim().split(/\s+/).slice(0, 2).map(n => n[0]?.toUpperCase() ?? '').join('')
+}
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -138,7 +148,9 @@ function esValor(tipo: Bloque['tipo'] | null) {
 // ── Componente principal ──────────────────────────────────────────────────────
 
 export function CalculadoraView() {
-  const navigate = useNavigate()
+  const navigate  = useNavigate()
+  const { user }  = useAuth()
+  const initials  = user ? getInitials(user.nombre) : 'WA'
   const [categoriaActiva, setCategoriaActiva] = useState('Cosecha')
   const [bloques, setBloques]       = useState<Bloque[]>([])
   const [fechaInicio, setFechaInicio] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10) })
@@ -299,8 +311,8 @@ export function CalculadoraView() {
       <Topbar
         title="Calculadora"
         badge="H0-R"
-        avatarInitials="CM"
-        rightSlot={<TopbarPeriod>29 Abr 2026</TopbarPeriod>}
+        avatarInitials={initials}
+        rightSlot={<TopbarPeriod>{fechaHoy()}</TopbarPeriod>}
       />
 
       <main style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 24 }}>

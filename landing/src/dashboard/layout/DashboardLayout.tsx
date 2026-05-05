@@ -1,21 +1,41 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar, NAV_ADMIN, type SidebarUser, type NavItem } from './Sidebar'
-import { useLocation } from 'react-router-dom'
 import { NAV_GERENTE, NAV_EXPORTADORA, NAV_AGRICULTOR } from './Sidebar'
+import { useAuth } from '../../auth/useAuth'
 
-const USERS: Record<string, SidebarUser> = {
-  admin: { initials: 'CM', name: 'Carlos Mendoza', role: 'Administrador', sub: 'Finca El Progreso' },
-  gerente: { initials: 'RV', name: 'Roberto Vargas', role: 'Gerente Agrícola', sub: '3 fincas activas' },
-  exportadora: { initials: 'AE', name: 'AgroExport S.A.', role: 'Exportadora', sub: '12 fincas activas' },
-  agricultor: { initials: 'JC', name: 'Juan Caicedo', role: 'Agricultor', sub: 'Finca El Progreso' },
+const ROL_LABEL: Record<string, string> = {
+  administrador: 'Administrador',
+  propietario:   'Propietario',
+  admin_org:     'Administrador',
+  gerente:       'Gerente Agrícola',
+  director:      'Director',
+  analista:      'Exportadora',
+  agricultor:    'Agricultor',
+  tecnico:       'Técnico de campo',
+  jefe_finca:    'Jefe de finca',
+}
+
+function getInitials(nombre: string): string {
+  return nombre.trim().split(/\s+/).slice(0, 2).map(n => n[0]?.toUpperCase() ?? '').join('')
 }
 
 function useRole(): { user: SidebarUser; nav: NavItem[] } {
   const { pathname } = useLocation()
-  if (pathname.startsWith('/dashboard/gerente')) return { user: USERS.gerente, nav: NAV_GERENTE }
-  if (pathname.startsWith('/dashboard/exportadora')) return { user: USERS.exportadora, nav: NAV_EXPORTADORA }
-  if (pathname.startsWith('/dashboard/agricultor')) return { user: USERS.agricultor, nav: NAV_AGRICULTOR }
-  return { user: USERS.admin, nav: NAV_ADMIN }
+  const { user }     = useAuth()
+
+  const sidebarUser: SidebarUser = user
+    ? {
+        initials: getInitials(user.nombre),
+        name:     user.nombre,
+        role:     ROL_LABEL[user.rol] ?? user.rol,
+        sub:      user.phone,
+      }
+    : { initials: '?', name: 'Usuario', role: 'Sin sesión', sub: '' }
+
+  if (pathname.startsWith('/dashboard/gerente'))     return { user: sidebarUser, nav: NAV_GERENTE }
+  if (pathname.startsWith('/dashboard/exportadora')) return { user: sidebarUser, nav: NAV_EXPORTADORA }
+  if (pathname.startsWith('/dashboard/agricultor'))  return { user: sidebarUser, nav: NAV_AGRICULTOR }
+  return { user: sidebarUser, nav: NAV_ADMIN }
 }
 
 export function DashboardLayout() {
