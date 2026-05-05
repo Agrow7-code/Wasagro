@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Topbar, TopbarPeriod } from '../layout/Topbar'
 import { lotes } from '../mock/data'
+import { addMetrica } from '../store/metricasStore'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -136,6 +138,7 @@ function esValor(tipo: Bloque['tipo'] | null) {
 // ── Componente principal ──────────────────────────────────────────────────────
 
 export function CalculadoraView() {
+  const navigate = useNavigate()
   const [categoriaActiva, setCategoriaActiva] = useState('Cosecha')
   const [bloques, setBloques]       = useState<Bloque[]>([])
   const [fechaInicio, setFechaInicio] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10) })
@@ -244,12 +247,6 @@ export function CalculadoraView() {
     }, 500)
   }
 
-  function guardar() {
-    if (!nombreMetrica.trim()) return
-    setGuardado(true)
-    setTimeout(() => setGuardado(false), 3000)
-  }
-
   // ── Preview de fórmula en texto ──────────────────────────────────────────────
 
   const formulaTexto = bloques.map(b => {
@@ -264,6 +261,24 @@ export function CalculadoraView() {
   const maxValor = valoresValidos.length ? Math.max(...valoresValidos) : 1
   const primeraVar = bloques.find(b => b.tipo === 'var') as BloqueVar | undefined
   const unidadResult = primeraVar?.variable.unidad ?? ''
+
+  function guardar() {
+    if (!nombreMetrica.trim() || !resultados) return
+    addMetrica({
+      id:           `metrica-${Date.now()}`,
+      nombre:       nombreMetrica.trim(),
+      unidad:       unidadResult,
+      formulaTexto: formulaTexto,
+      categoria:    primeraVar?.variable.categoria ?? 'Cosecha',
+      resultados:   resultados,
+      creadaEn:     new Date().toISOString().slice(0, 10),
+    })
+    setGuardado(true)
+    setTimeout(() => {
+      setGuardado(false)
+      navigate('/dashboard')
+    }, 1500)
+  }
 
   // ── Conteo de paréntesis abiertos sin cerrar ──────────────────────────────
 
@@ -572,7 +587,7 @@ export function CalculadoraView() {
                         color: guardado ? '#fff' : nombreMetrica.trim() ? '#F5F1E8' : 'rgba(13,15,12,0.35)',
                         border: '2px solid transparent', padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: nombreMetrica.trim() ? 'pointer' : 'default',
                       }}>
-                      {guardado ? '✓ Guardada' : 'Guardar métrica'}
+                      {guardado ? '✓ Guardada — volviendo al resumen…' : 'Guardar métrica'}
                     </button>
                   </div>
                   <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(13,15,12,0.4)' }}>
