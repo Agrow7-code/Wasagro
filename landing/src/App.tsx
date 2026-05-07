@@ -22,7 +22,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-const WA_LINK = 'https://wa.me/50672134878?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
+const WA_B2B = 'https://wa.me/50672134878?text=Hola%2C%20represento%20una%20organizaci%C3%B3n%20agr%C3%ADcola%20y%20quiero%20conocer%20Wasagro'
+const WA_B2C = 'https://wa.me/50672134878?text=Hola%2C%20tengo%20mi%20propia%20finca%20y%20quiero%20empezar%20con%20Wasagro'
 
 // ─────────────────────────────────────────────────────────────
 // LOGO — isotipo v3: W condensada + señal GPS (dot centrado)
@@ -135,7 +136,7 @@ function Nav() {
 
         <div className="flex items-center gap-3">
           <a
-            href={WA_LINK}
+            href={WA_B2C}
             target="_blank"
             rel="noopener noreferrer"
             className="hidden md:flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard-sm hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform duration-100"
@@ -166,7 +167,7 @@ function Nav() {
             </a>
           ))}
           <a
-            href={WA_LINK}
+            href={WA_B2C}
             target="_blank"
             rel="noopener noreferrer"
             className="mt-2 flex items-center justify-center gap-2 px-4 py-3 font-bold bg-negro text-pergamino border-2 border-negro rounded-md"
@@ -477,7 +478,7 @@ function Hero() {
             className="flex flex-wrap gap-3"
           >
             <a
-              href={WA_LINK}
+              href={WA_B2C}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-5 py-3 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-md shadow-hard hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
@@ -683,14 +684,14 @@ function WhatsAppSection() {
       <div className="absolute inset-0 dot-grid-light pointer-events-none opacity-40" />
       <div className="relative max-w-6xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-senal/70 mb-4">— Demo en vivo</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-senal/70 mb-4">— Conversación real de campo</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-pergamino mb-5" style={{ fontSize: 'clamp(30px, 4vw, 52px)' }}>
-            Demo en vivo — escribe como
+            Así se ve Wasagro
             <br />
-            <span className="text-senal">si fuera tu equipo de campo.</span>
+            <span className="text-senal">en una mañana real de campo.</span>
           </h2>
           <p className="text-[16px] text-pergamino/60 leading-[1.65] mb-8 max-w-md">
-            Estos son ejemplos reales de mensajes que Wasagro procesa. Texto, voz o foto — el resultado es el mismo.
+            Tres mensajes de un jefe de campo. Audio, texto, texto. Treinta segundos en total. Los datos quedan estructurados automáticamente.
           </p>
           <div className="flex flex-col gap-3">
             {[
@@ -813,7 +814,7 @@ function Audiences() {
   const audiences = [
     {
       id: 'exportadoras',
-      tag: 'Para exportadoras',
+      tag: 'Para organizaciones agrícolas',
       title: 'Visibilidad total de tus fincas.\nSin contratar más personal.',
       items: [
         'Dashboard de todas las fincas en tiempo real',
@@ -824,12 +825,13 @@ function Audiences() {
         'API para integrar con tu ERP exportador',
       ],
       cta: 'Solicitar demo para exportadoras',
+      link: WA_B2B,
       bg: '#F5F1E8',
       border: '#0D0F0C',
     },
     {
       id: 'finca',
-      tag: 'Para el jefe de finca',
+      tag: 'Para tu propia finca',
       title: 'El campo reporta solo.\nTú ves los datos.',
       items: [
         'Sin apps nuevas para tus trabajadores',
@@ -840,6 +842,7 @@ function Audiences() {
         'El agricultor solo habla — Wasagro estructura',
       ],
       cta: 'Empezar con mi finca',
+      link: WA_B2C,
       bg: '#1B3D24',
       border: '#C9F03B',
       dark: true,
@@ -857,9 +860,9 @@ function Audiences() {
         <FadeUp>
           <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— Dos perspectivas</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-14" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}>
-            Una herramienta.
+            ¿Tienes fincas proveedoras
             <br />
-            Dos mundos que conecta.
+            o tienes tu propia finca?
           </h2>
         </FadeUp>
         <div className="grid md:grid-cols-2 gap-5">
@@ -891,7 +894,7 @@ function Audiences() {
                 </div>
                 <div className="px-6 pb-6">
                   <a
-                    href={WA_LINK}
+                    href={a.link}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 w-full py-3 font-bold text-[14px] rounded-xl border-2 transition-all duration-100 hover:gap-3"
@@ -976,7 +979,7 @@ function FinalCTA() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <a
-              href={WA_LINK}
+              href={WA_B2C}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-8 py-4 font-bold text-[16px] bg-negro text-pergamino border-2 border-negro rounded-xl transition-all duration-100 hover:translate-x-[-2px] hover:translate-y-[-2px]"
@@ -1039,7 +1042,7 @@ function Footer() {
             Gestión agrícola · Trazabilidad · WhatsApp · Cacao · Banano
           </p>
           <a
-            href={WA_LINK}
+            href={WA_B2C}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-senal tracking-[.08em] uppercase hover:opacity-80 transition-opacity duration-100"
