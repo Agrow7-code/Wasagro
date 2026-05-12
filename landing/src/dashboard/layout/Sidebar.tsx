@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { NavLink } from 'react-router-dom'
+import { useState, useEffect, type ReactNode, type CSSProperties } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 
 export interface SidebarUser {
   initials: string
@@ -15,11 +15,39 @@ export interface NavItem {
   end?: boolean
 }
 
+export interface TipoConfig {
+  tipo: string
+  label: string
+  to: string
+  color: string
+}
+
+// ── Iconos ────────────────────────────────────────────────────────────────────
+
 function iconGrid() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
       <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    </svg>
+  )
+}
+function iconCalc() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="2" width="16" height="20" rx="2"/>
+      <line x1="8" y1="6" x2="16" y2="6"/>
+      <line x1="8" y1="10" x2="10" y2="10"/><line x1="12" y1="10" x2="14" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/>
+      <line x1="8" y1="14" x2="10" y2="14"/><line x1="12" y1="14" x2="14" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/>
+      <line x1="8" y1="18" x2="10" y2="18"/><line x1="12" y1="18" x2="14" y2="18"/><line x1="16" y1="18" x2="16" y2="18"/>
+    </svg>
+  )
+}
+function iconSettings() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M12 2a10 10 0 0 1 0 20M4.93 4.93a10 10 0 0 0 0 14.14"/>
     </svg>
   )
 }
@@ -47,15 +75,6 @@ function iconUsers() {
     </svg>
   )
 }
-function iconClipboard() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
-      <rect x="9" y="3" width="6" height="4" rx="1"/>
-      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="12" y2="16"/>
-    </svg>
-  )
-}
 function iconSearch() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -63,33 +82,22 @@ function iconSearch() {
     </svg>
   )
 }
-function iconCalc() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="2" width="16" height="20" rx="2"/>
-      <line x1="8" y1="6" x2="16" y2="6"/>
-      <line x1="8" y1="10" x2="10" y2="10"/><line x1="12" y1="10" x2="14" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/>
-      <line x1="8" y1="14" x2="10" y2="14"/><line x1="12" y1="14" x2="14" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/>
-      <line x1="8" y1="18" x2="10" y2="18"/><line x1="12" y1="18" x2="14" y2="18"/><line x1="16" y1="18" x2="16" y2="18"/>
-    </svg>
-  )
+
+// Icono mini para los tipos del accordion
+const TIPO_DOT_COLOR: Record<string, string> = {
+  insumo:  '#2A50D4',
+  labor:   '#6B7280',
+  cosecha: '#3EBB6A',
+  plaga:   '#D45828',
+  gasto:   '#C9A800',
+  clima:   '#9C9080',
 }
-function iconSettings() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M12 2a10 10 0 0 1 0 20M4.93 4.93a10 10 0 0 0 0 14.14"/>
-    </svg>
-  )
-}
+
+// ── Nav sets ─────────────────────────────────────────────────────────────────
 
 export const NAV_ADMIN: NavItem[] = [
   { to: '/dashboard', label: 'Resumen', icon: iconGrid(), end: true },
-  { to: '/dashboard/eventos', label: 'Eventos', icon: iconClipboard() },
-  { to: '/dashboard/lotes', label: 'Lotes', icon: iconMap() },
-  { to: '/dashboard/equipo', label: 'Equipo', icon: iconUsers() },
   { to: '/dashboard/calculadora', label: 'Calculadora', icon: iconCalc() },
-  { to: '/dashboard/reportes', label: 'Reportes', icon: iconBarChart() },
 ]
 
 export const NAV_GERENTE: NavItem[] = [
@@ -102,7 +110,7 @@ export const NAV_GERENTE: NavItem[] = [
 export const NAV_EXPORTADORA: NavItem[] = [
   { to: '/dashboard/exportadora', label: 'Fincas proveedoras', icon: iconMap(), end: true },
   { to: '/dashboard/exportadora/trazabilidad', label: 'Trazabilidad por lote', icon: iconSearch() },
-  { to: '/dashboard/exportadora/reportes', label: 'Reportes de exportación', icon: iconClipboard() },
+  { to: '/dashboard/exportadora/reportes', label: 'Reportes de exportación', icon: iconBarChart() },
 ]
 
 export const NAV_AGRICULTOR: NavItem[] = [
@@ -115,7 +123,53 @@ const NAV_SETTINGS: NavItem[] = [
   { to: '/dashboard/config', label: 'Configuración', icon: iconSettings() },
 ]
 
-export function Sidebar({ user, navItems }: { user: SidebarUser; navItems: NavItem[] }) {
+// ── Sidebar ──────────────────────────────────────────────────────────────────
+
+const DASHBOARD_ROUTES = [
+  '/dashboard/insumos',
+  '/dashboard/labor',
+  '/dashboard/cosecha',
+  '/dashboard/plagas',
+  '/dashboard/gastos',
+  '/dashboard/clima',
+]
+
+function navLinkStyle(isActive: boolean): CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 20px',
+    cursor: 'pointer',
+    color: isActive ? '#C9F03B' : 'rgba(245,241,232,0.65)',
+    fontSize: 14,
+    fontWeight: 500,
+    background: isActive ? 'rgba(201,240,59,0.15)' : 'transparent',
+    borderLeft: isActive ? '3px solid #C9F03B' : '3px solid transparent',
+    textDecoration: 'none',
+    transition: 'background 0.1s',
+  }
+}
+
+export function Sidebar({
+  user,
+  navItems,
+  tiposActivos = [],
+}: {
+  user: SidebarUser
+  navItems: NavItem[]
+  tiposActivos?: TipoConfig[]
+}) {
+  const { pathname } = useLocation()
+  const isOnDashRoute = DASHBOARD_ROUTES.includes(pathname)
+  const [open, setOpen] = useState(isOnDashRoute)
+
+  useEffect(() => {
+    if (isOnDashRoute) setOpen(true)
+  }, [isOnDashRoute])
+
+  const showAccordion = tiposActivos.length > 0
+
   return (
     <aside
       style={{
@@ -152,25 +206,14 @@ export function Sidebar({ user, navItems }: { user: SidebarUser; navItems: NavIt
       {/* Nav */}
       <nav style={{ flex: 1, padding: '16px 0' }}>
         <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '0 0 8px' }} />
+
+        {/* Items principales */}
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
-            style={({ isActive }) => ({
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '10px 20px',
-              cursor: 'pointer',
-              color: isActive ? '#C9F03B' : 'rgba(245,241,232,0.65)',
-              fontSize: 14,
-              fontWeight: 500,
-              background: isActive ? 'rgba(201,240,59,0.15)' : 'transparent',
-              borderLeft: isActive ? '3px solid #C9F03B' : '3px solid transparent',
-              textDecoration: 'none',
-              transition: 'background 0.1s',
-            })}
+            style={({ isActive }) => navLinkStyle(isActive)}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLElement
               if (!el.style.borderLeftColor.includes('C9F03B')) {
@@ -190,25 +233,107 @@ export function Sidebar({ user, navItems }: { user: SidebarUser; navItems: NavIt
             {item.label}
           </NavLink>
         ))}
-        <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '8px 0' }} />
+
+        {/* Accordion: Dashboards por tipo */}
+        {showAccordion && (
+          <>
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '8px 0' }} />
+
+            {/* Botón toggle */}
+            <button
+              onClick={() => setOpen(prev => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                padding: '10px 20px',
+                background: 'transparent',
+                border: 'none',
+                borderLeft: isOnDashRoute ? '3px solid #C9F03B' : '3px solid transparent',
+                cursor: 'pointer',
+                color: isOnDashRoute ? '#C9F03B' : 'rgba(245,241,232,0.65)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="6" height="6"/><rect x="9" y="3" width="6" height="6"/><rect x="16" y="3" width="6" height="6"/>
+                  <rect x="2" y="10" width="6" height="11"/><rect x="9" y="10" width="6" height="6"/><rect x="16" y="10" width="6" height="11"/>
+                </svg>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>Dashboard</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 800,
+                  background: 'rgba(201,240,59,0.2)',
+                  color: '#C9F03B',
+                  padding: '1px 6px',
+                  fontFamily: 'monospace',
+                }}>
+                  {tiposActivos.length}
+                </span>
+                <svg
+                  width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                  style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                >
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </div>
+            </button>
+
+            {/* Sub-items */}
+            {open && (
+              <div style={{ paddingTop: 2, paddingBottom: 4 }}>
+                {tiposActivos.map(t => (
+                  <NavLink
+                    key={t.to}
+                    to={t.to}
+                    style={({ isActive }) => ({
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 20px 8px 36px',
+                      textDecoration: 'none',
+                      color: isActive ? '#F5F1E8' : 'rgba(245,241,232,0.5)',
+                      fontSize: 13,
+                      fontWeight: isActive ? 700 : 400,
+                      background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
+                      borderLeft: isActive ? `3px solid ${t.color}` : '3px solid transparent',
+                      transition: 'background 0.1s',
+                    })}
+                    onMouseEnter={e => {
+                      const el = e.currentTarget as HTMLElement
+                      if (!el.style.background.includes('0.08')) {
+                        el.style.background = 'rgba(255,255,255,0.04)'
+                        el.style.color = 'rgba(245,241,232,0.8)'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      const el = e.currentTarget as HTMLElement
+                      if (!el.style.background.includes('0.08')) {
+                        el.style.background = 'transparent'
+                        el.style.color = 'rgba(245,241,232,0.5)'
+                      }
+                    }}
+                  >
+                    <div style={{ width: 6, height: 6, background: t.color ?? TIPO_DOT_COLOR[t.tipo] ?? '#9C9080', borderRadius: '50%', flexShrink: 0 }} />
+                    {t.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '8px 0' }} />
+          </>
+        )}
+
+        {/* Settings */}
         {NAV_SETTINGS.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
-            style={({ isActive }) => ({
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '10px 20px',
-              cursor: 'pointer',
-              color: isActive ? '#C9F03B' : 'rgba(245,241,232,0.65)',
-              fontSize: 14,
-              fontWeight: 500,
-              background: isActive ? 'rgba(201,240,59,0.15)' : 'transparent',
-              borderLeft: isActive ? '3px solid #C9F03B' : '3px solid transparent',
-              textDecoration: 'none',
-            })}
+            style={({ isActive }) => navLinkStyle(isActive)}
           >
             {item.icon}
             {item.label}

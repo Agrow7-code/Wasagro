@@ -12,6 +12,12 @@ import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
 import { AgricultorIndividual } from './dashboard/views/AgricultorIndividual'
 import { CalculadoraView } from './dashboard/views/CalculadoraView'
+import { InsumosView } from './dashboard/views/InsumosView'
+import { LaborView } from './dashboard/views/LaborView'
+import { CosechaView } from './dashboard/views/CosechaView'
+import { PlagasView } from './dashboard/views/PlagasView'
+import { GastosView } from './dashboard/views/GastosView'
+import { ClimaView } from './dashboard/views/ClimaView'
 import LoginPage from './auth/LoginPage'
 import Brochure from './Brochure'
 import { useAuth } from './auth/useAuth'
@@ -1101,6 +1107,12 @@ export default function App() {
         >
           <Route index element={<AdminFinca />} />
           <Route path="calculadora" element={<CalculadoraView />} />
+          <Route path="insumos" element={<InsumosView />} />
+          <Route path="labor" element={<LaborView />} />
+          <Route path="cosecha" element={<CosechaView />} />
+          <Route path="plagas" element={<PlagasView />} />
+          <Route path="gastos" element={<GastosView />} />
+          <Route path="clima" element={<ClimaView />} />
           <Route path="gerente" element={<GerenteAgricola />} />
           <Route path="exportadora" element={<Exportadora />} />
           <Route path="agricultor" element={<AgricultorIndividual />} />
