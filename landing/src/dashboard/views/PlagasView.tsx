@@ -1,8 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import type { Map as LeafletMap } from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { Topbar } from '../layout/Topbar'
 import { useAuth } from '../../auth/useAuth'
 
-// ── Datos de la finca ────────────────────────────────────────────────────────
+// ── Datos de la finca ─────────────────────────────────────────────────────────
+// Finca El Porvenir — Federico Aguirre — Quinindé, Esmeraldas, Ecuador
+// Coordenadas reales (~0.318°N, 79.473°W), 9 lotes, 22.4 ha total
 
 const FINCA = {
   nombre: 'Finca El Porvenir',
@@ -10,21 +14,12 @@ const FINCA = {
   cultivo: 'Banano (Cavendish)',
   ubicacion: 'Quinindé, Esmeraldas',
   hectareas: 22.4,
-  fecha: '11 May 2026',
+  fecha: '12 May 2026',
 }
 
-// Polígonos irregulares con bordes compartidos exactos entre lotes adyacentes.
-// Puntos de junction clave (compartidos):
-//   J_A = (178,20)   — L1/L5 top
-//   J_B = (148,148)  — L1/L5/L4/L6 junction
-//   J_C = (318,18)   — L5/L7 top
-//   J_D = (285,148)  — L5/L7/L6/L9 junction
-//   J_E = (458,15)   — L7/L8 top
-//   J_F = (432,148)  — L7/L8/L9 junction
-//   J_G = (148,280)  — L4/L6/L2/L3 junction
-//   J_H = (292,278)  — L6/L9/L3 junction
-//   J_I = (20,268)   — L4/L2 left edge
-//   J_J = (148,378)  — L2/L3 bottom
+// Coordenadas reales [lat, lng] — Quinindé, Esmeraldas (~0.31°N, 79.47°W)
+// Los 9 lotes comparten vértices exactos en los bordes adyacentes.
+type LatLng = [number, number]
 
 interface Lote {
   id: string
@@ -35,83 +30,110 @@ interface Lote {
   focos: number
   ultimaRevision: string
   trabajador: string
-  pts: string       // polygon points SVG
-  cx: number        // centroid x para labels
-  cy: number        // centroid y para labels
+  coords: LatLng[]
 }
 
 const LOTES: Lote[] = [
   {
     id: 'L1', nombre: 'Norte', ha: 2.1, severidad: 5, plaga: null,
     focos: 0, ultimaRevision: '10 May', trabajador: 'Marco Intriago',
-    pts: '20,22 178,20 168,75 148,148 95,155 48,150 20,135',
-    cx: 95, cy: 88,
+    coords: [
+      [0.31982, -79.47486], [0.31984, -79.47377],
+      [0.31940, -79.47384], [0.31882, -79.47398],
+      [0.31876, -79.47435], [0.31880, -79.47467],
+      [0.31892, -79.47486],
+    ],
   },
   {
     id: 'L5', nombre: 'Río', ha: 3.2, severidad: 8, plaga: null,
     focos: 1, ultimaRevision: '09 May', trabajador: 'José Delgado',
-    pts: '178,20 318,18 310,95 285,148 148,148 168,75',
-    cx: 232, cy: 88,
+    coords: [
+      [0.31984, -79.47377], [0.31986, -79.47281],
+      [0.31924, -79.47286], [0.31882, -79.47303],
+      [0.31882, -79.47398], [0.31940, -79.47384],
+    ],
   },
   {
     id: 'L7', nombre: 'Entrada', ha: 2.8, severidad: 45, plaga: 'Sigatoka negra',
     focos: 4, ultimaRevision: '11 May', trabajador: 'Rosa Cando',
-    pts: '318,18 458,15 448,88 432,148 285,148 310,95',
-    cx: 370, cy: 88,
+    coords: [
+      [0.31986, -79.47281], [0.31988, -79.47184],
+      [0.31930, -79.47191], [0.31882, -79.47202],
+      [0.31882, -79.47303], [0.31924, -79.47286],
+    ],
   },
   {
     id: 'L8', nombre: 'Palmar', ha: 1.9, severidad: 3, plaga: null,
     focos: 0, ultimaRevision: '08 May', trabajador: 'Marco Intriago',
-    pts: '458,15 562,20 562,148 432,148 448,88',
-    cx: 504, cy: 85,
+    coords: [
+      [0.31988, -79.47184], [0.31984, -79.47112],
+      [0.31882, -79.47112], [0.31882, -79.47202],
+      [0.31930, -79.47191],
+    ],
   },
   {
     id: 'L4', nombre: 'Central', ha: 4.1, severidad: 78, plaga: 'Sigatoka + Trips',
     focos: 8, ultimaRevision: '11 May', trabajador: 'Federico Aguirre',
-    pts: '20,135 48,150 95,155 148,148 148,200 145,268 148,280 78,290 30,284 20,268',
-    cx: 84, cy: 212,
+    coords: [
+      [0.31892, -79.47486], [0.31880, -79.47467],
+      [0.31876, -79.47435], [0.31882, -79.47398],
+      [0.31840, -79.47398], [0.31786, -79.47400],
+      [0.31776, -79.47398], [0.31768, -79.47446],
+      [0.31773, -79.47479], [0.31786, -79.47486],
+    ],
   },
   {
     id: 'L6', nombre: 'Colina', ha: 2.5, severidad: 18, plaga: 'Nematodos',
     focos: 2, ultimaRevision: '10 May', trabajador: 'José Delgado',
-    pts: '148,148 285,148 290,202 292,278 148,280 145,268 148,200',
-    cx: 218, cy: 212,
+    coords: [
+      [0.31882, -79.47398], [0.31882, -79.47303],
+      [0.31838, -79.47300], [0.31778, -79.47299],
+      [0.31776, -79.47398], [0.31786, -79.47400],
+      [0.31840, -79.47398],
+    ],
   },
   {
     id: 'L9', nombre: 'Nuevo', ha: 1.0, severidad: 25, plaga: 'Sigatoka negra',
     focos: 2, ultimaRevision: '09 May', trabajador: 'Federico Aguirre',
-    pts: '285,148 432,148 562,148 562,282 445,288 292,278 290,202',
-    cx: 418, cy: 215,
+    coords: [
+      [0.31882, -79.47303], [0.31882, -79.47202],
+      [0.31882, -79.47112], [0.31774, -79.47112],
+      [0.31770, -79.47193], [0.31778, -79.47299],
+      [0.31838, -79.47300],
+    ],
   },
   {
     id: 'L2', nombre: 'Sur-1', ha: 3.0, severidad: 62, plaga: 'Sigatoka negra',
     focos: 6, ultimaRevision: '11 May', trabajador: 'Rosa Cando',
-    pts: '20,268 30,284 78,290 148,280 148,378 102,388 45,382 20,370',
-    cx: 82, cy: 328,
+    coords: [
+      [0.31786, -79.47486], [0.31773, -79.47479],
+      [0.31768, -79.47446], [0.31776, -79.47398],
+      [0.31698, -79.47398], [0.31690, -79.47430],
+      [0.31695, -79.47469], [0.31704, -79.47486],
+    ],
   },
   {
     id: 'L3', nombre: 'Sur-2', ha: 1.8, severidad: 31, plaga: 'Trips del banano',
     focos: 3, ultimaRevision: '10 May', trabajador: 'Marco Intriago',
-    pts: '148,280 292,278 296,382 268,392 152,385 148,378',
-    cx: 218, cy: 335,
+    coords: [
+      [0.31776, -79.47398], [0.31778, -79.47299],
+      [0.31695, -79.47296], [0.31686, -79.47315],
+      [0.31692, -79.47395], [0.31698, -79.47398],
+    ],
   },
 ]
 
+const FARM_CENTER: LatLng = [0.31837, -79.47299]
+
 const TENDENCIA = [
-  { dia: 'Lun', avg: 22, max: 42 },
-  { dia: 'Mar', avg: 28, max: 51 },
-  { dia: 'Mié', avg: 35, max: 58 },
-  { dia: 'Jue', avg: 41, max: 65 },
-  { dia: 'Vie', avg: 48, max: 71 },
-  { dia: 'Sáb', avg: 52, max: 74 },
+  { dia: 'Lun', avg: 22, max: 42 }, { dia: 'Mar', avg: 28, max: 51 },
+  { dia: 'Mié', avg: 35, max: 58 }, { dia: 'Jue', avg: 41, max: 65 },
+  { dia: 'Vie', avg: 48, max: 71 }, { dia: 'Sáb', avg: 52, max: 74 },
   { dia: 'Hoy', avg: 55, max: 78 },
 ]
 
 interface Tratamiento {
-  fecha: string
-  lote: string
-  producto: string
-  dosis: string
+  fecha: string; lote: string; producto: string; dosis: string
   estado: 'Aplicado' | 'Pendiente' | 'En evaluación' | 'Eficaz' | 'Parcial'
 }
 
@@ -123,14 +145,14 @@ const TRATAMIENTOS: Tratamiento[] = [
   { fecha: '25 Abr', lote: 'L3 Sur-2',    producto: 'Aceite mineral',                dosis: '2.0 L/ha',        estado: 'Parcial'       },
 ]
 
-// ── Utilidades ───────────────────────────────────────────────────────────────
+// ── Utilidades ────────────────────────────────────────────────────────────────
 
 function sev(s: number) {
-  if (s <= 15) return { fill: '#3EBB6A', stroke: '#229A4A', text: '#0D4020', label: 'OK',      bg: '#EDFBF3' }
-  if (s <= 30) return { fill: '#96C93D', stroke: '#6A9020', text: '#2A3800', label: 'BAJA',    bg: '#F4FAE0' }
-  if (s <= 50) return { fill: '#D4A017', stroke: '#9A7000', text: '#3A2800', label: 'MEDIA',   bg: '#FDF6DD' }
-  if (s <= 70) return { fill: '#E06820', stroke: '#A04410', text: '#fff',    label: 'ALTA',    bg: '#FFF0E6' }
-  return              { fill: '#C43020', stroke: '#882010', text: '#fff',    label: 'CRÍTICA', bg: '#FFEEEA' }
+  if (s <= 15) return { fill: '#3EBB6A', stroke: '#1F8040', text: '#0D3A1A', label: 'OK',      bg: '#EDFBF3' }
+  if (s <= 30) return { fill: '#96C93D', stroke: '#5A8010', text: '#233800', label: 'BAJA',    bg: '#F2FAD8' }
+  if (s <= 50) return { fill: '#D4A017', stroke: '#8A6000', text: '#3A2800', label: 'MEDIA',   bg: '#FDF6DD' }
+  if (s <= 70) return { fill: '#E06820', stroke: '#903800', text: '#fff',    label: 'ALTA',    bg: '#FFF0E6' }
+  return              { fill: '#C43020', stroke: '#7A1810', text: '#fff',    label: 'CRÍTICA', bg: '#FFEEEA' }
 }
 
 function estadoStyle(estado: Tratamiento['estado']) {
@@ -153,165 +175,137 @@ const avgSev        = Math.round(lotesConPlaga.reduce((s, l) => s + l.severidad,
 const lotesCrit     = LOTES.filter(l => l.severidad > 70).length
 const haRiesgo      = parseFloat(LOTES.filter(l => l.severidad > 30).reduce((s, l) => s + l.ha, 0).toFixed(1))
 
-// ── Mapa SVG ─────────────────────────────────────────────────────────────────
+// ── Mapa Leaflet (instanciado via useEffect) ──────────────────────────────────
 
-function FarmMap({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
-  const [hov, setHov] = useState<string | null>(null)
+function MapaFinca({
+  selected,
+  onSelect,
+}: {
+  selected: string | null
+  onSelect: (id: string) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const mapRef       = useRef<LeafletMap | null>(null)
+  // Guardamos referencias a los polígonos para poder actualizarlos sin recrear el mapa
+  const polysRef     = useRef<Map<string, any>>(new Map())
+
+  // Inicializar mapa una sola vez
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return
+
+    import('leaflet').then((L) => {
+      const map = L.map(containerRef.current!, {
+        center: FARM_CENTER,
+        zoom: 16,
+        zoomControl: true,
+        attributionControl: true,
+      })
+
+      // Imagen satelital Esri (libre, sin API key)
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution: 'Tiles &copy; Esri',
+          maxZoom: 20,
+        }
+      ).addTo(map)
+
+      // Etiquetas de calles sobre la satelital (opcional, da contexto)
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 20, opacity: 0.6 }
+      ).addTo(map)
+
+      // Crear polígonos
+      LOTES.forEach(lote => {
+        const c = sev(lote.severidad)
+
+        const poly = L.polygon(lote.coords as [number, number][], {
+          color:       c.stroke,
+          weight:      2,
+          fillColor:   c.fill,
+          fillOpacity: 0.55,
+        }).addTo(map)
+
+        // Tooltip permanente con nombre del lote + severidad
+        const tooltipHtml = `
+          <div style="font-family:system-ui;line-height:1.3;">
+            <div style="font-weight:800;font-size:12px;color:#0D0F0C;">${lote.id} — ${lote.nombre}</div>
+            <div style="font-size:11px;color:${c.fill};font-weight:700;margin-top:2px;">
+              ${lote.severidad}% ${c.label}
+            </div>
+            ${lote.plaga ? `<div style="font-size:10px;color:#555;margin-top:1px;">${lote.plaga}</div>` : ''}
+          </div>
+        `
+        poly.bindTooltip(tooltipHtml, {
+          permanent: lote.severidad > 50,  // siempre visible si es crítico/alto
+          direction: 'center',
+          className: 'wasagro-lote-tooltip',
+          opacity: 0.95,
+        })
+
+        poly.on('click', () => onSelect(lote.id))
+
+        poly.on('mouseover', () => {
+          poly.setStyle({ weight: 3, fillOpacity: 0.75 })
+        })
+        poly.on('mouseout', () => {
+          const isSel = selected === lote.id
+          poly.setStyle({
+            weight:      isSel ? 3.5 : 2,
+            color:       isSel ? '#C9F03B' : c.stroke,
+            fillOpacity: isSel ? 0.72 : 0.55,
+          })
+        })
+
+        polysRef.current.set(lote.id, { poly, c })
+      })
+
+      mapRef.current = map
+    })
+
+    return () => {
+      mapRef.current?.remove()
+      mapRef.current = null
+      polysRef.current.clear()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Actualizar estilo cuando cambia la selección
+  useEffect(() => {
+    polysRef.current.forEach(({ poly, c }, id) => {
+      const isSel = id === selected
+      poly.setStyle({
+        color:       isSel ? '#C9F03B' : c.stroke,
+        weight:      isSel ? 3.5 : 2,
+        fillOpacity: isSel ? 0.72 : 0.55,
+      })
+      if (isSel) poly.bringToFront()
+    })
+  }, [selected])
 
   return (
-    <svg
-      viewBox="0 0 582 420"
-      style={{ width: '100%', height: 'auto', display: 'block', cursor: 'pointer' }}
-    >
-      <defs>
-        {/* Patrón de finca sin cultivar (fuera de lotes) */}
-        <pattern id="outside" patternUnits="userSpaceOnUse" width="8" height="8">
-          <rect width="8" height="8" fill="#D6E8C4" />
-          <path d="M 0 8 L 8 0" stroke="#C2D8B0" strokeWidth="0.5" />
-        </pattern>
-        {/* Filtro sombra para polígonos seleccionados */}
-        <filter id="glow">
-          <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#C9F03B" floodOpacity="0.8" />
-        </filter>
-      </defs>
-
-      {/* Fondo general fuera de la finca */}
-      <rect width="582" height="420" fill="#E8F0DC" />
-
-      {/* Contorno de la finca (forma irregular del predio total) */}
-      <polygon
-        points="20,22 562,20 562,282 445,290 296,385 268,395 152,388 45,384 20,370"
-        fill="url(#outside)"
-        stroke="#8AA870"
-        strokeWidth="2"
-      />
-
-      {/* ── LOTES ── */}
-      {LOTES.map(lote => {
-        const c       = sev(lote.severidad)
-        const isSel   = selected === lote.id
-        const isHov   = hov === lote.id
-        const dimmed  = selected !== null && !isSel
-        const opacity = dimmed ? 0.38 : 1
-
-        return (
-          <g
-            key={lote.id}
-            onClick={() => onSelect(lote.id)}
-            onMouseEnter={() => setHov(lote.id)}
-            onMouseLeave={() => setHov(null)}
-            style={{ cursor: 'pointer' }}
-          >
-            {/* Relleno del lote */}
-            <polygon
-              points={lote.pts}
-              fill={c.fill}
-              fillOpacity={isHov ? 0.96 : 0.78}
-              stroke={isSel ? '#C9F03B' : c.stroke}
-              strokeWidth={isSel ? 3 : isHov ? 2 : 1.5}
-              opacity={opacity}
-              filter={isSel ? 'url(#glow)' : undefined}
-            />
-
-            {/* Label: ID lote */}
-            <text
-              x={lote.cx} y={lote.cy - 8}
-              textAnchor="middle"
-              fontSize={lote.ha < 2 ? 10 : 12}
-              fontWeight={800}
-              fill={c.text}
-              opacity={opacity}
-              style={{ userSelect: 'none', pointerEvents: 'none' }}
-            >
-              {lote.id}
-            </text>
-
-            {/* Badge de severidad */}
-            <rect
-              x={lote.cx - 18} y={lote.cy + 2}
-              width={36} height={16}
-              rx={2}
-              fill="rgba(0,0,0,0.28)"
-              opacity={opacity}
-            />
-            <text
-              x={lote.cx} y={lote.cy + 14}
-              textAnchor="middle"
-              fontSize={9} fontWeight={800}
-              fill="#fff"
-              opacity={opacity}
-              style={{ userSelect: 'none', pointerEvents: 'none' }}
-            >
-              {lote.severidad}%
-            </text>
-
-            {/* Ícono crítico */}
-            {lote.severidad > 70 && (
-              <text
-                x={lote.cx - 22} y={lote.cy - 5}
-                fontSize={11}
-                opacity={opacity}
-                style={{ userSelect: 'none', pointerEvents: 'none' }}
-              >⚠</text>
-            )}
-          </g>
-        )
-      })}
-
-      {/* ── DECORACIONES ── */}
-
-      {/* Río (lateral derecho fuera de finca) */}
-      <path
-        d="M 572,20 C 578,80 576,160 574,220 C 572,280 574,340 570,400"
-        fill="none"
-        stroke="#7EC8E3"
-        strokeWidth={7}
-        strokeLinecap="round"
-        opacity={0.75}
-      />
-      <text x={579} y={120} fontSize={8} fill="#5BA4C0" fontWeight={700}
-        transform="rotate(90,579,120)" style={{ userSelect: 'none' }}>
-        Río Verde
-      </text>
-
-      {/* Camino de acceso (abajo) */}
-      <path
-        d="M 20,400 L 290,392 L 292,420 L 20,420 Z"
-        fill="#D4C4A0"
-        opacity={0.55}
-      />
-      <text x={155} y={413} textAnchor="middle" fontSize={8} fill="#7A6840" fontWeight={600}
-        style={{ userSelect: 'none' }}>
-        Camino de acceso
-      </text>
-
-      {/* Brújula */}
-      <g transform="translate(548, 295)">
-        <circle cx={0} cy={0} r={16} fill="rgba(255,255,255,0.88)" stroke="#5A6050" strokeWidth={1.2} />
-        <text x={0} y={-4} textAnchor="middle" fontSize={7} fontWeight={900} fill="#C43020"
-          style={{ userSelect: 'none' }}>N</text>
-        <polygon points="0,-13 3.5,0 0,5 -3.5,0" fill="#C43020" />
-        <polygon points="0,13 3.5,0 0,-5 -3.5,0" fill="#9C9080" />
-      </g>
-
-      {/* Leyenda */}
-      {[
-        { label: 'OK ≤15%',    fill: '#3EBB6A' },
-        { label: 'Baja ≤30%',  fill: '#96C93D' },
-        { label: 'Media ≤50%', fill: '#D4A017' },
-        { label: 'Alta ≤70%',  fill: '#E06820' },
-        { label: 'Crítica',    fill: '#C43020' },
-      ].map((item, i) => (
-        <g key={item.label} transform={`translate(${20 + i * 88}, 404)`}>
-          <rect x={0} y={0} width={11} height={11} fill={item.fill} rx={1.5} />
-          <text x={15} y={9} fontSize={8} fill="#3A3A30" style={{ userSelect: 'none' }}>{item.label}</text>
-        </g>
-      ))}
-    </svg>
+    <>
+      {/* CSS del tooltip personalizado */}
+      <style>{`
+        .wasagro-lote-tooltip {
+          background: rgba(255,255,255,0.96) !important;
+          border: 1.5px solid rgba(13,15,12,0.18) !important;
+          border-radius: 0 !important;
+          box-shadow: 2px 2px 0 rgba(13,15,12,0.12) !important;
+          padding: 5px 9px !important;
+        }
+        .wasagro-lote-tooltip::before {
+          display: none !important;
+        }
+      `}</style>
+      <div ref={containerRef} style={{ width: '100%', height: 440 }} />
+    </>
   )
 }
 
-// ── Detalle de lote ──────────────────────────────────────────────────────────
+// ── Detalle de lote ───────────────────────────────────────────────────────────
 
 function LoteDetail({ lote }: { lote: Lote }) {
   const c = sev(lote.severidad)
@@ -357,23 +351,17 @@ function LoteDetail({ lote }: { lote: Lote }) {
   )
 }
 
-// ── Gráfico tendencia ────────────────────────────────────────────────────────
+// ── Gráfico tendencia ─────────────────────────────────────────────────────────
 
 function TendenciaChart() {
   const W = 560, H = 130
   const PL = 30, PR = 12, PT = 14, PB = 26
   const IW = W - PL - PR, IH = H - PT - PB
-
   const xOf = (i: number) => PL + (i / (TENDENCIA.length - 1)) * IW
   const yOf = (v: number) => PT + IH - (v / 100) * IH
-
   const avgPath  = TENDENCIA.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i)} ${yOf(d.avg)}`).join(' ')
   const maxPath  = TENDENCIA.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i)} ${yOf(d.max)}`).join(' ')
-  const areaPath = [
-    ...TENDENCIA.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i)} ${yOf(d.avg)}`),
-    `L ${xOf(TENDENCIA.length - 1)} ${PT + IH}`,
-    `L ${xOf(0)} ${PT + IH}`, 'Z',
-  ].join(' ')
+  const areaPath = [...TENDENCIA.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i)} ${yOf(d.avg)}`), `L ${xOf(TENDENCIA.length - 1)} ${PT + IH}`, `L ${xOf(0)} ${PT + IH}`, 'Z'].join(' ')
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
@@ -383,18 +371,15 @@ function TendenciaChart() {
           <stop offset="100%" stopColor="#C43020" stopOpacity={0.02} />
         </linearGradient>
       </defs>
-
       {[0, 25, 50, 75, 100].map(t => (
         <g key={t}>
           <line x1={PL} y1={yOf(t)} x2={W - PR} y2={yOf(t)} stroke="rgba(13,15,12,0.07)" strokeWidth={1} />
           <text x={PL - 4} y={yOf(t) + 3} fontSize={7} fill="rgba(13,15,12,0.35)" textAnchor="end">{t}%</text>
         </g>
       ))}
-
       <path d={areaPath} fill="url(#ag)" />
       <path d={maxPath}  fill="none" stroke="#E06820" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.55} />
       <path d={avgPath}  fill="none" stroke="#C43020" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-
       {TENDENCIA.map((d, i) => (
         <g key={i}>
           <circle cx={xOf(i)} cy={yOf(d.avg)} r={3.5} fill="#C43020" stroke="#fff" strokeWidth={1.5} />
@@ -403,7 +388,6 @@ function TendenciaChart() {
           )}
         </g>
       ))}
-
       {TENDENCIA.map((d, i) => (
         <text key={i} x={xOf(i)} y={H - 5} fontSize={8} fill="rgba(13,15,12,0.5)" textAnchor="middle"
           fontWeight={i === TENDENCIA.length - 1 ? 800 : 400}>{d.dia}</text>
@@ -415,8 +399,8 @@ function TendenciaChart() {
 // ── Vista principal ───────────────────────────────────────────────────────────
 
 export function PlagasView() {
-  const { user }                 = useAuth()
-  const [selected, setSelected]  = useState<string | null>('L4')
+  const { user }                = useAuth()
+  const [selected, setSelected] = useState<string | null>('L4')
   const selectedLote = LOTES.find(l => l.id === selected) ?? null
   const sorted = [...LOTES].sort((a, b) => b.severidad - a.severidad)
 
@@ -450,7 +434,7 @@ export function PlagasView() {
           <span style={{ fontSize: 13, color: '#C43020', fontWeight: 600 }}>
             <strong>ALERTA CRÍTICA — </strong>
             L4 Central: severidad 78% — brote combinado Sigatoka negra + Trips.
-            Aplicación de Mancozeb pendiente. Riesgo de pérdida estimado 35% si no se actúa en 48h.
+            Aplicación de Mancozeb pendiente. Riesgo estimado 35% del lote si no se actúa en 48h.
           </span>
         </div>
 
@@ -471,15 +455,16 @@ export function PlagasView() {
         </div>
 
         {/* Mapa + panel lateral */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
-          {/* Mapa */}
-          <div style={{ background: '#F5F1E8', border: '2px solid #0D0F0C', boxShadow: '4px 4px 0 0 #0D0F0C', padding: 16 }}>
-            <div style={{ marginBottom: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 310px', gap: 16 }}>
+
+          {/* Mapa real Leaflet */}
+          <div style={{ background: '#F5F1E8', border: '2px solid #0D0F0C', boxShadow: '4px 4px 0 0 #0D0F0C', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(13,15,12,0.1)' }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'rgba(13,15,12,0.4)' }}>
-                Mapa de lotes · Clic para ver detalle
+                Vista satelital · Clic en lote para detalle
               </span>
             </div>
-            <FarmMap selected={selected} onSelect={setSelected} />
+            <MapaFinca selected={selected} onSelect={setSelected} />
           </div>
 
           {/* Panel derecho */}
@@ -541,19 +526,13 @@ export function PlagasView() {
           </div>
           <TendenciaChart />
           <div style={{ marginTop: 8, display: 'flex', gap: 20, flexWrap: 'wrap' as const }}>
-            <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)' }}>
-              <span style={{ fontWeight: 800, color: '#C43020' }}>+33pp</span> en 7 días
-            </span>
-            <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)' }}>
-              Pico: <span style={{ fontWeight: 700, color: '#E06820' }}>78%</span> (L4, hoy)
-            </span>
-            <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)' }}>
-              Inicio de semana: <span style={{ fontWeight: 700 }}>22%</span>
-            </span>
+            <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)' }}><span style={{ fontWeight: 800, color: '#C43020' }}>+33pp</span> en 7 días</span>
+            <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)' }}>Pico: <span style={{ fontWeight: 700, color: '#E06820' }}>78%</span> (L4, hoy)</span>
+            <span style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)' }}>Inicio de semana: <span style={{ fontWeight: 700 }}>22%</span></span>
           </div>
         </div>
 
-        {/* Tabla completa */}
+        {/* Tabla completa de lotes */}
         <section>
           <div style={{ marginBottom: 10 }}>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'rgba(13,15,12,0.4)' }}>
@@ -599,9 +578,7 @@ export function PlagasView() {
                       <td style={{ padding: '11px 13px', fontSize: 11, color: 'rgba(13,15,12,0.65)' }}>{lote.trabajador}</td>
                       <td style={{ padding: '11px 13px', fontSize: 11, fontFamily: 'monospace', color: 'rgba(13,15,12,0.5)' }}>{lote.ultimaRevision}</td>
                       <td style={{ padding: '11px 13px' }}>
-                        <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 7px', background: c.bg, color: c.fill, border: `1.5px solid ${c.fill}` }}>
-                          {c.label}
-                        </span>
+                        <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 7px', background: c.bg, color: c.fill, border: `1.5px solid ${c.fill}` }}>{c.label}</span>
                       </td>
                     </tr>
                   )
