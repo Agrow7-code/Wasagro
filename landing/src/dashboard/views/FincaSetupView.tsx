@@ -243,7 +243,7 @@ export function FincaSetupView() {
       polyLayers.current.clear()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [coordsLoaded])
 
   useEffect(() => {
     setTimeout(() => mapRef.current?.invalidateSize(), 50)
