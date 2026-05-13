@@ -5,19 +5,19 @@ import { Topbar } from '../layout/Topbar'
 import { useAuth } from '../../auth/useAuth'
 
 // ── Datos de la finca ─────────────────────────────────────────────────────────
-// Finca El Porvenir — Federico Aguirre — Quinindé, Esmeraldas, Ecuador
-// Coordenadas reales (~0.318°N, 79.473°W), 9 lotes, 22.4 ha total
+// Finca El Porvenir — Federico Aguirre — Pimocha, Babahoyo, Ecuador
+// Coordenadas reales (~-1.7708°S, 79.5760°W), 9 lotes, 22.4 ha total
 
 const FINCA = {
   nombre: 'Finca El Porvenir',
   agricultor: 'Federico Aguirre',
   cultivo: 'Banano (Cavendish)',
-  ubicacion: 'Quinindé, Esmeraldas',
+  ubicacion: 'Pimocha, Babahoyo',
   hectareas: 22.4,
   fecha: '12 May 2026',
 }
 
-// Coordenadas reales [lat, lng] — Quinindé, Esmeraldas (~0.31°N, 79.47°W)
+// Coordenadas reales [lat, lng] — Pimocha, Babahoyo (~-1.771°S, 79.576°W)
 // Los 9 lotes comparten vértices exactos en los bordes adyacentes.
 type LatLng = [number, number]
 
@@ -38,92 +38,92 @@ const LOTES: Lote[] = [
     id: 'L1', nombre: 'Norte', ha: 2.1, severidad: 5, plaga: null,
     focos: 0, ultimaRevision: '10 May', trabajador: 'Marco Intriago',
     coords: [
-      [0.31982, -79.47486], [0.31984, -79.47377],
-      [0.31940, -79.47384], [0.31882, -79.47398],
-      [0.31876, -79.47435], [0.31880, -79.47467],
-      [0.31892, -79.47486],
+      [-1.769319, -79.577838], [-1.769299, -79.576748],
+      [-1.769739, -79.576818], [-1.770319, -79.576958],
+      [-1.770379, -79.577328], [-1.770339, -79.577648],
+      [-1.770219, -79.577838],
     ],
   },
   {
     id: 'L5', nombre: 'Río', ha: 3.2, severidad: 8, plaga: null,
     focos: 1, ultimaRevision: '09 May', trabajador: 'José Delgado',
     coords: [
-      [0.31984, -79.47377], [0.31986, -79.47281],
-      [0.31924, -79.47286], [0.31882, -79.47303],
-      [0.31882, -79.47398], [0.31940, -79.47384],
+      [-1.769299, -79.576748], [-1.769279, -79.575788],
+      [-1.769899, -79.575838], [-1.770319, -79.576008],
+      [-1.770319, -79.576958], [-1.769739, -79.576818],
     ],
   },
   {
     id: 'L7', nombre: 'Entrada', ha: 2.8, severidad: 45, plaga: 'Sigatoka negra',
     focos: 4, ultimaRevision: '11 May', trabajador: 'Rosa Cando',
     coords: [
-      [0.31986, -79.47281], [0.31988, -79.47184],
-      [0.31930, -79.47191], [0.31882, -79.47202],
-      [0.31882, -79.47303], [0.31924, -79.47286],
+      [-1.769279, -79.575788], [-1.769259, -79.574818],
+      [-1.769839, -79.574888], [-1.770319, -79.574998],
+      [-1.770319, -79.576008], [-1.769899, -79.575838],
     ],
   },
   {
     id: 'L8', nombre: 'Palmar', ha: 1.9, severidad: 3, plaga: null,
     focos: 0, ultimaRevision: '08 May', trabajador: 'Marco Intriago',
     coords: [
-      [0.31988, -79.47184], [0.31984, -79.47112],
-      [0.31882, -79.47112], [0.31882, -79.47202],
-      [0.31930, -79.47191],
+      [-1.769259, -79.574818], [-1.769299, -79.574098],
+      [-1.770319, -79.574098], [-1.770319, -79.574998],
+      [-1.769839, -79.574888],
     ],
   },
   {
     id: 'L4', nombre: 'Central', ha: 4.1, severidad: 78, plaga: 'Sigatoka + Trips',
     focos: 8, ultimaRevision: '11 May', trabajador: 'Federico Aguirre',
     coords: [
-      [0.31892, -79.47486], [0.31880, -79.47467],
-      [0.31876, -79.47435], [0.31882, -79.47398],
-      [0.31840, -79.47398], [0.31786, -79.47400],
-      [0.31776, -79.47398], [0.31768, -79.47446],
-      [0.31773, -79.47479], [0.31786, -79.47486],
+      [-1.770219, -79.577838], [-1.770339, -79.577648],
+      [-1.770379, -79.577328], [-1.770319, -79.576958],
+      [-1.770739, -79.576958], [-1.771279, -79.576978],
+      [-1.771379, -79.576958], [-1.771459, -79.577438],
+      [-1.771409, -79.577768], [-1.771279, -79.577838],
     ],
   },
   {
     id: 'L6', nombre: 'Colina', ha: 2.5, severidad: 18, plaga: 'Nematodos',
     focos: 2, ultimaRevision: '10 May', trabajador: 'José Delgado',
     coords: [
-      [0.31882, -79.47398], [0.31882, -79.47303],
-      [0.31838, -79.47300], [0.31778, -79.47299],
-      [0.31776, -79.47398], [0.31786, -79.47400],
-      [0.31840, -79.47398],
+      [-1.770319, -79.576958], [-1.770319, -79.576008],
+      [-1.770759, -79.575978], [-1.771359, -79.575968],
+      [-1.771379, -79.576958], [-1.771279, -79.576978],
+      [-1.770739, -79.576958],
     ],
   },
   {
     id: 'L9', nombre: 'Nuevo', ha: 1.0, severidad: 25, plaga: 'Sigatoka negra',
     focos: 2, ultimaRevision: '09 May', trabajador: 'Federico Aguirre',
     coords: [
-      [0.31882, -79.47303], [0.31882, -79.47202],
-      [0.31882, -79.47112], [0.31774, -79.47112],
-      [0.31770, -79.47193], [0.31778, -79.47299],
-      [0.31838, -79.47300],
+      [-1.770319, -79.576008], [-1.770319, -79.574998],
+      [-1.770319, -79.574098], [-1.771399, -79.574098],
+      [-1.771439, -79.574908], [-1.771359, -79.575968],
+      [-1.770759, -79.575978],
     ],
   },
   {
     id: 'L2', nombre: 'Sur-1', ha: 3.0, severidad: 62, plaga: 'Sigatoka negra',
     focos: 6, ultimaRevision: '11 May', trabajador: 'Rosa Cando',
     coords: [
-      [0.31786, -79.47486], [0.31773, -79.47479],
-      [0.31768, -79.47446], [0.31776, -79.47398],
-      [0.31698, -79.47398], [0.31690, -79.47430],
-      [0.31695, -79.47469], [0.31704, -79.47486],
+      [-1.771279, -79.577838], [-1.771409, -79.577768],
+      [-1.771459, -79.577438], [-1.771379, -79.576958],
+      [-1.772159, -79.576958], [-1.772239, -79.577278],
+      [-1.772189, -79.577668], [-1.772099, -79.577838],
     ],
   },
   {
     id: 'L3', nombre: 'Sur-2', ha: 1.8, severidad: 31, plaga: 'Trips del banano',
     focos: 3, ultimaRevision: '10 May', trabajador: 'Marco Intriago',
     coords: [
-      [0.31776, -79.47398], [0.31778, -79.47299],
-      [0.31695, -79.47296], [0.31686, -79.47315],
-      [0.31692, -79.47395], [0.31698, -79.47398],
+      [-1.771379, -79.576958], [-1.771359, -79.575968],
+      [-1.772189, -79.575938], [-1.772279, -79.576128],
+      [-1.772219, -79.576928], [-1.772159, -79.576958],
     ],
   },
 ]
 
-const FARM_CENTER: LatLng = [0.31837, -79.47299]
+const FARM_CENTER: LatLng = [-1.770769, -79.575968]
 
 const TENDENCIA = [
   { dia: 'Lun', avg: 22, max: 42 }, { dia: 'Mar', avg: 28, max: 51 },
@@ -419,7 +419,7 @@ export function PlagasView() {
           <div>
             <div style={{ fontSize: 17, fontWeight: 800, color: '#C9F03B', letterSpacing: '-0.3px' }}>{FINCA.nombre}</div>
             <div style={{ fontSize: 12, color: 'rgba(245,241,232,0.65)', marginTop: 2 }}>
-              {FINCA.agricultor} · {FINCA.cultivo} · {FINCA.ubicacion} · {FINCA.hectareas} ha
+              {FINCA.agricultor} · {FINCA.cultivo} · {FINCA.ubicacion}, Ecuador · {FINCA.hectareas} ha
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
