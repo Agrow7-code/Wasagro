@@ -111,6 +111,7 @@ export function FincaSetupView() {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [mapReady, setMapReady] = useState(false)
+  const [fincaCenter, setFincaCenter] = useState<[number, number] | null>(null)
 
   // Dibujo
   const [drawMode, setDrawMode] = useState<'idle' | 'drawing'>('idle')
@@ -159,21 +160,24 @@ export function FincaSetupView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.phone])
 
-  // Centrar mapa en las coordenadas reales de la finca
+  // Obtener coordenadas de la finca en cuanto tengamos finca_id
   useEffect(() => {
-    if (!finca_id || !mapRef.current) return
+    if (!finca_id) return
     fetch(`/api/finca/${finca_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.finca?.coordenadas) return
-        // Supabase devuelve geography como GeoJSON
         const [lng, lat] = data.finca.coordenadas.coordinates
-        mapRef.current?.setView([lat, lng], 15)
-        setMapReady(true)
+        setFincaCenter([lat, lng])
       })
       .catch(() => {})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finca_id, mapRef.current])
+  }, [finca_id])
+
+  // Centrar el mapa cuando ambos estén listos (map + coordenadas)
+  useEffect(() => {
+    if (!mapReady || !fincaCenter || !mapRef.current) return
+    mapRef.current.setView(fincaCenter, 15)
+  }, [mapReady, fincaCenter])
 
   // ── Init mapa ────────────────────────────────────────────────────────────────
   useEffect(() => {
