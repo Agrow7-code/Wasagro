@@ -35,9 +35,9 @@ function getInitials(nombre: string): string {
   return nombre.trim().split(/\s+/).slice(0, 2).map(n => n[0]?.toUpperCase() ?? '').join('')
 }
 
-function useRole(): { user: SidebarUser; nav: NavItem[] } {
+function useRole(): { user: SidebarUser; nav: NavItem[]; logout: () => void } {
   const { pathname } = useLocation()
-  const { user }     = useAuth()
+  const { user, logout } = useAuth()
 
   const sidebarUser: SidebarUser = user
     ? {
@@ -48,14 +48,14 @@ function useRole(): { user: SidebarUser; nav: NavItem[] } {
       }
     : { initials: '?', name: 'Usuario', role: 'Sin sesión', sub: '' }
 
-  if (pathname.startsWith('/dashboard/gerente'))     return { user: sidebarUser, nav: NAV_GERENTE }
-  if (pathname.startsWith('/dashboard/exportadora')) return { user: sidebarUser, nav: NAV_EXPORTADORA }
-  if (pathname.startsWith('/dashboard/agricultor'))  return { user: sidebarUser, nav: NAV_AGRICULTOR }
-  return { user: sidebarUser, nav: NAV_ADMIN }
+  if (pathname.startsWith('/dashboard/gerente'))     return { user: sidebarUser, nav: NAV_GERENTE, logout }
+  if (pathname.startsWith('/dashboard/exportadora')) return { user: sidebarUser, nav: NAV_EXPORTADORA, logout }
+  if (pathname.startsWith('/dashboard/agricultor'))  return { user: sidebarUser, nav: NAV_AGRICULTOR, logout }
+  return { user: sidebarUser, nav: NAV_ADMIN, logout }
 }
 
 export function DashboardLayout() {
-  const { user, nav } = useRole()
+  const { user, nav, logout } = useRole()
   const { pathname }  = useLocation()
   const isAdminRoute  = !pathname.startsWith('/dashboard/gerente') &&
                         !pathname.startsWith('/dashboard/exportadora') &&
@@ -67,6 +67,7 @@ export function DashboardLayout() {
         user={user}
         navItems={nav}
         tiposActivos={isAdminRoute ? tiposActivos : []}
+        onLogout={logout}
       />
       <div style={{ marginLeft: 240, flex: 1, display: 'flex', flexDirection: 'column' }}>
         <Outlet />

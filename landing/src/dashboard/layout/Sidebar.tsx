@@ -170,10 +170,12 @@ export function Sidebar({
   user,
   navItems,
   tiposActivos = [],
+  onLogout,
 }: {
   user: SidebarUser
   navItems: NavItem[]
   tiposActivos?: TipoConfig[]
+  onLogout?: () => void
 }) {
   const { pathname } = useLocation()
   const isOnDashRoute = DASHBOARD_ROUTES.includes(pathname)
@@ -369,13 +371,32 @@ export function Sidebar({
           }}>
             {user.initials}
           </div>
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#F5F1E8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {user.name}
             </div>
             <div style={{ fontSize: 11, color: 'rgba(245,241,232,0.55)', marginTop: 1 }}>{user.role}</div>
             <div style={{ fontSize: 11, color: '#C9F03B', marginTop: 1, opacity: 0.85 }}>{user.sub}</div>
           </div>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="Cerrar sesión"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'rgba(245,241,232,0.4)', padding: 4, flexShrink: 0,
+                display: 'flex', alignItems: 'center',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#C43020')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(245,241,232,0.4)')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </aside>
