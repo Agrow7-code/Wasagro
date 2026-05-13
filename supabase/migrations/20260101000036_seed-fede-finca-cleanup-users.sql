@@ -1,7 +1,8 @@
 -- Finca F002: soja en Córdoba, Argentina — para Federico
-INSERT INTO fincas (finca_id, nombre, ubicacion, pais, cultivo_principal, coordenadas, activa)
+INSERT INTO fincas (finca_id, org_id, nombre, ubicacion, pais, cultivo_principal, coordenadas, activa)
 VALUES (
   'F002',
+  'ORG001',
   'Finca Soja Córdoba',
   'Córdoba, Argentina',
   'AR',
@@ -16,10 +17,8 @@ UPDATE usuarios
 SET rol = 'propietario', finca_id = 'F002'
 WHERE phone = '5492914474555';
 
--- Desactivar cuenta "Admin Banano" (soft-delete)
-UPDATE usuarios SET status = 'inactivo' WHERE phone = '593987310830';
+-- Desactivar cuenta "Admin Banano" y liberar el número (soft-delete)
+UPDATE usuarios SET phone = '593987310830_INACTIVO', status = 'inactivo' WHERE phone = '593987310830';
 
--- Henry Morales: sacar el sufijo _OLD
-UPDATE usuarios
-SET phone = '593987310830'
-WHERE phone = '593987310830_OLD';
+-- Henry Morales: sacar el sufijo _OLD (requiere que el número ya esté libre)
+UPDATE usuarios SET phone = '593987310830' WHERE phone = '593987310830_OLD';
