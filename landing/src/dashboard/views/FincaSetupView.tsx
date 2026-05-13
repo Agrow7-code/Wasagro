@@ -160,25 +160,19 @@ export function FincaSetupView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.phone])
 
-  // Obtener coordenadas de la finca en cuanto tengamos finca_id
+  // Obtener coordenadas de la finca y centrar el mapa en cuanto tengamos finca_id
   useEffect(() => {
     if (!finca_id) return
     fetch(`/api/finca/${finca_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        // RPC devuelve array — tomar primera fila con lat/lng como números
         const row = Array.isArray(data?.finca) ? data.finca[0] : data?.finca
         if (!row?.lat || !row?.lng) return
         setFincaCenter([row.lat, row.lng])
+        mapRef.current?.setView([row.lat, row.lng], 15)
       })
       .catch(() => {})
   }, [finca_id])
-
-  // Centrar el mapa cuando ambos estén listos (map + coordenadas)
-  useEffect(() => {
-    if (!mapReady || !fincaCenter || !mapRef.current) return
-    mapRef.current.setView(fincaCenter, 15)
-  }, [mapReady, fincaCenter])
 
   // ── Init mapa ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -189,7 +183,7 @@ export function FincaSetupView() {
 
       const map = L.map(containerRef.current!, {
         center: [-1.831239, -78.183406],
-        zoom: 7,
+        zoom: 10,
         zoomControl: true,
         attributionControl: true,
         doubleClickZoom: false,
