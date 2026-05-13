@@ -112,6 +112,7 @@ export function FincaSetupView() {
   const [searchError, setSearchError] = useState('')
   const [mapReady, setMapReady] = useState(false)
   const [fincaCenter, setFincaCenter] = useState<[number, number] | null>(null)
+  const [coordsLoaded, setCoordsLoaded] = useState(false)
 
   // Dibujo
   const [drawMode, setDrawMode] = useState<'idle' | 'drawing'>('idle')
@@ -160,30 +161,33 @@ export function FincaSetupView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.phone])
 
-  // Obtener coordenadas de la finca y centrar el mapa en cuanto tengamos finca_id
+  // Paso 1: obtener coordenadas de la finca antes de inicializar el mapa
   useEffect(() => {
-    if (!finca_id) return
+    if (!finca_id) { setCoordsLoaded(true); return }
     fetch(`/api/finca/${finca_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         const row = Array.isArray(data?.finca) ? data.finca[0] : data?.finca
-        if (!row?.lat || !row?.lng) return
-        setFincaCenter([row.lat, row.lng])
-        mapRef.current?.setView([row.lat, row.lng], 15)
+        if (row?.lat && row?.lng) setFincaCenter([row.lat, row.lng])
       })
       .catch(() => {})
+      .finally(() => setCoordsLoaded(true))
   }, [finca_id])
 
-  // ── Init mapa ────────────────────────────────────────────────────────────────
+  // ── Init mapa (solo cuando ya tenemos o descartamos coordenadas) ─────────────
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return
+    if (!coordsLoaded || !containerRef.current || mapRef.current) return
+
+    // Usar coordenadas de la finca si existen, si no América del Sur como fallback
+    const center: [number, number] = fincaCenter ?? [-15, -60]
+    const zoom = fincaCenter ? 14 : 4
 
     import('leaflet').then((L) => {
       leafletRef.current = L
 
       const map = L.map(containerRef.current!, {
-        center: [-1.831239, -78.183406],
-        zoom: 10,
+        center,
+        zoom,
         zoomControl: true,
         attributionControl: true,
         doubleClickZoom: false,
