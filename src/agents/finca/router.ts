@@ -3,14 +3,10 @@ import { supabase } from '../../integrations/supabase.js'
 
 export const fincaRouter = new Hono()
 
-// GET /api/finca/:finca_id — datos básicos + centroide de la finca
+// GET /api/finca/:finca_id — datos básicos + centroide como lat/lng numérico
 fincaRouter.get('/:finca_id', async (c) => {
   const finca_id = c.req.param('finca_id')
-  const { data, error } = await supabase
-    .from('fincas')
-    .select('finca_id, nombre, ubicacion, pais, cultivo_principal, coordenadas')
-    .eq('finca_id', finca_id)
-    .maybeSingle()
+  const { data, error } = await supabase.rpc('get_finca_centroide', { p_finca_id: finca_id })
   if (error) return c.json({ error: error.message }, 500)
   if (!data) return c.json({ error: 'Finca no encontrada' }, 404)
   return c.json({ finca: data })

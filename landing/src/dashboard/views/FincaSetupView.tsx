@@ -166,9 +166,10 @@ export function FincaSetupView() {
     fetch(`/api/finca/${finca_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!data?.finca?.coordenadas) return
-        const [lng, lat] = data.finca.coordenadas.coordinates
-        setFincaCenter([lat, lng])
+        // RPC devuelve array — tomar primera fila con lat/lng como números
+        const row = Array.isArray(data?.finca) ? data.finca[0] : data?.finca
+        if (!row?.lat || !row?.lng) return
+        setFincaCenter([row.lat, row.lng])
       })
       .catch(() => {})
   }, [finca_id])
