@@ -159,6 +159,22 @@ export function FincaSetupView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.phone])
 
+  // Centrar mapa en las coordenadas reales de la finca
+  useEffect(() => {
+    if (!finca_id || !mapRef.current) return
+    fetch(`/api/finca/${finca_id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.finca?.coordenadas) return
+        // Supabase devuelve geography como GeoJSON
+        const [lng, lat] = data.finca.coordenadas.coordinates
+        mapRef.current?.setView([lat, lng], 15)
+        setMapReady(true)
+      })
+      .catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finca_id, mapRef.current])
+
   // ── Init mapa ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
