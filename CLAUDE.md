@@ -325,6 +325,15 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Guardrails:** El endpoint POST solo crea — sin ON CONFLICT, sin modificación de polígonos existentes. La eliminación es soft-delete (`activo = false`). No hay endpoint de actualización de polígono para evitar sobreescritura accidental de geometría EUDR (P7).
 - **Revisar cuando:** Se requiera editar un polígono ya guardado — necesita flujo de confirmación explícita. Si se migra a Meta Cloud API en H1, el link compartible puede incluirse en el mensaje de bienvenida al agricultor.
 
+### D22. Autenticación OTP para acceso al dashboard
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** El dashboard web necesita identificar al admin/gerente antes de mostrar datos de la finca. El canal natural de Wasagro es WhatsApp, por lo que el OTP se envía al número registrado — evita passwords y mantiene coherencia con el flujo del agricultor.
+- **Decisión:** Flujo de dos pasos: (1) `POST /api/auth/request-otp` — busca el número en la tabla `usuarios`, genera un código de 6 dígitos con TTL de 10 minutos y lo envía vía WhatsApp usando `sendOTPViaWhatsApp`; (2) `POST /api/auth/verify-otp` — valida el código y devuelve el perfil del usuario (`id`, `phone`, `rol`, `nombre`, `finca_id`). El frontend persiste el perfil en localStorage. Endpoint auxiliar `GET /api/auth/me?phone=xxx` permite refrescar el perfil cuando la sesión fue creada antes de que se añadiera un campo nuevo (e.g., `finca_id`).
+- **Implementación:** `src/auth/router.ts`, `src/auth/otpService.ts`, `src/auth/whatsappAuthService.ts`. El `finca_id` se incluye en la respuesta de verify-otp para que el dashboard pueda identificar la finca sin llamada extra. Todo timeout de DB o WhatsApp se maneja con `callWithTimeout` — el OTP se guarda antes de intentar el envío WhatsApp para garantizar que el código existe aunque el mensaje se demore.
+- **Guardrails:** Solo usuarios con número registrado en `usuarios` pueden solicitar OTP (no registro abierto). El código caduca automáticamente. El endpoint `/me` no requiere autenticación propia — devuelve datos por número de teléfono, asumiendo que el llamador ya tiene el teléfono del usuario logueado en el frontend.
+- **Revisar cuando:** Si se necesita logout remoto o revocación de sesión, añadir tabla de sesiones activas. Si el volumen de intentos de OTP supera 100/hora, añadir rate limiting por número.
+
 ### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 
 - **Fecha:** Abril 2026 (actualizado desde Meta Cloud API directo — ver ADR 002)

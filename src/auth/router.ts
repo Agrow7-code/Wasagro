@@ -52,6 +52,19 @@ authRouter.post('/request-otp', async (c) => {
   }
 });
 
+authRouter.get('/me', async (c) => {
+  const phone = c.req.query('phone')?.replace(/\+/g, '').replace(/\s/g, '')
+  if (!phone) return c.json({ error: 'Falta teléfono' }, 400)
+  try {
+    const usuario = await callWithTimeout(getUserByPhone(phone), 4000)
+    if (!usuario) return c.json({ error: 'Usuario no encontrado' }, 404)
+    return c.json({ user: { id: usuario.id, phone: usuario.phone, rol: usuario.rol, nombre: usuario.nombre, finca_id: usuario.finca_id ?? null } })
+  } catch (err: any) {
+    console.error('[auth] me error:', err.message)
+    return c.json({ error: 'Error al buscar usuario' }, 500)
+  }
+})
+
 authRouter.post('/verify-otp', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '');
