@@ -614,14 +614,6 @@ export function FincaSetupView() {
           {/* Mapa */}
           <div style={{ flex: 1, border: '2px solid #0D0F0C', boxShadow: '4px 4px 0 #0D0F0C', overflow: 'hidden', position: 'relative', minHeight: 440 }}>
             <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 440 }} />
-            {step === 1 && !mapReady && (
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(27,61,36,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-                <div style={{ textAlign: 'center', color: '#C9F03B' }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>🗺</div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>Buscá tu finca arriba</div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Panel derecho */}
