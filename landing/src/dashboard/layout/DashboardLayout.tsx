@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar, NAV_ADMIN, type SidebarUser, type NavItem, type TipoConfig } from './Sidebar'
 import { NAV_GERENTE, NAV_EXPORTADORA, NAV_AGRICULTOR } from './Sidebar'
 import { useAuth } from '../../auth/useAuth'
@@ -57,6 +57,12 @@ function useRole(): { user: SidebarUser; nav: NavItem[]; logout: () => void } {
 export function DashboardLayout() {
   const { user, nav, logout } = useRole()
   const { pathname }  = useLocation()
+  const navigate      = useNavigate()
+
+  function handleLogout() {
+    logout()
+    navigate('/login')
+  }
   const isAdminRoute  = !pathname.startsWith('/dashboard/gerente') &&
                         !pathname.startsWith('/dashboard/exportadora') &&
                         !pathname.startsWith('/dashboard/agricultor')
@@ -67,7 +73,7 @@ export function DashboardLayout() {
         user={user}
         navItems={nav}
         tiposActivos={isAdminRoute ? tiposActivos : []}
-        onLogout={logout}
+        onLogout={handleLogout}
       />
       <div style={{ marginLeft: 240, flex: 1, display: 'flex', flexDirection: 'column' }}>
         <Outlet />
