@@ -62,8 +62,9 @@ authRouter.post('/verify-otp', async (c) => {
     if (!result.success) return c.json({ error: result.error }, 401);
 
     const usuario = await getUserByPhone(phone);
-    return c.json({ user: { id: usuario?.id, phone: usuario?.phone, rol: usuario?.rol, nombre: usuario?.nombre } });
+    return c.json({ user: { id: usuario?.id, phone: usuario?.phone, rol: usuario?.rol, nombre: usuario?.nombre, finca_id: usuario?.finca_id ?? null } });
   } catch (err) {
+    console.error('[auth] verify-otp error:', err)
     return c.json({ error: 'Error de verificación' }, 500);
   }
 });

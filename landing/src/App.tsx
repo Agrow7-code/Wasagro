@@ -18,6 +18,7 @@ import { CosechaView } from './dashboard/views/CosechaView'
 import { PlagasView } from './dashboard/views/PlagasView'
 import { GastosView } from './dashboard/views/GastosView'
 import { ClimaView } from './dashboard/views/ClimaView'
+import { FincaSetupView } from './dashboard/views/FincaSetupView'
 import LoginPage from './auth/LoginPage'
 import Brochure from './Brochure'
 import { useAuth } from './auth/useAuth'
@@ -1113,6 +1114,7 @@ export default function App() {
           <Route path="plagas" element={<PlagasView />} />
           <Route path="gastos" element={<GastosView />} />
           <Route path="clima" element={<ClimaView />} />
+          <Route path="finca/setup" element={<FincaSetupView />} />
           <Route path="gerente" element={<GerenteAgricola />} />
           <Route path="exportadora" element={<Exportadora />} />
           <Route path="agricultor" element={<AgricultorIndividual />} />

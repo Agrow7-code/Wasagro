@@ -17,6 +17,7 @@ import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 import { cors } from 'hono/cors'
 import { authRouter } from './auth/router.js'
 import { metricasRouter } from './agents/metricas/router.js'
+import { fincaRouter } from './agents/finca/router.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
 function validarEnvVars(): void {
@@ -142,7 +143,7 @@ app.use('*', cors({
     if (!origin || origin === 'https://wasagro.vercel.app' || origin === 'http://localhost:5173' || previewOriginRe.test(origin)) return origin
     return origin 
   },
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
 }))
 
@@ -159,6 +160,7 @@ app.route('/auth', authRouter)
 app.route('/api/auth', authRouter)
 app.route('/api/webhook', webhookRouter)
 app.route('/api/metricas', metricasRouter)
+app.route('/api/finca', fincaRouter)
 
 // POST /reportes/semanal — trigger manual de reportes (protegido por secret)
 app.post('/reportes/semanal', async (c) => {

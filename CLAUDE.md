@@ -316,6 +316,15 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Diferenciador:** La misma métrica tiene umbrales distintos por finca. El dashboard del gerente muestra el semáforo de cada finca según sus propios criterios, no una vara universal.
 - **Revisar cuando:** Si el volumen de eventos supera 10K por finca, evaluar precálculo batch en pg-boss en vez de on-demand. Cuando el AI suggestion layer esté listo, dispararlo desde el worker de pg-boss al completar el evento N+1 con campos de muestreo.
 
+### D21. Editor de polígonos de lotes en el dashboard
+
+- **Fecha:** Mayo 2026
+- **Problema que motivó la decisión:** Los agricultores necesitan digitalizar los límites geográficos de sus lotes para que el sistema de alertas, trazabilidad EUDR y reportes sean georreferenciados con precisión real. El onboarding por WhatsApp (D16) registra la finca pero no puede capturar polígonos complejos de lotes por ese canal.
+- **Decisión:** Editor visual en el dashboard (`/dashboard/finca/setup`) con Leaflet y tiles Esri satellite. Flujo: (1) geocodificación de dirección vía Nominatim → centrar mapa en la finca; (2) dibujo interactivo de polígonos por clic (vértice a vértice), cierre manual con botón "Cerrar lote"; (3) nombre del lote mediante modal; (4) guardado en Supabase via `POST /api/finca/:finca_id/lotes`. El backend calcula centroide simple y persiste `poligono geography(POLYGON,4326)` en la tabla `lotes` usando la función RPC `insertar_lote` (migración 35).
+- **Implementación:** `landing/src/dashboard/views/FincaSetupView.tsx`, `src/agents/finca/router.ts`, `supabase/migrations/20260101000035_add-lote-polygon-fns.sql`. El sidebar tiene el link "Dibujar lotes" en la sección de configuración. El `finca_id` se obtiene de la sesión (`useAuth`) o del query param `?finca_id=` para links directos.
+- **Guardrails:** El endpoint POST solo crea — sin ON CONFLICT, sin modificación de polígonos existentes. La eliminación es soft-delete (`activo = false`). No hay endpoint de actualización de polígono para evitar sobreescritura accidental de geometría EUDR (P7).
+- **Revisar cuando:** Se requiera editar un polígono ya guardado — necesita flujo de confirmación explícita. Si se migra a Meta Cloud API en H1, el link compartible puede incluirse en el mensaje de bienvenida al agricultor.
+
 ### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 
 - **Fecha:** Abril 2026 (actualizado desde Meta Cloud API directo — ver ADR 002)

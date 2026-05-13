@@ -119,7 +119,22 @@ export const NAV_AGRICULTOR: NavItem[] = [
   { to: '/dashboard/agricultor/alertas', label: 'Alertas', icon: iconBarChart() },
 ]
 
+function iconDrawPolygon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 19 8 22 18 12 22 2 18 5 8"/>
+      <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+      <circle cx="19" cy="8" r="1.5" fill="currentColor"/>
+      <circle cx="22" cy="18" r="1.5" fill="currentColor"/>
+      <circle cx="12" cy="22" r="1.5" fill="currentColor"/>
+      <circle cx="2" cy="18" r="1.5" fill="currentColor"/>
+      <circle cx="5" cy="8" r="1.5" fill="currentColor"/>
+    </svg>
+  )
+}
+
 const NAV_SETTINGS: NavItem[] = [
+  { to: '/dashboard/finca/setup', label: 'Dibujar lotes', icon: iconDrawPolygon() },
   { to: '/dashboard/config', label: 'Configuración', icon: iconSettings() },
 ]
 

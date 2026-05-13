@@ -5,6 +5,7 @@ export interface User {
   phone: string
   rol: string
   nombre: string
+  finca_id?: string | null
 }
 
 export function useAuth() {
