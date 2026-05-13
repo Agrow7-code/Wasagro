@@ -249,6 +249,12 @@ export function FincaSetupView() {
     setTimeout(() => mapRef.current?.invalidateSize(), 50)
   }, [step])
 
+  // Si el mapa ya estaba montado cuando llegaron las coordenadas, volar a ellas
+  useEffect(() => {
+    if (!fincaCenter || !mapRef.current) return
+    mapRef.current.setView(fincaCenter, 14)
+  }, [fincaCenter])
+
   // ── Acciones ─────────────────────────────────────────────────────────────────
 
   async function handleBuscar() {
