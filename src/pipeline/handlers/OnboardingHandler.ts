@@ -12,8 +12,24 @@ import {
   createFinca,
   createLote,
   getJefeByFinca,
-  actualizarMensaje
+  actualizarMensaje,
+  updateFincaCoordenadas,
 } from '../supabaseQueries.js'
+
+async function geocodeAndUpdateFinca(fincaId: string, address: string, traceId: string): Promise<void> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&accept-language=es`
+    const res = await fetch(url, { headers: { 'User-Agent': 'Wasagro/1.0 (wasagro@proton.me)' } })
+    const data = await res.json() as Array<{ lat: string; lon: string }>
+    if (!data?.length) return
+    const lat = parseFloat(data[0].lat)
+    const lng = parseFloat(data[0].lon)
+    await updateFincaCoordenadas(fincaId, lat, lng)
+    langfuse.trace({ id: traceId }).event({ name: 'finca_geocoded', level: 'DEFAULT', output: { finca_id: fincaId, lat, lng, address } })
+  } catch (err) {
+    langfuse.trace({ id: traceId }).event({ name: 'finca_geocode_failed', level: 'WARNING', input: { address, error: String(err) } })
+  }
+}
 import { _sender, _llm } from '../procesarMensajeEntrante.js'
 import { transcribirAudio } from '../sttService.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
@@ -88,6 +104,10 @@ export async function handleOnboardingAdmin(
           cultivo_principal: datos.cultivo_principal ?? null,
           ubicacion: datos.finca_ubicacion_texto ?? null,
         })
+        // Geocodificar dirección para centrar el mapa en el dashboard
+        if (datos.finca_ubicacion_texto) {
+          geocodeAndUpdateFinca(fincaId, datos.finca_ubicacion_texto, traceId).catch(() => {})
+        }
         const lotes = datos.lotes ?? []
         for (const [i, lote] of lotes.entries()) {
           const loteNum = String(i + 1).padStart(2, '0')

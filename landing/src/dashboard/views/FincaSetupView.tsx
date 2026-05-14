@@ -112,6 +112,7 @@ export function FincaSetupView() {
   const [searchError, setSearchError] = useState('')
   const [mapReady, setMapReady] = useState(false)
   const [fincaCenter, setFincaCenter] = useState<[number, number] | null>(null)
+  const [fincaUbicacion, setFincaUbicacion] = useState<string | null>(null)
   const [coordsLoaded, setCoordsLoaded] = useState(false)
 
   // Dibujo
@@ -161,7 +162,7 @@ export function FincaSetupView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.phone])
 
-  // Paso 1: obtener coordenadas de la finca antes de inicializar el mapa
+  // Cargar coordenadas y ubicación de la finca antes de inicializar el mapa
   useEffect(() => {
     if (!finca_id) { setCoordsLoaded(true); return }
     fetch(`/api/finca/${finca_id}`)
@@ -169,10 +170,26 @@ export function FincaSetupView() {
       .then(data => {
         const row = Array.isArray(data?.finca) ? data.finca[0] : data?.finca
         if (row?.lat && row?.lng) setFincaCenter([row.lat, row.lng])
+        if (row?.ubicacion) setFincaUbicacion(row.ubicacion)
       })
       .catch(() => {})
       .finally(() => setCoordsLoaded(true))
   }, [finca_id])
+
+  // Si la finca ya tiene coordenadas, saltar directo al paso 2
+  useEffect(() => {
+    if (coordsLoaded && fincaCenter) setStep(2)
+  }, [coordsLoaded, fincaCenter])
+
+  // Si tiene texto de ubicación pero no coords, pre-llenar búsqueda y geocodificar
+  useEffect(() => {
+    if (!mapReady || fincaCenter || !fincaUbicacion) return
+    setSearch(fincaUbicacion)
+    geocodificar(fincaUbicacion).then(coords => {
+      if (coords && mapRef.current) mapRef.current.setView(coords, 15)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, fincaCenter, fincaUbicacion])
 
   // ── Init mapa (solo cuando ya tenemos o descartamos coordenadas) ─────────────
   useEffect(() => {
@@ -558,6 +575,20 @@ export function FincaSetupView() {
               </button>
             </div>
             {searchError && <div style={{ fontSize: 12, color: '#C43020', fontWeight: 600 }}>{searchError}</div>}
+          </div>
+        )}
+
+        {/* ── Banner de ubicación (paso 2, cuando el centro vino del onboarding) ── */}
+        {step === 2 && fincaUbicacion && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: '#F5F1E8', border: '1px solid rgba(13,15,12,0.15)', fontSize: 12, color: 'rgba(13,15,12,0.6)' }}>
+            <span>📍</span>
+            <span style={{ flex: 1 }}><strong style={{ color: '#0D0F0C' }}>Finca ubicada en:</strong> {fincaUbicacion}</span>
+            <button
+              onClick={() => setStep(1)}
+              style={{ fontSize: 11, fontWeight: 700, color: '#2A50D4', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0, whiteSpace: 'nowrap' }}
+            >
+              Cambiar ubicación
+            </button>
           </div>
         )}
 
