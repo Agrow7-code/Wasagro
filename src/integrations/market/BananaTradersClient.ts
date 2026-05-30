@@ -1,3 +1,5 @@
+import { timedFetch } from '../timedFetch.js'
+
 const URL_BANANA_TRADERS = 'https://www.banana-traders.com/'
 
 export interface PrecioBanano {
@@ -19,7 +21,7 @@ function parsearPrecio(raw: string): number {
 export async function getUltimosPreciosBanano(
   deps: { fetchClient?: typeof fetch } = {},
 ): Promise<[PrecioBanano, PrecioBanano] | null> {
-  const fetchClient = deps.fetchClient ?? globalThis.fetch
+  const fetchClient = deps.fetchClient ?? timedFetch(10_000)
 
   const res = await fetchClient(URL_BANANA_TRADERS)
   if (!res.ok) throw new Error(`[BananaTraders] HTTP ${res.status}`)

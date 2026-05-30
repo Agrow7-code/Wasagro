@@ -20,7 +20,10 @@ export function crearAdapterWhatsApp(): IWhatsAppAdapter {
   }
 
   if (provider === 'evolution') {
-    const secret = process.env['EVOLUTION_WEBHOOK_SECRET'] ?? ''
+    const secret = process.env['EVOLUTION_WEBHOOK_SECRET']
+    if (!secret) {
+      throw new Error('WHATSAPP_PROVIDER=evolution requiere EVOLUTION_WEBHOOK_SECRET (seguridad del webhook)')
+    }
     return new EvolutionAdapter({ secret })
   }
 

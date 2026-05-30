@@ -1,6 +1,7 @@
 import type { ILLMAdapter, LLMGeneracionOpciones } from './ILLMAdapter.js'
 import { LLMError } from './LLMError.js'
 import { langfuse } from '../langfuse.js'
+import { timedFetch } from '../timedFetch.js'
 
 export interface OllamaAdapterConfig {
   baseUrl?: string
@@ -20,7 +21,7 @@ export class OllamaAdapter implements ILLMAdapter {
   constructor(config: OllamaAdapterConfig = {}) {
     this.#baseUrl = config.baseUrl ?? process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434'
     this.#model = config.model ?? process.env['OLLAMA_MODEL'] ?? 'llama3.2'
-    this.#fetch = config.fetchClient ?? globalThis.fetch
+    this.#fetch = config.fetchClient ?? timedFetch(60_000)
   }
 
   async generarTexto(userContent: string, opciones: LLMGeneracionOpciones): Promise<string> {

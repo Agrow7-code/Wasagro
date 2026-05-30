@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { requestOTP, verifyOTP } from './otpService.js'
 import { sendOTPViaWhatsApp } from './whatsappAuthService.js'
+import { emitirJWT, verificarJWT, requireJwtSecret } from './jwtService.js'
 import { getUserByPhone } from '../pipeline/supabaseQueries.js'
 
 export const authRouter = new Hono()
 
-// Helper de timeout para que nada tarde más de 4 segundos
 const callWithTimeout = async (promise: Promise<any>, timeoutMs: number) => {
   let timer: any;
   const timeout = new Promise((_, reject) => {
@@ -17,51 +17,66 @@ const callWithTimeout = async (promise: Promise<any>, timeoutMs: number) => {
 authRouter.post('/request-otp', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const phone = body.phone?.replace(/\+/g, '').replace(/\s/g, '');
-  
+
   if (!phone) return c.json({ error: 'Falta teléfono' }, 400);
+
+  // Constant-time response: regardless of whether the user exists or not, the
+  // total handler latency is in the same band. This prevents an attacker from
+  // enumerating registered phone numbers by measuring response time.
+  const startedAt = Date.now();
+  const MIN_LATENCY_MS = 1500;
+  const MAX_LATENCY_MS = 2500;
+  const targetMs = MIN_LATENCY_MS + Math.floor(Math.random() * (MAX_LATENCY_MS - MIN_LATENCY_MS));
+
+  async function padToTarget(): Promise<void> {
+    const elapsed = Date.now() - startedAt;
+    const remaining = targetMs - elapsed;
+    if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
+  }
 
   try {
     console.log(`[auth] Solicitando para ${phone}`);
 
-    // 1. Buscar usuario con timeout de 4s
     const usuario = await callWithTimeout(getUserByPhone(phone), 4000)
       .catch(err => { if (err.message === 'TIMEOUT_LIMIT') throw new Error('DB_LENTA'); throw err; });
 
-    if (!usuario) return c.json({ error: 'Número no registrado' }, 404);
+    if (!usuario) {
+      await padToTarget();
+      return c.json({ status: 'sent' });
+    }
 
-    // 2. Generar OTP con timeout de 4s
     const code = await callWithTimeout(requestOTP(phone), 4000)
       .catch(err => { if (err.message === 'TIMEOUT_LIMIT') throw new Error('DB_LENTA'); throw err; });
 
-    // 3. Envío de WhatsApp (Esperado para que Vercel no mate el proceso, pero con timeout de 6s)
-    // Esto asegura que el mensaje se intente enviar y que Vercel luego cierre la conexión HTTP sin 504.
     await callWithTimeout(sendOTPViaWhatsApp(phone, code), 6000).catch(e => {
       console.error('[WhatsApp Error Diferido]:', e.message);
-      // No fallamos la request si WhatsApp falla o se demora más de 6s. El OTP ya está en la DB.
     });
 
-    // 4. Responder inmediatamente al frontend
+    await padToTarget();
     return c.json({ status: 'sent' });
 
   } catch (err: any) {
     console.error(`[auth] Error crítico:`, err.message);
-    const msg = err.message === 'DB_LENTA' 
-      ? 'La base de datos no responde a tiempo. Reintenta.' 
+    await padToTarget();
+    const msg = err.message === 'DB_LENTA'
+      ? 'La base de datos no responde a tiempo. Reintenta.'
       : 'Error en el servidor';
     return c.json({ error: msg }, 500);
   }
 });
 
 authRouter.get('/me', async (c) => {
-  const phone = c.req.query('phone')?.replace(/\+/g, '').replace(/\s/g, '')
-  if (!phone) return c.json({ error: 'Falta teléfono' }, 400)
+  const authHeader = c.req.header('Authorization')
+  if (!authHeader?.startsWith('Bearer ')) {
+    return c.json({ error: 'Token requerido' }, 401)
+  }
   try {
-    const usuario = await callWithTimeout(getUserByPhone(phone), 4000)
+    const payload = await verificarJWT(authHeader.slice(7))
+    const usuario = await callWithTimeout(getUserByPhone(payload.phone), 4000)
     if (!usuario) return c.json({ error: 'Usuario no encontrado' }, 404)
     return c.json({ user: { id: usuario.id, phone: usuario.phone, rol: usuario.rol, nombre: usuario.nombre, finca_id: usuario.finca_id ?? null } })
-  } catch (err: any) {
-    console.error('[auth] me error:', err.message)
-    return c.json({ error: 'Error al buscar usuario' }, 500)
+  } catch {
+    return c.json({ error: 'Token inválido o expirado' }, 401)
   }
 })
 
@@ -75,7 +90,20 @@ authRouter.post('/verify-otp', async (c) => {
     if (!result.success) return c.json({ error: result.error }, 401);
 
     const usuario = await getUserByPhone(phone);
-    return c.json({ user: { id: usuario?.id, phone: usuario?.phone, rol: usuario?.rol, nombre: usuario?.nombre, finca_id: usuario?.finca_id ?? null } });
+    if (!usuario) return c.json({ error: 'Usuario no encontrado' }, 404);
+
+    requireJwtSecret()
+    const token = await emitirJWT({
+      id: usuario.id,
+      phone: usuario.phone,
+      rol: usuario.rol,
+      finca_id: usuario.finca_id ?? null,
+    })
+
+    return c.json({
+      token,
+      user: { id: usuario.id, phone: usuario.phone, rol: usuario.rol, nombre: usuario.nombre, finca_id: usuario.finca_id ?? null },
+    });
   } catch (err) {
     console.error('[auth] verify-otp error:', err)
     return c.json({ error: 'Error de verificación' }, 500);

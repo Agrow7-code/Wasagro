@@ -1,3 +1,5 @@
+import { timedFetch } from '../timedFetch.js'
+
 const BASE_URL = 'https://api.open-meteo.com/v1/forecast'
 
 export interface ForecastManana {
@@ -36,7 +38,7 @@ export async function getForecast(
   lng: number,
   deps: { fetchClient?: typeof fetch } = {},
 ): Promise<ForecastManana> {
-  const fetchClient = deps.fetchClient ?? globalThis.fetch
+  const fetchClient = deps.fetchClient ?? timedFetch(10_000)
 
   const params = new URLSearchParams({
     latitude:     String(lat),
@@ -63,7 +65,7 @@ export async function getForecastSemanal(
   lng: number,
   deps: { fetchClient?: typeof fetch } = {},
 ): Promise<ForecastSemanal> {
-  const fetchClient = deps.fetchClient ?? globalThis.fetch
+  const fetchClient = deps.fetchClient ?? timedFetch(10_000)
 
   const params = new URLSearchParams({
     latitude:     String(lat),

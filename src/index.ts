@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
+import { timingSafeEqual } from 'node:crypto'
 import cron from 'node-cron'
 import { webhookRouter, inicializarRouter } from './webhook/router.js'
 import { crearAdapterWhatsApp, crearSenderWhatsApp } from './integrations/whatsapp/index.js'
@@ -15,7 +16,10 @@ import { langfuse } from './integrations/langfuse.js'
 import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 
 import { cors } from 'hono/cors'
+import { bodyLimit } from 'hono/body-limit'
 import { authRouter } from './auth/router.js'
+import { authMiddleware } from './auth/middleware.js'
+import { rateLimiter } from './auth/rateLimiter.js'
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
 
@@ -29,6 +33,8 @@ function validarEnvVars(): void {
   if (!process.env['SUPABASE_URL']) criticas.push('SUPABASE_URL')
   if (!process.env['SUPABASE_SERVICE_ROLE_KEY']) criticas.push('SUPABASE_SERVICE_ROLE_KEY')
   if (!process.env['DATABASE_URL']) criticas.push('DATABASE_URL')
+  if (!process.env['JWT_SECRET']) criticas.push('JWT_SECRET')
+  if (!process.env['REPORTE_SECRET']) criticas.push('REPORTE_SECRET')
   if (!llmProvider) criticas.push('WASAGRO_LLM')
   if (!provider) criticas.push('WHATSAPP_PROVIDER')
 
@@ -42,6 +48,7 @@ function validarEnvVars(): void {
     if (!process.env['EVOLUTION_API_URL']) criticas.push('EVOLUTION_API_URL')
     if (!process.env['EVOLUTION_API_KEY']) criticas.push('EVOLUTION_API_KEY')
     if (!process.env['EVOLUTION_INSTANCE']) criticas.push('EVOLUTION_INSTANCE')
+    if (!process.env['EVOLUTION_WEBHOOK_SECRET']) criticas.push('EVOLUTION_WEBHOOK_SECRET')
   }
 
   if (criticas.length > 0) {
@@ -51,7 +58,7 @@ function validarEnvVars(): void {
 
   const opcionales: [string, string][] = [
     ['DEMO_BOOKING_URL', 'sin esta variable no se podrán enviar links de demo'],
-    ['REPORTE_SECRET', 'el endpoint /reportes/semanal no estará protegido'],
+    ['SUPABASE_ANON_KEY', 'endpoints autenticados usarán service_role en vez de RLS'],
     ['LANGFUSE_SECRET_KEY', 'sin observabilidad LangFuse'],
     ['LANGFUSE_PUBLIC_KEY', 'sin observabilidad LangFuse'],
   ]
@@ -128,6 +135,13 @@ if (!process.env['VERCEL']) {
 
 const app = new Hono()
 
+function secureSecretCompare(a: string, b: string): boolean {
+  const aBuf = Buffer.from(String(a))
+  const bBuf = Buffer.from(String(b))
+  if (aBuf.length !== bBuf.length) return false
+  return timingSafeEqual(aBuf, bBuf)
+}
+
 // Logger para depuración en Vercel
 app.use('*', async (c, next) => {
   const start = Date.now()
@@ -141,10 +155,33 @@ const previewOriginRe = /^https:\/\/wasagro-.*\.vercel\.app$/
 app.use('*', cors({
   origin: (origin) => {
     if (!origin || origin === 'https://wasagro.vercel.app' || origin === 'http://localhost:5173' || previewOriginRe.test(origin)) return origin
-    return origin 
+    return ''
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
+}))
+
+app.use('*', async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '0')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+  c.header('Cross-Origin-Opener-Policy', 'same-origin')
+  // COEP=unsafe-none — this is a JSON API, not an HTML doc; require-corp adds
+  // no protection here and can break legitimate cross-origin embedding by clients.
+  c.header('Cross-Origin-Embedder-Policy', 'unsafe-none')
+  c.header('Cross-Origin-Resource-Policy', 'same-origin')
+})
+
+// Body size limit — protect against memory exhaustion DoS.
+// 1MB is generous for JSON payloads (webhooks include URLs + text, not binary).
+app.use('*', bodyLimit({
+  maxSize: 1 * 1024 * 1024,
+  onError: (c) => c.json({ error: 'Body too large' }, 413),
 }))
 
 app.get('/health', (c) => c.json({
@@ -156,16 +193,23 @@ app.get('/health', (c) => c.json({
 }))
 
 app.route('/webhook', webhookRouter)
+app.use('/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10 }))
+app.use('/api/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10 }))
 app.route('/auth', authRouter)
 app.route('/api/auth', authRouter)
 app.route('/api/webhook', webhookRouter)
+
+app.use('/api/metricas/*', authMiddleware)
+app.use('/api/finca/*', authMiddleware)
+app.use('/api/*', rateLimiter({ windowMs: 60 * 1000, maxRequests: 60 }))
 app.route('/api/metricas', metricasRouter)
 app.route('/api/finca', fincaRouter)
 
 // POST /reportes/semanal — trigger manual de reportes (protegido por secret)
 app.post('/reportes/semanal', async (c) => {
   const secret = c.req.header('x-reporte-secret')
-  if (!secret || secret !== process.env['REPORTE_SECRET']) {
+  const expected = process.env['REPORTE_SECRET']
+  if (!secret || !expected || !secureSecretCompare(secret, expected)) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
@@ -186,7 +230,8 @@ app.post('/reportes/semanal', async (c) => {
 // POST /alertas/clima — trigger manual de alertas de clima (protegido por secret)
 app.post('/alertas/clima', async (c) => {
   const secret = c.req.header('x-reporte-secret')
-  if (!secret || secret !== process.env['REPORTE_SECRET']) {
+  const expected = process.env['REPORTE_SECRET']
+  if (!secret || !expected || !secureSecretCompare(secret, expected)) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 

@@ -59,8 +59,10 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
   }
 
   async verificarWebhook(c: Context): Promise<boolean> {
-    // No secret configured — accept all (self-hosted Evolution API, H0)
-    if (!this.#secret) return true
+    if (!this.#secret) {
+      console.error('[EvolutionAdapter] EVOLUTION_WEBHOOK_SECRET no configurado — rechazando webhook por seguridad')
+      return false
+    }
     try {
       const body = await c.req.raw.clone().text()
       const signature = c.req.header('x-evolution-signature') ?? ''

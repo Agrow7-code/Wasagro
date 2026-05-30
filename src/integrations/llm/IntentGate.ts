@@ -49,15 +49,15 @@ export class IntentGate {
       }
     }
 
-    const prompt = injectarVariables(
-      (await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', traceId)),
-      {
-        FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
-        CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
-        NOMBRE_USUARIO: input.nombre_usuario ?? '',
-        MENSAJE: input.transcripcion,
-      },
-    )
+  const systemPrompt = injectarVariables(
+    (await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', traceId)),
+    {
+      FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
+      CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
+    },
+  )
+
+  const userMessage = `Nombre del usuario: ${input.nombre_usuario ?? 'No especificado'}\n\nMensaje: ${input.transcripcion}`
 
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
@@ -68,8 +68,8 @@ export class IntentGate {
 
     const inicio = Date.now()
     try {
-      const textoRaw = await this.#adapter.generarTexto(input.transcripcion, {
-        systemPrompt: prompt,
+    const textoRaw = await this.#adapter.generarTexto(userMessage, {
+      systemPrompt,
         responseFormat: 'json_object',
         traceId,
         generationName: 'intent_gate',

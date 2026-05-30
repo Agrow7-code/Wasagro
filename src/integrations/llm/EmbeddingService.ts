@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { timedFetch } from '../timedFetch.js'
 
 export interface IEmbeddingService {
   generarEmbedding(text: string): Promise<number[]>
@@ -36,7 +37,7 @@ export class OllamaEmbeddingService implements IEmbeddingService {
   constructor(
     private readonly baseUrl: string,
     private readonly model: string,
-    private readonly fetchClient: typeof fetch = globalThis.fetch,
+    private readonly fetchClient: typeof fetch = timedFetch(15_000),
   ) {}
 
   async generarEmbedding(text: string): Promise<number[]> {

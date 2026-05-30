@@ -1,4 +1,5 @@
 import type { IWhatsAppSender } from './IWhatsAppSender.js'
+import { timedFetch } from '../timedFetch.js'
 
 interface EvolutionSenderConfig {
   apiUrl: string
@@ -17,7 +18,7 @@ export class EvolutionSender implements IWhatsAppSender {
     this.#apiUrl = config.apiUrl
     this.#apiKey = config.apiKey
     this.#instance = config.instance
-    this.#fetch = config.fetchClient ?? globalThis.fetch
+    this.#fetch = config.fetchClient ?? timedFetch()
   }
 
   async enviarTexto(to: string, texto: string, timeoutMs = 15_000): Promise<void> {

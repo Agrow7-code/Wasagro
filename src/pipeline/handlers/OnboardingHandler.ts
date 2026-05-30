@@ -1,6 +1,7 @@
 import { langfuse } from '../../integrations/langfuse.js'
 import type { NormalizedMessage } from '../../integrations/whatsapp/NormalizedMessage.js'
 import type { ContextoOnboardingAgricultor } from '../../types/dominio/Onboarding.js'
+import { timedFetch } from '../../integrations/timedFetch.js'
 import {
   getUserByPhone,
   getOrCreateSession,
@@ -19,11 +20,11 @@ import {
 async function geocodeAndUpdateFinca(fincaId: string, address: string, traceId: string): Promise<void> {
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&accept-language=es`
-    const res = await fetch(url, { headers: { 'User-Agent': 'Wasagro/1.0 (wasagro@proton.me)' } })
+    const res = await timedFetch(10_000)(url, { headers: { 'User-Agent': 'Wasagro/1.0 (wasagro@proton.me)' } })
     const data = await res.json() as Array<{ lat: string; lon: string }>
-    if (!data?.length) return
-    const lat = parseFloat(data[0].lat)
-    const lng = parseFloat(data[0].lon)
+  if (!data?.length) return
+  const lat = parseFloat(data[0]!.lat)
+  const lng = parseFloat(data[0]!.lon)
     await updateFincaCoordenadas(fincaId, lat, lng)
     langfuse.trace({ id: traceId }).event({ name: 'finca_geocoded', level: 'DEFAULT', output: { finca_id: fincaId, lat, lng, address } })
   } catch (err) {

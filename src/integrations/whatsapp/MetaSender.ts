@@ -1,4 +1,5 @@
 import type { IWhatsAppSender } from './IWhatsAppSender.js'
+import { timedFetch } from '../timedFetch.js'
 
 interface MetaSenderConfig {
   phoneNumberId: string
@@ -14,7 +15,7 @@ export class MetaSender implements IWhatsAppSender {
   constructor(config: MetaSenderConfig) {
     this.#phoneNumberId = config.phoneNumberId
     this.#accessToken = config.accessToken
-    this.#fetch = config.fetchClient ?? globalThis.fetch
+    this.#fetch = config.fetchClient ?? timedFetch()
   }
 
   async enviarTexto(to: string, texto: string): Promise<void> {

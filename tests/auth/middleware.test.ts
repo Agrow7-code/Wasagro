@@ -1,0 +1,160 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+
+vi.mock('../../src/integrations/supabase.js', () => ({
+  supabase: {
+    from: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    single: vi.fn().mockResolvedValue({ data: { finca_id: 'F001', org_id: 'ORG-A' }, error: null }),
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+  },
+  createUserScopedClient: vi.fn(),
+}))
+
+vi.mock('../../src/auth/jwtService.js', () => ({
+  verificarJWT: vi.fn().mockResolvedValue({
+    sub: 'user-001',
+    phone: '593987654321',
+    rol: 'agricultor',
+    finca_id: 'F001',
+  }),
+  firmarJWT: vi.fn().mockReturnValue('mock-jwt-token'),
+}))
+
+import { Hono } from 'hono'
+import { authMiddleware, requireFincaAccess, getUserSupabase } from '../../src/auth/middleware.js'
+import { createUserScopedClient } from '../../src/integrations/supabase.js'
+
+function crearApp() {
+  const app = new Hono()
+  app.use('/api/*', authMiddleware)
+  app.get('/api/test-me', (c) => {
+    const user = c.get('authedUser')
+    const db = getUserSupabase(c)
+    return c.json({ user, hasScopedClient: db !== null })
+  })
+  app.get('/api/test-finca/:finca_id', (c) => {
+    const finca_id = c.req.param('finca_id')
+    if (!requireFincaAccess(c, finca_id)) {
+      return c.json({ error: 'Sin acceso' }, 403)
+    }
+    return c.json({ ok: true, finca_id })
+  })
+  return app
+}
+
+describe('Auth middleware', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('rejects requests without Authorization header', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/test-me', {})
+    expect(res.status).toBe(401)
+    const body = await res.json()
+    expect(body.error).toContain('Token requerido')
+  })
+
+  it('rejects requests with malformed Authorization header', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/test-me', {
+      headers: { Authorization: 'Basic abc123' },
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('accepts valid JWT and sets authedUser', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/test-me', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.user.id).toBe('user-001')
+    expect(body.user.phone).toBe('593987654321')
+    expect(body.user.rol).toBe('agricultor')
+  })
+
+  it('creates user-scoped Supabase client when SUPABASE_ANON_KEY is available', async () => {
+    const mockScopedClient = { from: vi.fn() }
+    vi.mocked(createUserScopedClient).mockReturnValue(mockScopedClient as any)
+
+    const app = crearApp()
+    const res = await app.request('/api/test-me', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.hasScopedClient).toBe(true)
+    expect(createUserScopedClient).toHaveBeenCalledWith('valid-jwt')
+  })
+
+  it('gracefully falls back when createUserScopedClient throws (no SUPABASE_ANON_KEY)', async () => {
+    vi.mocked(createUserScopedClient).mockImplementation(() => {
+      throw new Error('SUPABASE_ANON_KEY requerido')
+    })
+
+    const app = crearApp()
+    const res = await app.request('/api/test-me', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.hasScopedClient).toBe(false)
+  })
+})
+
+describe('requireFincaAccess', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('allows access to own finca for agricultor', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/test-finca/F001', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('denies access to other finca for agricultor', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/test-finca/F999', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('allows access to any finca for admin_org', async () => {
+    const { verificarJWT } = await import('../../src/auth/jwtService.js')
+    vi.mocked(verificarJWT).mockResolvedValueOnce({
+      sub: 'admin-001',
+      phone: '593987654321',
+      rol: 'admin_org',
+      finca_id: 'F001',
+    })
+
+    const app = crearApp()
+    const res = await app.request('/api/test-finca/F999', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('allows access to any finca for director', async () => {
+    const { verificarJWT } = await import('../../src/auth/jwtService.js')
+    vi.mocked(verificarJWT).mockResolvedValueOnce({
+      sub: 'dir-001',
+      phone: '593987654321',
+      rol: 'director',
+      finca_id: 'F001',
+    })
+
+    const app = crearApp()
+    const res = await app.request('/api/test-finca/F999', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+  })
+})

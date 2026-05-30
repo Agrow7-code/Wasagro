@@ -1,12 +1,14 @@
 import { DeepgramClient, type ListenV1Response, type ListenV1AcceptedResponse } from '@deepgram/sdk'
 import { langfuse } from '../integrations/langfuse.js'
+import { validateUrlAgainstSSRF } from '../integrations/ssrfProtection.js'
+import { timedFetch } from '../integrations/timedFetch.js'
 
 export async function transcribirAudio(
   audioInput: string | Buffer,
   traceId: string,
   deps: { fetchClient?: typeof fetch } = {},
 ): Promise<string> {
-  const fetchClient = deps.fetchClient ?? globalThis.fetch
+  const fetchClient = deps.fetchClient ?? timedFetch(30_000)
 
   const deepgramKey = process.env['DEEPGRAM_API_KEY']
   if (!deepgramKey) throw new Error('DEEPGRAM_API_KEY no configurada en el servidor')
@@ -24,8 +26,9 @@ export async function transcribirAudio(
   try {
     let buffer: Buffer
 
-    if (typeof audioInput === 'string') {
-      const audioRes = await fetchClient(audioInput)
+  if (typeof audioInput === 'string') {
+    await validateUrlAgainstSSRF(audioInput)
+    const audioRes = await fetchClient(audioInput, { redirect: 'error' })
       if (!audioRes.ok) {
         throw new Error(`[sttService] No se pudo descargar audio (HTTP ${audioRes.status}): ${audioInput}`)
       }

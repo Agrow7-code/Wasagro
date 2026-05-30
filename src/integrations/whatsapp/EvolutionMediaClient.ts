@@ -1,3 +1,5 @@
+import { timedFetch } from '../timedFetch.js'
+
 export interface MediaResult {
   base64: string
   mimeType: string
@@ -14,7 +16,7 @@ export async function downloadEvolutionMedia(
     throw new Error('rawPayload no contiene key/message de Evolution')
   }
 
-  const res = await fetch(`${apiUrl}/chat/getBase64FromMediaMessage/${instance}`, {
+  const res = await timedFetch(20_000)(`${apiUrl}/chat/getBase64FromMediaMessage/${instance}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: apiKey },
     body: JSON.stringify({ message: { key: data.key, message: data.message } }),

@@ -10,6 +10,8 @@ import {
   saveEvento,
 } from './supabaseQueries.js'
 import { enriquecerDatosEventoInfraestructura } from './derivadorInfraestructura.js'
+import { validateUrlAgainstSSRF } from '../integrations/ssrfProtection.js'
+import { timedFetch } from '../integrations/timedFetch.js'
 
 const MAX_MUESTRA_FILAS = 5
 const MAX_FILAS_BATCH = 500
@@ -19,7 +21,8 @@ const MAX_FILAS_BATCH = 500
 // En H0, la mayoría de archivos agrícolas son CSV o XLSX básico.
 
 async function descargarArchivo(url: string): Promise<Buffer> {
-  const res = await fetch(url)
+  await validateUrlAgainstSSRF(url)
+  const res = await timedFetch(30_000)(url, { redirect: 'error' })
   if (!res.ok) throw new Error(`Error descargando archivo: ${res.status} ${res.statusText}`)
   const buffer = await res.arrayBuffer()
   return Buffer.from(buffer)

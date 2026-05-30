@@ -1,8 +1,12 @@
+import { randomInt } from 'node:crypto'
+import { compare, hash } from 'bcryptjs'
 import { supabase } from '../integrations/supabase.js'
+
+const BCRYPT_ROUNDS = 10
 
 export async function requestOTP(phone: string): Promise<string> {
   console.log(`[otpService] Solicitando OTP para ${phone}`)
-  
+
   // 1. Verificar rate limiting
   const { count, error: countError } = await supabase
     .from('otp_codes')
@@ -14,20 +18,22 @@ export async function requestOTP(phone: string): Promise<string> {
     console.error('[otpService] Error en rate limit check:', countError)
     throw countError
   }
-  
+
   if (count && count >= 3) {
     throw new Error('Demasiadas solicitudes de código. Intenta de nuevo en 15 minutos.')
   }
 
   // 2. Generar código de 6 dígitos
-  const code = Math.floor(100000 + Math.random() * 900000).toString()
+  const code = randomInt(100000, 1000000).toString()
 
-  // 3. Guardar en Supabase
+  // 3. Hash con bcrypt antes de persistir
+  const codeHash = await hash(code, BCRYPT_ROUNDS)
+
   const { error: insertError } = await supabase
     .from('otp_codes')
     .insert({
       phone,
-      code,
+      code: codeHash,
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     })
 
@@ -58,7 +64,8 @@ export async function verifyOTP(phone: string, code: string): Promise<{ success:
     return { success: false, error: 'Máximo de intentos alcanzado. Solicita un nuevo código.' }
   }
 
-  if (data.code !== code) {
+  const isMatch = await compare(code, data.code)
+  if (!isMatch) {
     await supabase
       .from('otp_codes')
       .update({ intentos: data.intentos + 1 })

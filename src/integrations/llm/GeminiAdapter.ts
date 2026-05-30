@@ -2,6 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { ILLMAdapter, LLMGeneracionOpciones } from './ILLMAdapter.js'
 import { LLMError } from './LLMError.js'
 import { langfuse } from '../langfuse.js'
+import { validateUrlAgainstSSRF, SSRFError } from '../ssrfProtection.js'
+import { timedFetch } from '../timedFetch.js'
 
 export interface GeminiAdapterConfig {
   apiKey: string
@@ -54,11 +56,12 @@ export class GeminiAdapter implements ILLMAdapter {
 
       if (opciones.imageBase64) {
         parts.push({ inlineData: { mimeType: opciones.imageMimeType ?? 'image/jpeg', data: opciones.imageBase64 } })
-      } else if (opciones.imageUrl) {
-        let base64Data: string
-        let mimeType = 'image/jpeg'
+    } else if (opciones.imageUrl) {
+      let base64Data: string
+      let mimeType = 'image/jpeg'
 
-        const res = await fetch(opciones.imageUrl)
+      await validateUrlAgainstSSRF(opciones.imageUrl)
+      const res = await timedFetch(15_000)(opciones.imageUrl, { redirect: 'error' })
         if (!res.ok) throw new Error(`Error descargando imagen: HTTP ${res.status}`)
         const buffer = await res.arrayBuffer()
         base64Data = Buffer.from(buffer).toString('base64')
@@ -101,9 +104,13 @@ export class GeminiAdapter implements ILLMAdapter {
       
       generation.end({ output: texto, usage: { totalTokens: 0 }, metadata: { latencia_ms: Date.now() - inicio } })
       return texto
-    } catch (err) {
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GEMINI_ERROR', `Error en GeminiAdapter: ${String(err)}`, err)
+  } catch (err) {
+    if (err instanceof SSRFError) {
+      generation.end({ output: 'SSRF blocked', level: 'ERROR' })
+      throw err
+    }
+    generation.end({ output: 'LLM_ERROR', level: 'ERROR' })
+    throw new LLMError('GEMINI_ERROR', `Error en GeminiAdapter`, err)
     }
   }
 }
