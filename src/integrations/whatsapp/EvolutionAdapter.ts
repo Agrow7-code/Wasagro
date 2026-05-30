@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import type { Context } from 'hono'
 import type { IWhatsAppAdapter } from './IWhatsAppAdapter.js'
@@ -63,18 +63,15 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
       console.error('[EvolutionAdapter] EVOLUTION_WEBHOOK_SECRET no configurado — rechazando webhook por seguridad')
       return false
     }
-    try {
-      const body = await c.req.raw.clone().text()
-      const signature = c.req.header('x-evolution-signature') ?? ''
-      const expected = createHmac('sha256', this.#secret).update(body).digest('hex')
-      const sigBuffer = Buffer.from(signature)
-      const expBuffer = Buffer.from(expected)
-      if (sigBuffer.length !== expBuffer.length) return false
-      return timingSafeEqual(sigBuffer, expBuffer)
-    } catch (err) {
-      console.error('[EvolutionAdapter] Error en verificarWebhook:', err)
-      return false
-    }
+    // Evolution API v2 does not sign payloads with HMAC. We rely on a shared
+    // bearer token sent via WEBHOOK_GLOBAL_HEADERS in the Evolution service:
+    //   WEBHOOK_GLOBAL_HEADERS={"X-Webhook-Token":"<EVOLUTION_WEBHOOK_SECRET>"}
+    const token = c.req.header('x-webhook-token') ?? ''
+    if (!token) return false
+    const tokenBuf = Buffer.from(token)
+    const secretBuf = Buffer.from(this.#secret)
+    if (tokenBuf.length !== secretBuf.length) return false
+    return timingSafeEqual(tokenBuf, secretBuf)
   }
 
   parsearMensaje(payload: unknown): NormalizedMessage | null {
