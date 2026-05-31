@@ -183,7 +183,13 @@ ${cachedSDRContext ? `Contexto Reciente: ${cachedSDRContext}` : ''}
       directiva = 'Pregunta cómo registran actualmente las labores o aplicaciones de insumos (ej. papel, Excel). MÁXIMO 3 oraciones o 90 palabras.'
     }
   } else if (currentNode === 'pitch') {
-    directiva = `Usa los datos recopilados para redactar un argumento persuasivo que genere un "aha moment". En lugar de solo describir funciones, enfócate en el problema de usar ${combinedProspecto['sistema_actual']} y cómo Wasagro les ahorrará horas de trabajo en sus ${combinedProspecto['fincas_en_cartera']} hectáreas/fincas de ${combinedProspecto['cultivo_principal']}, evitando pérdidas con alertas tempranas y tableros automáticos por WhatsApp. ESTRICTO: NO PIDAS AGENDAR REUNIÓN TODAVÍA. MÁXIMO 3 oraciones y 90 palabras.`
+    directiva = `Usa los datos recopilados para redactar un argumento persuasivo que genere un "aha moment". En lugar de solo describir funciones, enfócate en el problema de usar ${combinedProspecto['sistema_actual']} y cómo Wasagro les ahorrará horas de trabajo en sus ${combinedProspecto['fincas_en_cartera']} hectáreas/fincas de ${combinedProspecto['cultivo_principal']}, evitando pérdidas con alertas tempranas y tableros automáticos por WhatsApp.
+
+ESTRICTO:
+- NO pidas agendar la demo en este mensaje (eso lo hace el siguiente turno).
+- SÍ termina obligatoriamente con UNA pregunta corta de validación que invite al cliente a responder. Nunca cierres con un párrafo explicativo "en aire" — el cliente se queda sin saber qué responder y se va. Ejemplos válidos: "¿Te hace sentido para tu finca?" / "¿Esto te suena con lo que vivís?" / "¿Cómo registran hoy lo que pasa en el lote?" / "¿Querés que te muestre cómo se vería con tus aguacates?"
+- La pregunta NO es agendar la demo — es validar interés o profundizar el dolor.
+- MÁXIMO 3 oraciones y 90 palabras en total (la pregunta cuenta como una oración).`
   } else if (currentNode === 'close') {
     requires_founder_approval = true
     directiva = 'El cliente no tiene objeciones fuertes. Cierra el trato ofreciendo dos opciones de bajo compromiso: una demo corta o un brochure por su segmento. ESTRICTO: Termina obligatoriamente con algo como "¿Te parece si agendamos 10 minutitos para mostrarte cómo se ve, o preferís que te mande el brochure con la info para tu segmento?". NO menciones "casos de éxito" ni "PDF de casos" (no los tenemos). MÁXIMO 3 oraciones o 90 palabras.'
