@@ -136,34 +136,31 @@ ${cachedSDRContext ? `Contexto Reciente: ${cachedSDRContext}` : ''}
 
   if (currentNode === 'discovery') {
     // Regression check: If user invalidated a known variable, it would drop from combinedProspecto.
-    // Transition to Pitch if all 4 variables are known
-    if (datosConocidos >= 4 || nuevoTurno >= MAX_SDR_TURNS) {
+    // Transition to Pitch if we have at least 3 of 4 variables OR we hit max turns
+    // (but only if we have >=2 datos — never pitch blind).
+    const hitMaxTurns = nuevoTurno >= MAX_SDR_TURNS && datosConocidos >= 2
+    if (datosConocidos >= 3 || hitMaxTurns) {
       currentNode = 'pitch'
       updateData.sdr_node = currentNode
     }
   }
 
   if (currentNode === 'pitch') {
-    // After pitching in the previous turn, the user responds. 
-    // We must check if they have strong objections.
+    // After pitching in the previous turn, the user responds.
+    // We must check if they have strong objections. Use the JSON-typed intent
+    // classifier (the writer is text-only — previous JSON parse silently failed).
     if (nuevoTurno > 2) {
-      const objectionCheck = await llm.redactarMensajeSDR(
-        textoOriginal, 
-        contextoActual, 
-        'Evalúa si el usuario tiene una objeción fuerte a agendar una demostración. Responde SOLO en JSON: {"objeciones_detectadas": true/false}',
-        traceId
+      const objIntent = await llm.clasificarIntencionSDR(
+        textoOriginal,
+        ['objection', 'advance', 'other'] as const,
+        'Después del pitch, el usuario responde. Clasifica: "objection" = objeción real (no presupuesto, no tiempo, no interés, ya tengo X, prefiero pensarlo). "advance" = quiere avanzar / muestra interés / pregunta corta como "ya?", "ok", "y entonces?", "cuéntame más". "other" = ninguna de las anteriores.',
+        traceId,
       )
-      try {
-        const isObjection = JSON.parse(objectionCheck).objeciones_detectadas
-        if (!isObjection) {
-          currentNode = 'close'
-          updateData.sdr_node = currentNode
-        } else {
-          trace.event({ name: 'sdr_objection_detected', level: 'DEFAULT', input: { objectionCheck } })
-        }
-      } catch (e) {
-        // Fallback safely to pitch node if JSON parsing fails
-        console.warn('Failed to parse objection check:', e)
+      if (objIntent === 'advance' || objIntent === 'other') {
+        currentNode = 'close'
+        updateData.sdr_node = currentNode
+      } else {
+        trace.event({ name: 'sdr_objection_detected', level: 'DEFAULT', input: { intent: objIntent } })
       }
     }
   }
@@ -189,7 +186,7 @@ ${cachedSDRContext ? `Contexto Reciente: ${cachedSDRContext}` : ''}
     directiva = `Usa los datos recopilados para redactar un argumento persuasivo que genere un "aha moment". En lugar de solo describir funciones, enfócate en el problema de usar ${combinedProspecto['sistema_actual']} y cómo Wasagro les ahorrará horas de trabajo en sus ${combinedProspecto['fincas_en_cartera']} hectáreas/fincas de ${combinedProspecto['cultivo_principal']}, evitando pérdidas con alertas tempranas y tableros automáticos por WhatsApp. ESTRICTO: NO PIDAS AGENDAR REUNIÓN TODAVÍA. MÁXIMO 3 oraciones y 90 palabras.`
   } else if (currentNode === 'close') {
     requires_founder_approval = true
-    directiva = 'El cliente no tiene objeciones fuertes. Cierra el trato pidiendo una demostración mediante una pregunta cerrada ofreciendo dos opciones de bajo compromiso. ESTRICTO: Termina obligatoriamente con algo como "¿Te parece si agendamos 10 minutitos para mostrarte cómo se ve, o prefieres que te envíe un PDF con casos de éxito?". MÁXIMO 3 oraciones o 90 palabras.'
+    directiva = 'El cliente no tiene objeciones fuertes. Cierra el trato ofreciendo dos opciones de bajo compromiso: una demo corta o un brochure por su segmento. ESTRICTO: Termina obligatoriamente con algo como "¿Te parece si agendamos 10 minutitos para mostrarte cómo se ve, o preferís que te mande el brochure con la info para tu segmento?". NO menciones "casos de éxito" ni "PDF de casos" (no los tenemos). MÁXIMO 3 oraciones o 90 palabras.'
   }
 
   const respuesta = await llm.redactarMensajeSDR(textoOriginal, contextoActual, directiva, traceId)

@@ -32,5 +32,6 @@ export interface IWasagroLLM {
   resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal>
   extraerDatosSDR(texto: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR>
   redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string): Promise<string>
+  clasificarIntencionSDR(texto: string, opciones: readonly string[], contexto: string, traceId: string): Promise<string>
   clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel>
 }

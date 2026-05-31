@@ -647,6 +647,59 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
+  async clasificarIntencionSDR(
+    texto: string,
+    opciones: readonly string[],
+    contexto: string,
+    traceId: string,
+  ): Promise<string> {
+    const trace = this.#lf.trace({ id: traceId })
+    const generation = trace.generation({
+      name: 'clasificar_intencion_sdr',
+      model: 'wasagro-ai-agent',
+      input: { texto, opciones },
+    })
+
+    const systemPrompt = `Eres un clasificador. Tu única tarea es analizar el mensaje del usuario y elegir UNA opción exacta de la lista proporcionada.
+
+Reglas:
+- Devuelve EXCLUSIVAMENTE un JSON: {"intencion":"<opcion>"}
+- "<opcion>" DEBE ser una de las opciones literales del input. No inventes.
+- Si ninguna opción aplica claramente, elige "other".
+- NO escribas explicación. NO uses Markdown. Solo el JSON.`
+
+    const userContent = `Opciones permitidas: ${JSON.stringify(opciones)}\n\nContexto:\n${contexto}\n\nMensaje del usuario: "${texto}"`
+
+    try {
+      const raw = await this.#adapter.generarTexto(userContent, {
+        systemPrompt,
+        responseFormat: 'json_object',
+        traceId,
+        generationName: 'clasificar_intencion_sdr',
+        modelClass: 'fast',
+        temperature: 0,
+      })
+      const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(cleaned)
+      } catch {
+        generation.end({ output: raw, level: 'WARNING' })
+        return 'other'
+      }
+      const intencion = (parsed as { intencion?: unknown })?.intencion
+      if (typeof intencion === 'string' && opciones.includes(intencion)) {
+        generation.end({ output: { intencion } })
+        return intencion
+      }
+      generation.end({ output: { intencion, fallback: 'other' }, level: 'WARNING' })
+      return 'other'
+    } catch (err) {
+      generation.end({ output: String(err), level: 'ERROR' })
+      return 'other'
+    }
+  }
+
   async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({

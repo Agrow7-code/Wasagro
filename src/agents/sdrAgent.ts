@@ -40,6 +40,18 @@ function calcularPrecio(segmento_icp: string, fincas: number): string {
   return 'Es un costo variable según el tamaño de tu finca y las hectáreas activas. Lo mejor es agendar una breve llamada para darte el precio exacto.'
 }
 
+// Map a prospect to one of the brochures we actually have ("exportadora" or "agricultor").
+// Brochures live at WASAGRO_BROCHURE_URL?segment=<segmento>.
+// Rule: >=10 fincas/hectáreas OR already classified as exportadora/ong → exportadora.
+// Default (agricultor con pocas fincas o desconocido) → agricultor.
+export function inferBrochureSegment(prospecto: Record<string, unknown>): 'exportadora' | 'agricultor' {
+  const seg = prospecto['segmento_icp'] as string | undefined
+  if (seg === 'exportadora' || seg === 'ong') return 'exportadora'
+  const fincas = prospecto['fincas_en_cartera']
+  if (typeof fincas === 'number' && fincas >= 10) return 'exportadora'
+  return 'agricultor'
+}
+
 export function detectarHandoffTrigger(texto: string, turno: number): 'human_request' | 'price_readiness' | null {
   if (/hablar\s+con\s+alguien|hablar\s+con\s+ustedes|hablar\s+con\s+el\s+equipo|persona\s+real|hablar\s+directamente/i.test(texto)) {
     return 'human_request'
@@ -245,16 +257,17 @@ export async function handleMeetingConfirmation(
 
     const trace = langfuse.trace({ id: traceId })
     const texto = (msg.texto ?? '').trim()
-    
-    // Clasificar intención post-pitch
-    const directiva = 'El usuario acaba de recibir una invitación a agendar una videollamada o recibir un PDF. Clasifica su respuesta. Devuelve SOLO JSON: {"intencion": "wants_pdf" | "booked" | "will_book_later" | "declined" | "other"}'
-    let intencion = 'other'
-    try {
-      const classifStr = await llm.redactarMensajeSDR(texto, 'Estado: Pendiente de agenda', directiva, traceId)
-      intencion = JSON.parse(classifStr).intencion
-    } catch (e) {
-      console.warn('Failed to parse meeting confirmation intent:', e)
-    }
+
+    // Clasificar intención post-pitch. Usar el clasificador JSON real, no el writer
+    // (el writer está configurado en responseFormat: 'text' y el prompt SP-SDR-03
+    // dice "NO uses JSON" — esa contradicción rompía silenciosamente el parse).
+    const opciones = ['wants_brochure', 'booked', 'will_book_later', 'declined', 'other'] as const
+    const intencion = await llm.clasificarIntencionSDR(
+      texto,
+      opciones,
+      'El usuario acaba de recibir una invitación a agendar una videollamada o pedir un brochure por segmento. Variantes válidas para "wants_brochure": "envíame pdf", "mandame el brochure", "info", "quiero leerlo primero".',
+      traceId,
+    )
 
     let actionTaken = 'meeting_pending'
     
@@ -272,13 +285,18 @@ export async function handleMeetingConfirmation(
 
       await sender.enviarTexto(msg.from, '¡Perfecto! Quedamos confirmados. Te escribimos antes para recordarte. ✅')
       actionTaken = 'meeting_confirmed'
-    } else if (intencion === 'wants_pdf') {
-      const segment = (prospecto['segmento_icp'] as string) || 'exportadora'
-      const pdfUrl = `${process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'}?segment=${segment}`
-      await sender.enviarTexto(msg.from, `¡Claro que sí! Aquí tienes nuestro brochure interactivo con casos de uso y detalles específicos para tu perfil: ${pdfUrl}\n\nÉchale un vistazo y si te surge alguna duda, me avisas por aquí.`)
-      actionTaken = 'pdf_sent'
-      
-      // Mover a estado 'dormant' o mantener 'piloto_propuesto' pero con anotación
+    } else if (intencion === 'wants_brochure') {
+      const segment = inferBrochureSegment(prospecto)
+      const brochureBase = process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'
+      const brochureUrl = `${brochureBase}?segment=${segment}`
+      await sender.enviarTexto(
+        msg.from,
+        `¡Claro! Aquí tienes el brochure pensado para tu perfil de ${segment}: ${brochureUrl}\n\nDale una mirada y cualquier duda me avisas por acá. ✅`,
+      )
+      actionTaken = 'brochure_sent'
+
+      // Mantener el prospecto vivo en piloto_propuesto — el brochure es un nurture step,
+      // no un descarte. El chaser job (20h) lo va a revisitar.
       await updateSDRProspecto(prospecto['id'] as string, { status: 'dormant' }, client)
     } else if (intencion === 'declined') {
       await sender.enviarTexto(msg.from, 'Entiendo, no hay problema. Si en algún momento quieres simplificar tu operación agrícola, aquí estaremos. ¡Un saludo! 👋')
