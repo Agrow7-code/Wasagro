@@ -7,6 +7,9 @@ import {
   type ObjectionType,
 } from '../../constants/intents.js'
 
+// Re-export so consumers (router, classifier, composer) have one import surface.
+export type { Intent, ObjectionType } from '../../constants/intents.js'
+
 // ─── Domain enums (Zod) ───────────────────────────────────────────────────────
 
 export const CultivoEnum = z.enum([
