@@ -136,7 +136,13 @@ export function createDefaultContext(prospectId: string, phone: string): ConvCon
 }
 
 // FSM transition table — pure function of (current state, intent).
-// No LLM, no IO, fully testable.
+// No LLM, no IO, fully testable. Exported so router.ts can dry-run the
+// transition BEFORE the actual reduce, in order to pick the right template /
+// directive for the message it's about to send.
+export function computeFsmTransition(current: SDRFsmState, intent: Intent): SDRFsmState {
+  return nextFsmState(current, intent)
+}
+
 function nextFsmState(current: SDRFsmState, intent: Intent): SDRFsmState {
   // Terminal-ish intents short-circuit the FSM
   if (intent === 'declined') return 'declined'

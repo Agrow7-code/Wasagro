@@ -6,7 +6,7 @@ import { ExtraccionSDRSchema } from '../../types/dominio/SDRTypes.js'
 import { updateSDRProspecto, saveSDRInteraccion } from '../../pipeline/supabaseQueries.js'
 import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSender.js'
 import { getCachedContext, setCachedContext } from '../../integrations/redis.js'
-import { reduceContext, type ConvContext, type Intent, type SDRFsmState } from './context.js'
+import { reduceContext, computeFsmTransition, type ConvContext, type Intent, type SDRFsmState } from './context.js'
 import {
   loadHydratedContext,
   persistSessionState,
@@ -135,14 +135,20 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
   const turnIntent: Intent = classification.intent
 
   // ── 6. FSM transitions ────────────────────────────────────────────────────
-  //    The reducer below owns most transitions (declined/booked/intent-driven
-  //    state changes). The only transition that doesn't depend on intent is
-  //    discovery -> pitch_sent — that's a data-completeness gate, so it stays
-  //    here as an explicit override (router decides when there are enough
-  //    facts to pitch).
-  let nextFsmState: SDRFsmState = ctx.fsmState === 'triage' ? 'discovery' : ctx.fsmState
+  //    Dry-run the same pure transition function the reducer uses, so the
+  //    composer + directive builder downstream see the SAME nextFsmState the
+  //    state will land at after reduceContext(). Without this, e.g.
+  //    pitch_sent + advance left nextFsmState='pitch_sent' here while the
+  //    reducer correctly transitioned to 'closing' — composer didn't resolve
+  //    a template (no key for pitch_sent) and the response fell back to the
+  //    LLM with the pitch directive, sending the pitch AGAIN on a 'Ya?'. The
+  //    E2E test in handleSDRSession.roundtrip.test.ts catches that exact bug.
+  let nextFsmState: SDRFsmState = computeFsmTransition(ctx.fsmState, turnIntent)
   const nuevoTurno = ctx.turnCount + 1
 
+  // Discovery -> pitch_sent is the only transition the reducer doesn't own:
+  // it depends on accumulated data, not on intent. Override here when the
+  // transition function leaves us in 'discovery' but the data gate is met.
   if (nextFsmState === 'discovery') {
     const hitMaxTurns = nuevoTurno >= MAX_SDR_TURNS && ctx.datosConocidos >= 2
     if (ctx.datosConocidos >= 3 || hitMaxTurns) {
