@@ -40,16 +40,19 @@ function calcularPrecio(segmento_icp: string, fincas: number): string {
   return 'Es un costo variable según el tamaño de tu finca y las hectáreas activas. Lo mejor es agendar una breve llamada para darte el precio exacto.'
 }
 
-// Map a prospect to one of the brochures we actually have ("exportadora" or "agricultor").
-// Brochures live at WASAGRO_BROCHURE_URL?segment=<segmento>.
-// Rule: >=10 fincas/hectáreas OR already classified as exportadora/ong → exportadora.
-// Default (agricultor con pocas fincas o desconocido) → agricultor.
+// Pick the brochure slug for this prospect.
+// Source of truth: prospecto['segmento_icp'] which was set by detectRoleFromText
+// in the SDR router based on what the prospect explicitly said about themselves.
+// Size (fincas/hectáreas) is NOT used here anymore — a smallholder with 30 ha
+// who said "tengo mi propia finca" is an agricultor, not an exportadora.
+// If no role was ever detected (segmento_icp = 'desconocido'), default to
+// agricultor — that's the safer copy for any prospect we can't classify.
+import { segmentoToBrochureSlug } from './sdr/roleDetector.js'
+import type { Segmento } from './sdr/context.js'
+
 export function inferBrochureSegment(prospecto: Record<string, unknown>): 'exportadora' | 'agricultor' {
-  const seg = prospecto['segmento_icp'] as string | undefined
-  if (seg === 'exportadora' || seg === 'ong') return 'exportadora'
-  const fincas = prospecto['fincas_en_cartera']
-  if (typeof fincas === 'number' && fincas >= 10) return 'exportadora'
-  return 'agricultor'
+  const seg = (prospecto['segmento_icp'] as Segmento | undefined) ?? 'desconocido'
+  return segmentoToBrochureSlug(seg)
 }
 
 export function detectarHandoffTrigger(texto: string, turno: number): 'human_request' | 'price_readiness' | null {

@@ -13,6 +13,7 @@ import {
   mapExtraccionToUpdate,
   buildContextoString,
 } from './contextStore.js'
+import { detectRoleFromText } from './roleDetector.js'
 
 export interface SDRRouterContext {
   prospecto: Record<string, unknown>
@@ -188,6 +189,21 @@ ESTRICTO:
   // We override fsmState afterwards because the legacy FSM logic above decided
   // the transition (Fase B will move that decision into the reducer/classifier).
   const extraction = extraccionValidada ? mapExtraccionToUpdate(extraccionValidada) : {}
+
+  // Role detection from free text — runs every turn, but the reducer only
+  // upgrades segmento from 'desconocido', so once set it sticks. This prevents
+  // the regression where size (e.g. "30 hectáreas") was misread as exportadora
+  // when the prospect explicitly said "tengo mi propia finca".
+  const roleHit = detectRoleFromText(textoOriginal)
+  if (roleHit) {
+    extraction.segmento = roleHit.segmento
+    trace.event({
+      name: 'sdr_role_detected',
+      level: 'DEFAULT',
+      input: { segmento: roleHit.segmento, reason: roleHit.reason, pattern: roleHit.matchedPattern },
+    })
+  }
+
   ctx = reduceContext(ctx, {
     classification: { intent: turnIntent, confidence: 1.0 },
     extraction,
