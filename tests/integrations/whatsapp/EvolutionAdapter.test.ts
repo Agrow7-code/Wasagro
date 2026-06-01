@@ -1,21 +1,21 @@
-import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { EvolutionAdapter } from '../../../src/integrations/whatsapp/EvolutionAdapter.js'
 import evoTexto from '../../fixtures/evolution-texto.json'
 import evoAudio from '../../fixtures/evolution-audio.json'
 import evoUbicacion from '../../fixtures/evolution-ubicacion.json'
 
-const SECRET = 'evo-secret'
+const SECRET = 'bearer-secret-token'
 
-function firmarPayload(body: string, secret: string): string {
-  return createHmac('sha256', secret).update(body).digest('hex')
-}
-
-function mockContext(body: string, signature: string) {
+// Builds a fake Hono Context with the given X-Webhook-Token header.
+// Evolution API sends this header via WEBHOOK_GLOBAL_HEADERS, configured per
+// instance via POST /webhook/set/{instance}. The adapter does a timing-safe
+// compare against EVOLUTION_WEBHOOK_SECRET. See commit 35977ff for the
+// HMAC -> bearer migration rationale and runtime impl.
+function mockContext(token: string | undefined) {
   return {
     req: {
-      raw: { clone: () => ({ text: async () => body }) },
-      header: (name: string) => name === 'x-evolution-signature' ? signature : undefined,
+      raw: { clone: () => ({ text: async () => '' }) },
+      header: (name: string) => name === 'x-webhook-token' ? token : undefined,
     },
   } as any
 }
@@ -24,15 +24,26 @@ describe('EvolutionAdapter', () => {
   const adapter = new EvolutionAdapter({ secret: SECRET })
 
   describe('verificarWebhook', () => {
-    it('retorna true con firma válida', async () => {
-      const body = JSON.stringify(evoTexto)
-      const sig = firmarPayload(body, SECRET)
-      expect(await adapter.verificarWebhook(mockContext(body, sig))).toBe(true)
+    it('retorna true cuando el header X-Webhook-Token coincide con el secret', async () => {
+      expect(await adapter.verificarWebhook(mockContext(SECRET))).toBe(true)
     })
 
-    it('retorna false con firma inválida', async () => {
-      const body = JSON.stringify(evoTexto)
-      expect(await adapter.verificarWebhook(mockContext(body, 'invalida'))).toBe(false)
+    it('retorna false cuando el token no coincide', async () => {
+      expect(await adapter.verificarWebhook(mockContext('token-invalido'))).toBe(false)
+    })
+
+    it('retorna false cuando el header viene ausente', async () => {
+      expect(await adapter.verificarWebhook(mockContext(undefined))).toBe(false)
+    })
+
+    it('retorna false cuando el secret del adapter está vacío (fail-closed)', async () => {
+      const sinSecret = new EvolutionAdapter({ secret: '' })
+      expect(await sinSecret.verificarWebhook(mockContext(SECRET))).toBe(false)
+    })
+
+    it('retorna false aunque el token sea prefijo del secret (length mismatch)', async () => {
+      // Evita la trampa de strncmp / startsWith: timingSafeEqual exige misma longitud.
+      expect(await adapter.verificarWebhook(mockContext(SECRET.slice(0, 5)))).toBe(false)
     })
   })
 
