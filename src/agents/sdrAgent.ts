@@ -51,6 +51,7 @@ import { segmentoToBrochureSlug } from './sdr/roleDetector.js'
 import type { Segmento } from './sdr/context.js'
 import { getClassifier } from './sdr/classifier.js'
 import { loadHydratedContext } from './sdr/contextStore.js'
+import { compose } from './sdr/composer.js'
 import type { ILLMAdapter } from '../integrations/llm/ILLMAdapter.js'
 
 export function inferBrochureSegment(prospecto: Record<string, unknown>): 'exportadora' | 'agricultor' {
@@ -294,7 +295,12 @@ export async function handleMeetingConfirmation(
     }
 
     let actionTaken = 'meeting_pending'
-    
+
+    // Fase A: structural responses come from deterministic templates. The
+    // composer resolves by intent (these are all high-priority intent overrides
+    // in the registry), so the state arg is informational only.
+    const ctxForTemplate = (await loadHydratedContext(prospecto)).ctx
+
     if (intencion === 'booked') {
       const reunionAgendadaAt = new Date().toISOString()
       await updateSDRProspecto(prospecto['id'] as string, {
@@ -307,27 +313,25 @@ export async function handleMeetingConfirmation(
         input: { prospecto_id: prospecto['id'], narrativa: prospecto['narrativa_asignada'], phone: prospecto['phone'] },
       })
 
-      await sender.enviarTexto(msg.from, '¡Perfecto! Quedamos confirmados. Te escribimos antes para recordarte. ✅')
+      const composed = compose('meeting_proposed', 'booked', ctxForTemplate)
+      await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto! Quedamos confirmados.')
       actionTaken = 'meeting_confirmed'
     } else if (intencion === 'wants_brochure') {
-      const segment = inferBrochureSegment(prospecto)
-      const brochureBase = process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'
-      const brochureUrl = `${brochureBase}?segment=${segment}`
-      await sender.enviarTexto(
-        msg.from,
-        `¡Claro! Aquí tienes el brochure pensado para tu perfil de ${segment}: ${brochureUrl}\n\nDale una mirada y cualquier duda me avisas por acá. ✅`,
-      )
+      const composed = compose('meeting_proposed', 'wants_brochure', ctxForTemplate)
+      await sender.enviarTexto(msg.from, composed?.text ?? '¡Claro! Te mando el brochure ✅')
       actionTaken = 'brochure_sent'
 
       // Mantener el prospecto vivo en piloto_propuesto — el brochure es un nurture step,
       // no un descarte. El chaser job (20h) lo va a revisitar.
       await updateSDRProspecto(prospecto['id'] as string, { status: 'dormant' }, client)
     } else if (intencion === 'declined') {
-      await sender.enviarTexto(msg.from, 'Entiendo, no hay problema. Si en algún momento quieres simplificar tu operación agrícola, aquí estaremos. ¡Un saludo! 👋')
+      const composed = compose('meeting_proposed', 'declined', ctxForTemplate)
+      await sender.enviarTexto(msg.from, composed?.text ?? 'Entiendo, no hay problema.')
       actionTaken = 'graceful_exit'
       await updateSDRProspecto(prospecto['id'] as string, { status: 'descartado' }, client)
     } else if (intencion === 'will_book_later') {
-      await sender.enviarTexto(msg.from, '¡Perfecto, quedo a la espera! Cuando tengas un ratito, me avisas o usas el link que te mandé. ⏰')
+      const composed = compose('meeting_proposed', 'will_book_later', ctxForTemplate)
+      await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto, quedo a la espera!')
       actionTaken = 'meeting_pending'
     } else {
       // Intent 'other' - Respuesta conversacional amigable con el link

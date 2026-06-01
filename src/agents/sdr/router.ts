@@ -16,6 +16,7 @@ import {
 } from './contextStore.js'
 import { detectRoleFromText } from './roleDetector.js'
 import { getClassifier, type IIntentClassifier } from './classifier.js'
+import { compose, composeCalendarLink } from './composer.js'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
 
 export interface SDRRouterContext {
@@ -185,10 +186,29 @@ ESTRICTO:
 - MÁXIMO 3 oraciones y 90 palabras en total (la pregunta cuenta como una oración).`
   } else if (nextFsmState === 'closing') {
     requires_founder_approval = true
-    directiva = 'El cliente no tiene objeciones fuertes. Cierra el trato ofreciendo dos opciones de bajo compromiso: una demo corta o un brochure por su segmento. ESTRICTO: Termina obligatoriamente con algo como "¿Te parece si agendamos 10 minutitos para mostrarte cómo se ve, o preferís que te mande el brochure con la info para tu segmento?". NO menciones "casos de éxito" ni "PDF de casos" (no los tenemos). MÁXIMO 3 oraciones o 90 palabras.'
+    // directiva remains empty — closing is a deterministic template now (Fase A).
+    // The LLM is not asked to redact this turn; compose() resolves the template
+    // below. Keeping requires_founder_approval flag so persistence + telemetry
+    // continue to fire.
   }
 
-  const respuesta = await llm.redactarMensajeSDR(textoOriginal, contextoActual, directiva, traceId)
+  // Fase A: structural messages come from deterministic templates, not LLM.
+  // Today only the 'closing' state has a template resolution from this branch
+  // (post-pitch states are handled in sdrAgent.handleMeetingConfirmation).
+  // Discovery questions and pitch body still need LLM creativity, so they fall
+  // through to redactarMensajeSDR.
+  let respuesta: string
+  const composed = compose(nextFsmState, turnIntent, ctx)
+  if (composed) {
+    respuesta = composed.text
+    trace.event({
+      name: 'sdr_template_used',
+      level: 'DEFAULT',
+      input: { templateKey: composed.templateKey, state: nextFsmState, intent: turnIntent },
+    })
+  } else {
+    respuesta = await llm.redactarMensajeSDR(textoOriginal, contextoActual, directiva, traceId)
+  }
 
   // Cache recent response in Dual-Tier Memory
   await setCachedContext(ctx.phone, respuesta, 3600 * 24)
@@ -249,11 +269,8 @@ ESTRICTO:
 
   await sender.enviarTexto(ctx.phone, respuesta)
   if (requires_founder_approval) {
-    const bookingUrl = process.env['DEMO_BOOKING_URL']
-    const followUp = bookingUrl
-      ? `📅 Puedes elegir el horario aquí: ${bookingUrl}`
-      : '¿Qué día y hora te queda mejor la próxima semana? 📅'
-    await sender.enviarTexto(ctx.phone, followUp)
+    // Calendar link is also a deterministic template — no copy variance turn-to-turn.
+    await sender.enviarTexto(ctx.phone, composeCalendarLink())
     trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: ctx.prospectId } })
   }
 
