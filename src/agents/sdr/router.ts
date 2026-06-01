@@ -15,6 +15,8 @@ import {
   buildContextoString,
 } from './contextStore.js'
 import { detectRoleFromText } from './roleDetector.js'
+import { getClassifier, type IIntentClassifier } from './classifier.js'
+import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
 
 export interface SDRRouterContext {
   prospecto: Record<string, unknown>
@@ -23,13 +25,25 @@ export interface SDRRouterContext {
   llm: IWasagroLLM
   sender: IWhatsAppSender
   client?: SupabaseClient
+  // Either an LLM adapter (router instantiates classifier) or a pre-built
+  // classifier (tests inject a mock). Caller provides one of the two.
+  adapter?: ILLMAdapter
+  classifier?: IIntentClassifier
 }
 
 const MAX_SDR_TURNS = 4
 
 export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
-  const { prospecto, textoOriginal, traceId, llm, sender, client } = rctx
+  const { prospecto, textoOriginal, traceId, llm, sender, client, adapter, classifier: injectedClassifier } = rctx
   const trace = langfuse.trace({ id: traceId })
+
+  // Resolve the classifier: prefer an injected one (tests), otherwise build
+  // from adapter via the module-level singleton. If neither is provided, the
+  // router falls back to the Commit 2 behavior (placeholder intent='neutro').
+  // Production wiring always passes adapter via procesarMensajeEntrante, so the
+  // fallback is only for legacy tests that haven't been migrated.
+  const classifier: IIntentClassifier | null = injectedClassifier
+    ?? (adapter ? getClassifier(adapter) : null)
 
   // ── HYDRATE FIRST — must precede any classifier call (resuelve H1 ADR-009).
   //    All prospecto[...] accesses + the Redis session-state fetch live inside
@@ -109,13 +123,23 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
     return
   }
 
-  // ── 5. FSM transitions (legacy logic operating on ConvContext) ────────────
-  // BRIDGE: Fase B unifies these transitions inside reduceContext() with a real
-  // intent classifier. For Commit 2 we keep the existing rules and snapshot the
-  // resulting fsmState + turnIntent for the final reduce() call below.
-  let nextFsmState: SDRFsmState = ctx.fsmState === 'triage' ? 'discovery' : ctx.fsmState
-  let turnIntent: Intent = 'neutro'
+  // ── 5. Classify intent (Fase B: typed enum + retry-with-feedback) ────────
+  //    The classifier reads ConvContext directly (lastBotMessage,
+  //    intentHistory, fsmState, lastBotAction). H1 of ADR-009 is now resolved
+  //    at the wiring level: 'Ya?' tras pitch -> advance, no objection.
+  //    Fallback to placeholder when no classifier was wired (legacy tests).
+  const classification = classifier
+    ? await classifier.classify(textoOriginal, ctx, traceId)
+    : { intent: 'neutro' as Intent, confidence: 0 }
+  const turnIntent: Intent = classification.intent
 
+  // ── 6. FSM transitions ────────────────────────────────────────────────────
+  //    The reducer below owns most transitions (declined/booked/intent-driven
+  //    state changes). The only transition that doesn't depend on intent is
+  //    discovery -> pitch_sent — that's a data-completeness gate, so it stays
+  //    here as an explicit override (router decides when there are enough
+  //    facts to pitch).
+  let nextFsmState: SDRFsmState = ctx.fsmState === 'triage' ? 'discovery' : ctx.fsmState
   const nuevoTurno = ctx.turnCount + 1
 
   if (nextFsmState === 'discovery') {
@@ -125,29 +149,10 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
     }
   }
 
-  if (nextFsmState === 'pitch_sent' && nuevoTurno > 2) {
-    // Pass the full ConvContext-derived contextoActual so the classifier sees
-    // lastBotMessage and intentHistory. This is what resolves H1 of ADR-009:
-    // "Ya?" is ambiguous in isolation but unambiguous once the classifier knows
-    // the bot just sent the pitch.
-    const objIntent = await llm.clasificarIntencionSDR(
-      textoOriginal,
-      ['objection', 'advance', 'other'] as const,
-      `${contextoActual}\n\nInstrucción: Después del pitch, el usuario responde. Clasifica: "objection" = objeción real (no presupuesto, no tiempo, no interés, ya tengo X, prefiero pensarlo). "advance" = quiere avanzar / muestra interés / pregunta corta como "ya?", "ok", "y entonces?", "cuéntame más". "other" = ninguna de las anteriores.`,
-      traceId,
-    )
-    if (objIntent === 'advance' || objIntent === 'other') {
-      nextFsmState = 'closing'
-      turnIntent = objIntent === 'advance' ? 'advance' : 'other'
-    } else {
-      // The 'objection' label here is a coarse signal; Fase B emits a typed
-      // ObjectionType (precio / tiempo / confianza). For now, treat as generic.
-      turnIntent = 'objection_trust'
-      trace.event({ name: 'sdr_objection_detected', level: 'DEFAULT', input: { intent: objIntent } })
-    }
-  }
-
-  // ── 6. Plan directive (reads from ctx, not prospecto) ─────────────────────
+  // ── 7. Plan directive (reads from ctx, not prospecto) ─────────────────────
+  //    Note: at this point nextFsmState is the FSM-decided next state but the
+  //    reducer hasn't run yet. The directive uses nextFsmState because the
+  //    composer needs to know which message to produce for this turn.
   let directiva = ''
   let requires_founder_approval = false
   const ctwaContext = sourceContext ? ` [NOTA: El cliente llegó desde el anuncio: ${sourceContext}. Usa esto para personalizar tu saludo o enfoque].` : ''
@@ -188,10 +193,13 @@ ESTRICTO:
   // Cache recent response in Dual-Tier Memory
   await setCachedContext(ctx.phone, respuesta, 3600 * 24)
 
-  // ── 7. REDUCE: single, atomic context update for this turn ────────────────
-  // Replaces the 5 inline mutations (ex-lines 104-115) with one pure call.
-  // We override fsmState afterwards because the legacy FSM logic above decided
-  // the transition (Fase B will move that decision into the reducer/classifier).
+  // ── 8. REDUCE: single, atomic context update for this turn ────────────────
+  //    Uses the REAL intent from the classifier (not the 'neutro' placeholder
+  //    of Commit 2). The reducer's FSM transition table now does most of the
+  //    work — pitch_sent + advance -> closing, closing + wants_brochure ->
+  //    brochure_sent, any + declined -> declined, etc. The only override we
+  //    keep is discovery -> pitch_sent, which is a data-driven gate (router
+  //    knows when there are enough facts to pitch).
   const extraction = extraccionValidada ? mapExtraccionToUpdate(extraccionValidada) : {}
 
   // Role detection from free text — runs every turn, but the reducer only
@@ -209,12 +217,16 @@ ESTRICTO:
   }
 
   ctx = reduceContext(ctx, {
-    classification: { intent: turnIntent, confidence: 1.0 },
+    classification: { intent: turnIntent, confidence: classification.confidence },
     extraction,
     botMessage: respuesta,
   })
-  // BRIDGE: stamp the FSM transition chosen by the legacy block above.
-  ctx = { ...ctx, fsmState: nextFsmState }
+
+  // Discovery -> pitch_sent is the only transition the reducer doesn't own:
+  // it depends on accumulated data, not on intent. Stamp it here.
+  if (nextFsmState === 'pitch_sent' && ctx.fsmState === 'discovery') {
+    ctx = { ...ctx, fsmState: 'pitch_sent' }
+  }
 
   // ── 8. Persist legacy row + send message ──────────────────────────────────
   const updateData = computeLegacyUpdate(ctx, initial)

@@ -49,6 +49,9 @@ function calcularPrecio(segmento_icp: string, fincas: number): string {
 // agricultor — that's the safer copy for any prospect we can't classify.
 import { segmentoToBrochureSlug } from './sdr/roleDetector.js'
 import type { Segmento } from './sdr/context.js'
+import { getClassifier } from './sdr/classifier.js'
+import { loadHydratedContext } from './sdr/contextStore.js'
+import type { ILLMAdapter } from '../integrations/llm/ILLMAdapter.js'
 
 export function inferBrochureSegment(prospecto: Record<string, unknown>): 'exportadora' | 'agricultor' {
   const seg = (prospecto['segmento_icp'] as Segmento | undefined) ?? 'desconocido'
@@ -72,6 +75,7 @@ export async function handleSDRSession(
   sender: IWhatsAppSender,
   llm: IWasagroLLM,
   client?: SupabaseClient,
+  adapter?: ILLMAdapter,
 ): Promise<void> {
   const trace = langfuse.trace({ id: traceId })
   const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : '[mensaje de voz o imagen]'
@@ -124,6 +128,7 @@ export async function handleSDRSession(
       sender,
     }
     if (client) routerCtx.client = client
+    if (adapter) routerCtx.adapter = adapter
 
     await routeSDRNode(routerCtx)
 
@@ -258,6 +263,7 @@ export async function handleMeetingConfirmation(
   sender: IWhatsAppSender,
   llm: IWasagroLLM,
   client?: SupabaseClient,
+  adapter?: ILLMAdapter,
 ): Promise<boolean> {
   try {
     const prospecto = await getSDRProspecto(msg.from, client) as Record<string, unknown> | null
@@ -266,16 +272,26 @@ export async function handleMeetingConfirmation(
     const trace = langfuse.trace({ id: traceId })
     const texto = (msg.texto ?? '').trim()
 
-    // Clasificar intención post-pitch. Usar el clasificador JSON real, no el writer
-    // (el writer está configurado en responseFormat: 'text' y el prompt SP-SDR-03
-    // dice "NO uses JSON" — esa contradicción rompía silenciosamente el parse).
-    const opciones = ['wants_brochure', 'booked', 'will_book_later', 'declined', 'other'] as const
-    const intencion = await llm.clasificarIntencionSDR(
-      texto,
-      opciones,
-      'El usuario acaba de recibir una invitación a agendar una videollamada o pedir un brochure por segmento. Variantes válidas para "wants_brochure": "envíame pdf", "mandame el brochure", "info", "quiero leerlo primero".',
-      traceId,
-    )
+    // Fase B classifier: hydrate ConvContext (Redis-backed) and run the typed
+    // intent classifier. Falls back to the legacy clasificarIntencionSDR path
+    // only when no adapter was wired (tests / very-old call sites). The new
+    // path returns a typed Intent that already includes the categories we
+    // need here (wants_brochure / booked / will_book_later / declined).
+    let intencion: string
+    if (adapter) {
+      const initial = await loadHydratedContext(prospecto)
+      const classifier = getClassifier(adapter)
+      const result = await classifier.classify(texto, initial.ctx, traceId)
+      intencion = result.intent
+    } else {
+      const opciones = ['wants_brochure', 'booked', 'will_book_later', 'declined', 'other'] as const
+      intencion = await llm.clasificarIntencionSDR(
+        texto,
+        opciones,
+        'El usuario acaba de recibir una invitación a agendar una videollamada o pedir un brochure por segmento. Variantes válidas para "wants_brochure": "envíame pdf", "mandame el brochure", "info", "quiero leerlo primero".',
+        traceId,
+      )
+    }
 
     let actionTaken = 'meeting_pending'
     

@@ -20,6 +20,7 @@ export const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'd
 
 export let _sender: IWhatsAppSender | null = null
 export let _llm: IWasagroLLM | null = null
+export let _llmAdapter: ILLMAdapter | null = null
 export let _intentDetector: IntentDetector | null = null
 export let _ragRetriever: RAGRetriever | null = null
 export let _embeddingService: IEmbeddingService | null = null
@@ -33,6 +34,7 @@ export interface PipelineOptions {
 export function inicializarPipeline(sender: IWhatsAppSender, llm: IWasagroLLM, options: PipelineOptions = {}): void {
   _sender = sender
   _llm = llm
+  _llmAdapter = options.adapter ?? null
   _intentDetector = options.adapter ? new IntentDetector(options.adapter) : null
   _embeddingService = options.embeddingService ?? null
   _ragRetriever = options.ragRetriever ?? null
@@ -79,9 +81,9 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
     const usuario = await getUserByPhone(msg.from)
 
     if (!usuario) {
-      const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!, _llm!)
+      const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
       if (meetingHandled) return
-      await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!)
+      await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
       return
     }
 
