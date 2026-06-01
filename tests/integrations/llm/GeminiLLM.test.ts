@@ -48,7 +48,8 @@ function crearLangfuseMock() {
   return { trace: vi.fn().mockReturnValue(trace), _generation: generation, _trace: trace }
 }
 
-describe('GeminiLLM', () => {
+// Stale: extraerEvento ya no existe en WasagroAIAgent (refactor a IntentGate + handlers especializados).
+describe.skip('GeminiLLM', () => {
   describe('extraerEvento', () => {
     it('parsea respuesta JSON válida del SDK', async () => {
       const sdk = crearSdkMock([JSON.stringify(respuestaClasificacion), JSON.stringify(respuestaEventoMock)])

@@ -71,7 +71,8 @@ function crearLangfuseMock() {
   return { trace: vi.fn().mockReturnValue(trace), _generation: generation, _trace: trace }
 }
 
-describe('GroqLLM.atenderSDR', () => {
+// Stale: atenderSDR fue eliminado en 048b04c (cleanup Fase E). El pipeline SDR vive ahora en agents/sdr/.
+describe.skip('GroqLLM.atenderSDR', () => {
   it('carga SP-SDR-01-master.md y llama al LLM', async () => {
     const sdk = crearOpenAIMock(JSON.stringify(respuestaSDRMock))
     const lf = crearLangfuseMock()

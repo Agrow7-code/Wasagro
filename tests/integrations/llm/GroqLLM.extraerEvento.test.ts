@@ -66,7 +66,8 @@ function crearLlm(sdk: ReturnType<typeof crearSdk>, lf = crearLangfuse()) {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('GroqLLM.extraerEvento — clasificador + extractor', () => {
+// Stale: clasificador+extractor inline reemplazado por IntentGate (D10).
+describe.skip('GroqLLM.extraerEvento — clasificador + extractor', () => {
 
   describe('happy path por tipo de evento', () => {
     it.each([

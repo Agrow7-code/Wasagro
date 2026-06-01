@@ -68,7 +68,10 @@ describe('sdrChaserWorker', () => {
       })
     })
 
-    const mockSender = { enviarTexto: vi.fn().mockResolvedValue(true) }
+    const mockSender = {
+      enviarTexto: vi.fn().mockResolvedValue(true),
+      enviarTemplate: vi.fn().mockResolvedValue(true),
+    }
     // @ts-ignore
     whatsappIndex.crearSenderWhatsApp.mockReturnValue(mockSender)
 
@@ -78,7 +81,7 @@ describe('sdrChaserWorker', () => {
 
     await sdrChaserHandler(job as any)
 
-    expect(mockSender.enviarTexto).toHaveBeenCalledWith('123456', expect.stringContaining('¿pudiste revisar'))
+    expect(mockSender.enviarTemplate).toHaveBeenCalledWith('123456', 'sdr_reenganche_24h', 'es')
     expect(supabaseQueries.saveSDRInteraccion).toHaveBeenCalled()
   })
 })

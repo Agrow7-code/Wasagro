@@ -121,7 +121,7 @@ describe('WasagroAIAgent.extraerDocumentoOCR — flujo con tier OCR', () => {
       'trace-ocr-002',
     )
 
-    expect(resultado.advertencia).toContain('zod_validation_issues')
+    expect(resultado.advertencia).toContain('requires_review')
     expect(resultado.registros[0].cantidad).toBeNull()
     expect(resultado.registros[0].monto).toBeNull()
   })

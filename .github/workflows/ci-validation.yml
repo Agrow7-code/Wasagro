@@ -31,3 +31,11 @@ jobs:
 
       - name: Run tests
         run: npm test
+        env:
+          # Dummy values — tests must mock external services, never hit them.
+          # Required only because some modules validate env at import time.
+          SUPABASE_URL: http://localhost
+          SUPABASE_SERVICE_ROLE_KEY: ci-dummy-service-role-key
+          SUPABASE_ANON_KEY: ci-dummy-anon-key
+          EVOLUTION_WEBHOOK_SECRET: ci-dummy-webhook-secret
+          DEEPGRAM_API_KEY: ci-dummy-deepgram-key
