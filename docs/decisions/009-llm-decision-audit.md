@@ -314,6 +314,26 @@ AUDIT prompts/sp-00-prospecto.md       — confirmar si está vivo o es dead cod
 
 ---
 
+## Anexo Z: comportamiento esperado de session state TTL (Commit 3 Fase C)
+
+Session-scoped fields (`intentHistory`, `lastBotMessage`, `lastBotAction`, `lastObjectionType`, `signalStrength`, `clarificationTurnsUsed`, `fsmState`) viven en Redis con clave `sdr_session:<phone>` y **TTL 24h**. Persistent fields (cultivo, pais, segmento, etc.) viven en Supabase sin expiración.
+
+**Comportamiento esperado al expirar el TTL:**
+
+- Si el prospecto reescribe el día 1 → next turn carga sessionState completo, classifier ve `lastBotMessage` del turno anterior, "Ya?" se desambigua correctamente.
+- Si el prospecto reescribe el día 3 (24h+ sin actividad) → next turn no encuentra sessionState en Redis, hidrata con defaults (`intentHistory: []`, `lastBotMessage: null`). El classifier ve el mensaje en aislación — **mismo comportamiento que pre-Fase-C**. La conversación reinicia desde la última decisión persistente en Supabase (cultivo, segmento, etc. siguen ahí).
+
+Esto **no es un bug, es degradación intencional**. SDR conversations rara vez span más de un día activo. Si la persona necesita continuidad cross-day, la lógica del chaser job (20h) la rescata via cold-start saludo y el flow reinicia. Si en producción vemos que TTL 24h es muy corto (e.g. prospects que vuelven al día 2 con frecuencia), subirlo a 72h es un cambio de una constante (`SESSION_TTL_SECONDS` en `contextStore.ts`), no un refactor.
+
+**Comportamiento esperado en otros casos:**
+- Redis caído al persistir → log warning, conversation sigue. Next turn pierde el last bot message — degradación al estado pre-Fase-C.
+- Redis caído al cargar → log warning, hidrata con defaults. Mismo efecto que TTL expirado.
+- Schema drift (e.g. nuevo `IntentEnum` value se persistió antes del rollback) → `safeParse` falla, devuelve null, hidrata con defaults. Next persist sobrescribe con el nuevo shape.
+
+Todo lo anterior está cubierto por tests en `tests/agents/sdr/contextStore.test.ts`.
+
+---
+
 ## Anexo A: lo que NO está en este audit
 
 - Lógica de pricing (`calcularPrecio` en sdrAgent y router) — duplicación de código pre-existente, no decisión LLM.

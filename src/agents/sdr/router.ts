@@ -8,7 +8,8 @@ import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSende
 import { getCachedContext, setCachedContext } from '../../integrations/redis.js'
 import { reduceContext, type ConvContext, type Intent, type SDRFsmState } from './context.js'
 import {
-  hydrateContext,
+  loadHydratedContext,
+  persistSessionState,
   computeLegacyUpdate,
   mapExtraccionToUpdate,
   buildContextoString,
@@ -31,9 +32,12 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
   const trace = langfuse.trace({ id: traceId })
 
   // ── HYDRATE FIRST — must precede any classifier call (resuelve H1 ADR-009).
-  //    All prospecto[...] accesses live inside hydrateContext(). The router
-  //    only reads from ctx and legacy from this point on.
-  const initial = hydrateContext(prospecto)
+  //    All prospecto[...] accesses + the Redis session-state fetch live inside
+  //    loadHydratedContext(). The router only reads from ctx + legacy from here.
+  //    Redis-backed session state (intentHistory, lastBotMessage, etc.) is
+  //    merged on top of the Supabase prospect row, so the classifier downstream
+  //    actually sees what the bot said in the previous turn.
+  const initial = await loadHydratedContext(prospecto)
   let ctx = initial.ctx
   const { sourceContext, statusActual } = initial.legacy
 
@@ -250,4 +254,9 @@ ESTRICTO:
     action_taken: nextFsmState,
     langfuse_trace_id: traceId,
   }, client)
+
+  // Persist session-scoped fields (intentHistory, lastBotMessage, fsmState, etc.)
+  // to Redis with TTL 24h. Next turn's loadHydratedContext() picks them up.
+  // Failure here is non-fatal — graceful degradation documented in ADR-009.
+  await persistSessionState(ctx)
 }
