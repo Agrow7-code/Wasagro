@@ -15,6 +15,8 @@ import {
 import { handleSDRSession, handleFounderApproval, handleMeetingConfirmation } from '../agents/sdrAgent.js'
 import { handleOnboardingAdmin, handleOnboardingAgricultor } from './handlers/OnboardingHandler.js'
 import { handleEvento } from './handlers/EventHandler.js'
+import { loadSessionState } from '../agents/sdr/contextStore.js'
+import { shouldSuppressOnboardingForActiveSDR } from '../agents/sdr/onboardingGuard.js'
 
 export const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -88,6 +90,23 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
     }
 
     if (!usuario.onboarding_completo) {
+      // Guard: a live SDR conversation must not be interrupted by the onboarding
+      // fallback. The `usuarios` row can be created mid-pitch (e.g., agendar
+      // piloto), and without this guard the very next inbound message would
+      // route to handleOnboarding* and emit "estamos terminando de configurar
+      // tu acceso" style copy — which made the bot look broken to a real
+      // prospect that was about to convert.
+      const sdrSession = await loadSessionState(msg.from)
+      if (shouldSuppressOnboardingForActiveSDR(sdrSession)) {
+        trace.event({
+          name:  'onboarding_fallback_suppressed',
+          level: 'WARNING',
+          input: { phone: msg.from, fsmState: sdrSession?.fsmState },
+        })
+        await actualizarMensaje(mensajeId, { status: 'processed' }).catch(() => {})
+        return
+      }
+
       if (ROLES_ADMIN.has(usuario.rol)) {
         await handleOnboardingAdmin(msg, usuario, mensajeId, traceId)
       } else {
