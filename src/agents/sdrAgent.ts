@@ -146,7 +146,12 @@ export async function handleSDRSession(
   } catch (err) {
     console.error('[SDR] Error en handleSDRSession:', err)
     trace.event({ name: 'sdr_error', level: 'ERROR', input: { error: String(err) } })
-    await sender.enviarTexto(msg.from, 'Hola. Soy Wasagro, tu asistente de campo. En este momento estamos terminando de configurar tu acceso. Por favor intenta escribirnos de nuevo en un momento. 🚜')
+    // Diplomatic recovery message — does NOT imply the system is broken or
+    // mid-setup. Previous copy ("estamos terminando de configurar tu acceso")
+    // appeared in real conversations and made the bot look half-finished to a
+    // prospect that was about to convert. Keep it short, owning the hiccup,
+    // inviting one retry.
+    await sender.enviarTexto(msg.from, 'Disculpá, tuve un problemita procesando tu mensaje. ¿Me lo podés contar de nuevo? 🙏').catch(() => {})
     await actualizarMensaje(mensajeId, { status: 'error', error_detail: String(err) }).catch(() => {})
   }
 }
