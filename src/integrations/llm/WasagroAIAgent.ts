@@ -19,7 +19,6 @@ import {
   type ContextoOnboardingAgricultor,
   type RespuestaOnboarding,
 } from '../../types/dominio/Onboarding.js'
-import { RespuestaProspectoSchema, type ContextoProspecto, type RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
@@ -468,45 +467,6 @@ export class WasagroAIAgent implements IWasagroLLM {
       if (err instanceof LLMError) throw err
       generation.end({ output: String(err), level: 'ERROR' })
       throw new LLMError('GROQ_ERROR', `Error en onboarding agricultor: ${String(err)}`, err)
-    }
-  }
-
-  async atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto> {
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'atender_prospecto', model: 'wasagro-ai-agent', input: { mensaje } })
-    try {
-      const hoy = new Date().toISOString().slice(0, 10)
-      const prompt = injectarVariables((await PromptManager.getPrompt('sp-00-prospecto.md', 'prompts/sp-00-prospecto.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
-        PASO_ACTUAL: String(contexto.paso_actual),
-        DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recopilados),
-        FECHA_ACTUAL: hoy,
-      })
-      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#adapter.generarTexto(`Historial:\n${historial}\nUsuario: ${mensaje}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
-
-      let json: unknown
-      try { json = JSON.parse(texto) } catch {
-        json = {
-          paso_completado: 0, siguiente_paso: 1,
-          tipo_contacto: 'sin_clasificar',
-          datos_extraidos: { nombre: null, finca_nombre: null, cultivo_principal: null, pais: null, tamanio_aproximado: null, interes_demo: false },
-          guardar_en_prospectos: false,
-          mensaje_para_usuario: texto,
-        }
-      }
-
-      const parsed = RespuestaProspectoSchema.safeParse(json)
-      if (!parsed.success) {
-        generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Schema prospecto inválido: ${parsed.error.message}`)
-      }
-
-      generation.end({ output: parsed.data })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error atendiendo prospecto: ${String(err)}`, err)
     }
   }
 

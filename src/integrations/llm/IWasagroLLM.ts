@@ -1,6 +1,5 @@
 import type { EntradaEvento, ExtraccionMultiEvento, ResultadoIntentGate } from '../../types/dominio/EventoCampo.js'
 import type { ContextoConversacion, ContextoOnboardingAgricultor, RespuestaOnboarding } from '../../types/dominio/Onboarding.js'
-import type { ContextoProspecto, RespuestaProspecto } from '../../types/dominio/Prospecto.js'
 import type { ResumenSemanal, EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import type { ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
 import type { ClasificacionExcel, EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
@@ -28,7 +27,6 @@ export interface IWasagroLLM {
   extraerDocumentoOCR(base64: string, mimeType: string, contexto: ContextoOCR, traceId: string): Promise<ResultadoOCR>
   onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding>
   onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding>
-  atenderProspecto(mensaje: string, contexto: ContextoProspecto, traceId: string): Promise<RespuestaProspecto>
   resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal>
   extraerDatosSDR(texto: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR>
   redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string): Promise<string>

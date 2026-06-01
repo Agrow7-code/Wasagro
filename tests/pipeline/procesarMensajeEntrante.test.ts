@@ -96,16 +96,6 @@ const extractedEventoMock: EventoCampoExtraido = {
   pregunta_sugerida: null,
 }
 
-const prospectoResponseMock = {
-  paso_completado: 1,
-  siguiente_paso: 2,
-  tipo_contacto: 'sin_clasificar' as const,
-  datos_extraidos: { nombre: null, finca_nombre: null, cultivo_principal: null, pais: null, tamanio_aproximado: null, interes_demo: false, horario_preferido: null },
-  enviar_link_demo: false,
-  guardar_en_prospectos: false,
-  mensaje_para_usuario: 'Hola, soy Wasagro. ¿Cuál es tu nombre?',
-}
-
 const onboardingAdminResponseMock = {
   paso_completado: 1, siguiente_paso: 2,
   datos_extraidos: { nombre: null, rol: null, consentimiento: null, finca_nombre: null, finca_ubicacion_texto: null, finca_lat: null, finca_lng: null, cultivo_principal: null, pais: null, lotes: [] },
@@ -129,7 +119,6 @@ function crearSenderMock() {
 function crearLlmMock(extraido: EventoCampoExtraido = extractedEventoMock) {
   return {
     extraerEvento: vi.fn().mockResolvedValue(extraido),
-    atenderProspecto: vi.fn().mockResolvedValue(prospectoResponseMock),
     onboardarAdmin: vi.fn().mockResolvedValue(onboardingAdminResponseMock),
     onboardarAgricultor: vi.fn().mockResolvedValue(onboardingAgricultorResponseMock),
     corregirTranscripcion: vi.fn(),
