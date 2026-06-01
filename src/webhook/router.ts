@@ -3,17 +3,35 @@ import type { Context } from 'hono'
 import { langfuse } from '../integrations/langfuse.js'
 import { getBoss } from '../workers/pgBoss.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
+import { setIfNotExists } from '../integrations/redis.js'
 
-// In-memory dedup: Evolution API sends the same webhook 6-8 times per message.
-// singletonKey in pg-boss has a race condition when requests arrive simultaneously.
-// This set prevents enqueuing the same wamid more than once per 60s window.
-const recentWamids = new Set<string>()
-const WAMID_TTL_MS = 60_000
-function isDuplicate(wamid: string): boolean {
-  if (recentWamids.has(wamid)) return true
-  recentWamids.add(wamid)
-  setTimeout(() => recentWamids.delete(wamid), WAMID_TTL_MS)
-  return false
+// Cross-instance dedup for incoming webhooks. Evolution API delivers the same
+// webhook 6-8 times per message; pg-boss singletonKey has a race window when
+// the duplicates arrive within milliseconds of each other AND land on different
+// process instances (Railway autoscales). An in-memory Set only deduped per
+// instance, so two instances each processed the message once -> 'doble mensaje'
+// observed in production with real clients.
+//
+// Now: Redis SET NX EX 60. Atomic, shared across the fleet, single source of
+// truth. Falls back to an in-memory Set if Redis is unreachable so the webhook
+// keeps working (degrades to the old buggy behavior rather than dropping
+// messages entirely).
+const WAMID_TTL_S = 60
+const WAMID_TTL_MS = WAMID_TTL_S * 1000
+const recentWamidsLocal = new Set<string>()
+
+async function isDuplicate(wamid: string): Promise<boolean> {
+  try {
+    const wasSet = await setIfNotExists(`wamid:${wamid}`, WAMID_TTL_S)
+    return !wasSet  // wasSet=true means we just inserted = first time; false means it already existed = duplicate
+  } catch {
+    // Redis hiccup: fall back to per-instance in-memory dedup. Imperfect across
+    // instances but better than processing the same message N times.
+    if (recentWamidsLocal.has(wamid)) return true
+    recentWamidsLocal.add(wamid)
+    setTimeout(() => recentWamidsLocal.delete(wamid), WAMID_TTL_MS)
+    return false
+  }
 }
 
 let adapter: IWhatsAppAdapter
@@ -55,7 +73,7 @@ webhookRouter.post('/whatsapp', async (c) => {
   // Parsear mensaje y encolar trabajo en pg-boss antes de retornar 200
   const msg = adapter.parsearMensaje(payload)
   if (msg) {
-    if (isDuplicate(msg.wamid)) {
+    if (await isDuplicate(msg.wamid)) {
       console.log(`[webhook] wamid duplicado ignorado: ${msg.wamid}`)
       return c.json({ status: 'received' }, 200)
     }
