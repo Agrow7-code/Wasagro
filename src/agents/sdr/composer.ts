@@ -18,6 +18,10 @@ export interface ComposeResult {
   text: string
 }
 
+// TODO [FASE-A] composer: disculpa innecesaria en turno de discovery
+// Causa: instrucción de confirmar datos aunque no haya pregunta previa en el turno anterior
+// Fix: template determinístico de discovery en composer.ts (Fase A)
+//
 // Returns the rendered message + the template key used (for telemetry).
 // Returns null when no template applies — caller uses LLM.
 export function compose(state: SDRFsmState, intent: Intent, ctx: ConvContext): ComposeResult | null {

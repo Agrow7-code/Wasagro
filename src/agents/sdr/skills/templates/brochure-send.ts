@@ -9,6 +9,9 @@ import { segmentoToBrochureSlug } from '../../roleDetector.js'
 // The URL base is WASAGRO_BROCHURE_URL (env). Default kept for the unlikely
 // case the var disappears in prod.
 
+// TODO [FASE-A]: mensaje duplicado post-brochure
+// Causa: posible worker duplicado o singletonKey no cubre este path de Evolution API
+// Investigar después de que Redis wiring esté estable
 export function brochureSend({ ctx }: { ctx: ConvContext }): string {
   const slug = segmentoToBrochureSlug(ctx.segmento)
   const base = process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'

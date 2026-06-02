@@ -82,6 +82,9 @@ export function fsmStateToLegacySDRNode(state: SDRFsmState): string {
   }
 }
 
+// TODO [H1-expansion]: cultivos fuera de scope no se comunican al prospecto
+// Si cultivo ∉ ['cacao','banano','cafe','pina'] → responder honestamente:
+// "Actualmente optimizado para cacao y banano — te anotamos para hortalizas cuando esté listo"
 function mapCultivo(c: string | null | undefined): Cultivo | null {
   if (!c) return null
   const lower = c.toLowerCase()
