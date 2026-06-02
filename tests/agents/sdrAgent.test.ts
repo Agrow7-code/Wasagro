@@ -197,10 +197,60 @@ describe('handleFounderApproval', () => {
     const result = await handleFounderApproval(mockMsg, 'msg-1', 'trace-1', mockSender)
     expect(result).toBe(false)
   })
+
+  // FIX-7: el constraint de sdr_interacciones.action_taken (migration 40) debe
+  // aceptar 'founder_override' — sin esa migracion el insert fallaba en prod.
+  it('escribe action_taken=founder_override cuando el founder envia texto custom', async () => {
+    vi.mocked(queries.getSDRProspectosPendingApproval).mockResolvedValue([{
+      ...prospectoBase,
+      status: 'await_approval',
+      deal_brief: { draft_message: 'Draft generado' },
+    }])
+
+    const founderOverrideMsg: NormalizedMessage = {
+      ...mockMsg,
+      texto: 'Mejor decile que lo agendemos para la semana que viene, yo le explico en persona.',
+    }
+
+    await handleFounderApproval(founderOverrideMsg, 'msg-1', 'trace-1', mockSender)
+
+    const interactionCall = vi.mocked(queries.saveSDRInteraccion).mock.calls.at(-1)
+    expect(interactionCall, 'saveSDRInteraccion was not called').toBeDefined()
+    const row = interactionCall![0] as { action_taken: string }
+    expect(row.action_taken).toBe('founder_override')
+  })
 })
 
 describe('handleMeetingConfirmation', () => {
   it('retorna true cuando detecta agendamiento', () => {
     expect(detectarConfirmacionReunion('ya agendé para el lunes')).toBe(true)
+  })
+
+  // FIX-7: el constraint de sdr_interacciones.action_taken (migration 40) debe
+  // aceptar 'brochure_sent' — el path de wants_brochure dentro de
+  // handleMeetingConfirmation fallaba en prod sin migracion.
+  it('escribe action_taken=brochure_sent cuando el prospecto pide el brochure', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({
+      ...prospectoBase,
+      status: 'piloto_propuesto',
+      turns_total: 4,
+    })
+
+    const llmConBrochure = {
+      ...mockLLM,
+      clasificarIntencionSDR: vi.fn().mockResolvedValue('wants_brochure'),
+    } as any
+
+    const wantsBrochureMsg: NormalizedMessage = {
+      ...mockMsg,
+      texto: 'Prefiero leerlo primero, mandame el brochure',
+    }
+
+    await handleMeetingConfirmation(wantsBrochureMsg, 'msg-1', 'trace-1', mockSender, llmConBrochure)
+
+    const interactionCall = vi.mocked(queries.saveSDRInteraccion).mock.calls.at(-1)
+    expect(interactionCall, 'saveSDRInteraccion was not called').toBeDefined()
+    const row = interactionCall![0] as { action_taken: string }
+    expect(row.action_taken).toBe('brochure_sent')
   })
 })
