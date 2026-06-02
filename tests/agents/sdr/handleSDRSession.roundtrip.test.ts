@@ -7,7 +7,7 @@
 // After Fases 0-A-B-C-E this same exchange MUST produce:
 //
 //   client: "Ya?"
-//   bot:    closeOffer template — '¿Te parece si agendamos 10 minutitos para
+//   bot:    closeOffer template — '¿Te parece si agendamos 30 minutos para
 //           mostrarte cómo se ve, o preferís que te mande el brochure con la
 //           info para tu segmento? 📅'
 //   bot:    calendarLink template — '📅 Puedes elegir el horario aquí: <URL>'
@@ -258,7 +258,7 @@ describe('E2E roundtrip — "Ya?" after pitch (real-client regression)', () => {
     // closeOffer text + calendarLink follow-up — 2 messages.
     expect(sender.enviarTexto).toHaveBeenCalledTimes(2)
     const fullConversation = sent.join('\n')
-    expect(fullConversation).toMatch(/10 minutitos/i)
+    expect(fullConversation).toMatch(/30 minutos/i)
     expect(fullConversation).toMatch(/brochure/i)
     expect(fullConversation).toContain('https://cal.example/book')
 

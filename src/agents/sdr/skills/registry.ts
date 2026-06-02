@@ -21,6 +21,7 @@ import { calendarLink } from './templates/calendar-link.js'
 import { meetingConfirm } from './templates/meeting-confirm.js'
 import { gracefulExit } from './templates/graceful-exit.js'
 import { willBookLater } from './templates/will-book-later.js'
+import { audioAck } from './templates/audio-ack.js'
 
 export interface TemplateInput {
   ctx: ConvContext
@@ -36,6 +37,7 @@ export const TEMPLATES = {
   meetingConfirm,
   gracefulExit,
   willBookLater,
+  audioAck,
 } as const
 
 export type TemplateKey = keyof typeof TEMPLATES

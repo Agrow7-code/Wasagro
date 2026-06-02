@@ -249,7 +249,7 @@ export function closeOfferTemplate(ctx: ConvContext): string {
   guardClose(ctx)
   return (
     `Lo que te conté lo vivimos a diario con ${ctx.cultivo}. ` +
-    `¿Te parece si vemos 10 min en vivo o te mando el brochure para ${ctx.segmento}?`
+    `¿Te parece si vemos 30 minutos en vivo o te mando el brochure para ${ctx.segmento}?`
   )
 }
 

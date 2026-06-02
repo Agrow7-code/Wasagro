@@ -127,6 +127,7 @@ export async function handleSDRSession(
       traceId,
       llm,
       sender,
+      mediaType: msg.tipo,
     }
     if (client) routerCtx.client = client
     if (adapter) routerCtx.adapter = adapter
@@ -338,7 +339,7 @@ export async function handleMeetingConfirmation(
       const bookingUrl = process.env['DEMO_BOOKING_URL']
       const followUp = bookingUrl
         ? `No estoy seguro de haberte entendido. Si quieres agendar la demostración, puedes elegir el horario directamente aquí: ${bookingUrl} ⏰`
-        : '¿Cuándo tienes 10 minutos disponibles? Dime el día y la hora que mejor te quede.'
+        : '¿Cuándo tienes 30 minutos disponibles? Dime el día y la hora que mejor te quede.'
       await sender.enviarTexto(msg.from, followUp)
     }
 

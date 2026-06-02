@@ -18,7 +18,7 @@ describe('closeOffer', () => {
   it('includes the prospect segmento when known', () => {
     const text = closeOffer({ ctx: ctx({ segmento: 'agricultor' }) })
     expect(text).toContain('agricultor')
-    expect(text).toMatch(/10 minutitos/i)
+    expect(text).toMatch(/30 minutos/i)
   })
 
   it('falls back to "tu segmento" when segmento is desconocido', () => {

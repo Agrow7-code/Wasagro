@@ -17,6 +17,8 @@ import {
 import { detectRoleFromText } from './roleDetector.js'
 import { getClassifier, type IIntentClassifier } from './classifier.js'
 import { compose, composeCalendarLink } from './composer.js'
+import { TEMPLATES } from './skills/registry.js'
+import { fsmStateToLegacySDRNode } from './contextStore.js'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
 
 export interface SDRRouterContext {
@@ -30,6 +32,9 @@ export interface SDRRouterContext {
   // classifier (tests inject a mock). Caller provides one of the two.
   adapter?: ILLMAdapter
   classifier?: IIntentClassifier
+  // FIX-3: incoming WhatsApp message type. Lets the router fast-path audio
+  // and image without invoking the text classifier on a placeholder string.
+  mediaType?: 'texto' | 'audio' | 'imagen' | 'ubicacion' | 'documento' | 'otro'
 }
 
 const MAX_SDR_TURNS = 4
@@ -55,6 +60,19 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
   const initial = await loadHydratedContext(prospecto)
   let ctx = initial.ctx
   const { sourceContext, statusActual } = initial.legacy
+
+  // ── FIX-3: Audio short-circuit. ───────────────────────────────────────────
+  //    STT (Deepgram, D4) lives in the field agent path, not here. An audio
+  //    in SDR context is a strong interest signal — the prospect is showing
+  //    they grasp the use case. Skip the text classifier (it would chew on a
+  //    placeholder string and either crash or return garbage, then the catch
+  //    in handleSDRSession would emit "tuve un problemita" — the bug the user
+  //    reported on 2026-06-01). Force intent=interest, render the audioAck
+  //    template, and run the same persist + send pipeline as the regular path.
+  if (rctx.mediaType === 'audio') {
+    await handleAudioInbound(rctx, ctx, initial)
+    return
+  }
 
   // ── 1. Global Fallback Check (Semantic Caching via Redis, no LLM) ─────────
   const cachedFallback = await getCachedContext(`faq:${textoOriginal.toLowerCase().trim()}`)
@@ -293,5 +311,62 @@ ESTRICTO:
   // Persist session-scoped fields (intentHistory, lastBotMessage, fsmState, etc.)
   // to Redis with TTL 24h. Next turn's loadHydratedContext() picks them up.
   // Failure here is non-fatal — graceful degradation documented in ADR-009.
+  await persistSessionState(ctx)
+}
+
+// ─── Audio inbound handler (FIX-3) ───────────────────────────────────────────
+// Pulled out so the audio path doesn't share scope with the long routeSDRNode
+// body — separation of concerns + easier to unit-test.
+
+async function handleAudioInbound(
+  rctx: SDRRouterContext,
+  ctxIn: ConvContext,
+  initial: Awaited<ReturnType<typeof loadHydratedContext>>,
+): Promise<void> {
+  const { traceId, sender, client } = rctx
+  const trace = langfuse.trace({ id: traceId })
+
+  // The classifier never runs for audio — we synthesize the classification
+  // directly. Confidence 0.85 mirrors the user spec: audio in SDR context is
+  // a strong but not certain signal of interest (it could also be a misclick).
+  const classification = { intent: 'interest' as Intent, confidence: 0.85 }
+  const respuesta = TEMPLATES.audioAck({ ctx: ctxIn })
+
+  // Reduce with the synthesized intent. FSM transitions follow the same
+  // table as text: pitch_sent + interest -> closing, etc.
+  const ctx = reduceContext(ctxIn, {
+    classification,
+    extraction: {},
+    botMessage: respuesta,
+  })
+
+  trace.event({
+    name:  'sdr_audio_received',
+    level: 'DEFAULT',
+    input: {
+      fsmStateBefore: ctxIn.fsmState,
+      fsmStateAfter:  ctx.fsmState,
+      datosConocidos: ctxIn.datosConocidos,
+    },
+  })
+
+  // Persist legacy row. action_taken uses the legacy SDR-node form because the
+  // sdr_interacciones CHECK constraint (migration 31/32) only knows the legacy
+  // values. fsmStateToLegacySDRNode handles every fsmState -> legal value.
+  const updateData = computeLegacyUpdate(ctx, initial)
+  await updateSDRProspecto(ctx.prospectId, updateData, client)
+
+  await sender.enviarTexto(ctx.phone, respuesta)
+
+  await saveSDRInteraccion({
+    prospecto_id: ctx.prospectId,
+    phone: ctx.phone,
+    turno: ctx.turnCount,
+    tipo: 'inbound',
+    contenido: '[audio]',
+    action_taken: fsmStateToLegacySDRNode(ctx.fsmState),
+    langfuse_trace_id: traceId,
+  }, client)
+
   await persistSessionState(ctx)
 }
