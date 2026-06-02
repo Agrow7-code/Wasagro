@@ -286,6 +286,14 @@ export function FincaSetupView() {
     }
     mapRef.current?.setView(coords, 16)
     setMapReady(true)
+    setFincaCenter(coords)
+    if (finca_id) {
+      fetch(`/api/finca/${finca_id}/coordenadas`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: coords[0], lng: coords[1] }),
+      }).catch(() => {})
+    }
   }
 
   function startDrawing() {
