@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { ILLMAdapter, LLMGeneracionOpciones } from '../../../src/integrations/llm/ILLMAdapter.js'
-import { IntentClassifier, resetClassifierCache } from '../../../src/agents/sdr/classifier.js'
+import {
+  IntentClassifier,
+  resetClassifierCache,
+  applyConfidenceThreshold,
+  type IntentClassification,
+} from '../../../src/agents/sdr/classifier.js'
 import { createDefaultContext, type ConvContext } from '../../../src/agents/sdr/context.js'
+import { CONFIDENCE_THRESHOLD } from '../../../src/constants/intents.js'
 
 // ─── Adapter double ──────────────────────────────────────────────────────────
 // Captures call arguments so tests can assert what the classifier sent and
@@ -103,9 +109,12 @@ describe('IntentClassifier — retry-with-feedback', () => {
   })
 
   it('first attempt invalid enum → retry with feedback → second valid', async () => {
+    // Note: confidence 0.8 (above CONFIDENCE_THRESHOLD=0.7) so the threshold
+    // validator doesn't interfere with the retry assertion. This test is
+    // about retry-with-feedback, not threshold.
     const { adapter, calls } = makeAdapter([
       JSON.stringify({ intent: 'totally_not_a_real_intent', confidence: 0.9 }),
-      JSON.stringify({ intent: 'neutro', confidence: 0.6 }),
+      JSON.stringify({ intent: 'neutro', confidence: 0.8 }),
     ])
     const classifier = new IntentClassifier({ adapter })
     const result = await classifier.classify('hmm', ctxBase(), 'trace-r2')
@@ -191,5 +200,100 @@ describe('IntentClassifier — ConvContext propagation', () => {
     await classifier.classify('hmm', ctxBase({ lastBotMessage: longMsg }), 'trace-c3')
     // userContent definitely contains some of the bot message
     expect(calls[0]?.userContent.length).toBeGreaterThan(100)
+  })
+})
+
+// ─── Confidence threshold (Fase D) ───────────────────────────────────────────
+// CONFIDENCE_THRESHOLD = 0.7. Anything below collapses to 'other' so the FSM
+// never takes a high-stakes branch on a guess. The pre-downgrade intent goes
+// into a LangFuse event for the eval dataset.
+
+describe('applyConfidenceThreshold — pure helper', () => {
+  const sample = (intent: IntentClassification['intent'], confidence: number): IntentClassification => ({
+    intent, confidence, reason: 'test',
+  })
+
+  it('high confidence + non-other → passes through unchanged', () => {
+    const out = applyConfidenceThreshold(sample('advance', 0.9))
+    expect(out.downgraded).toBe(false)
+    expect(out.result.intent).toBe('advance')
+    expect(out.result.confidence).toBe(0.9)
+    expect(out.rawIntent).toBe('advance')
+  })
+
+  it('low confidence + non-other → downgrades to other, preserves confidence + rawIntent', () => {
+    const out = applyConfidenceThreshold(sample('advance', 0.5))
+    expect(out.downgraded).toBe(true)
+    expect(out.result.intent).toBe('other')
+    expect(out.result.confidence).toBe(0.5)
+    expect(out.rawIntent).toBe('advance')
+    expect(out.result.reason).toContain('downgraded')
+    expect(out.result.reason).toContain("'advance'")
+  })
+
+  it('low confidence + already other → no double-downgrade flag', () => {
+    const out = applyConfidenceThreshold(sample('other', 0.3))
+    expect(out.downgraded).toBe(false)
+    expect(out.result.intent).toBe('other')
+    expect(out.result.confidence).toBe(0.3)
+  })
+
+  it('confidence exactly at threshold (0.7) → no downgrade (strict <)', () => {
+    const out = applyConfidenceThreshold(sample('advance', CONFIDENCE_THRESHOLD))
+    expect(out.downgraded).toBe(false)
+    expect(out.result.intent).toBe('advance')
+  })
+
+  it('confidence just below threshold (0.69) → downgrades', () => {
+    const out = applyConfidenceThreshold(sample('wants_brochure', 0.69))
+    expect(out.downgraded).toBe(true)
+    expect(out.result.intent).toBe('other')
+  })
+
+  it('respects custom threshold parameter', () => {
+    // Pass an explicit 0.9 threshold — 0.8 should downgrade now.
+    const out = applyConfidenceThreshold(sample('booked', 0.8), 0.9)
+    expect(out.downgraded).toBe(true)
+    expect(out.result.intent).toBe('other')
+  })
+})
+
+describe('IntentClassifier — confidence threshold wiring', () => {
+  it('LLM returns intent=advance confidence=0.6 → classify() returns other (downgraded)', async () => {
+    const { adapter } = makeAdapter([
+      JSON.stringify({ intent: 'advance', confidence: 0.6, reason: 'mild signal' }),
+    ])
+    const classifier = new IntentClassifier({ adapter })
+    const ctx = ctxBase({ fsmState: 'pitch_sent', lastBotAction: 'sent_pitch' })
+
+    const result = await classifier.classify('mmm', ctx, 'trace-th-1')
+
+    // Downstream FSM must NOT see 'advance' on a 0.6 confidence — that path
+    // would prematurely transition pitch_sent → closing.
+    expect(result.intent).toBe('other')
+    expect(result.confidence).toBe(0.6)
+    expect(result.reason).toContain('downgraded')
+  })
+
+  it('LLM returns intent=objection_price confidence=0.95 → not downgraded', async () => {
+    const { adapter } = makeAdapter([
+      JSON.stringify({ intent: 'objection_price', confidence: 0.95 }),
+    ])
+    const classifier = new IntentClassifier({ adapter })
+    const result = await classifier.classify('cuánto cuesta?', ctxBase(), 'trace-th-2')
+    expect(result.intent).toBe('objection_price')
+    expect(result.confidence).toBe(0.95)
+  })
+
+  it('retry path also applies threshold (attempt 2 returns low confidence)', async () => {
+    const { adapter } = makeAdapter([
+      'totally invalid response',                                              // attempt 1: parse fail
+      JSON.stringify({ intent: 'declined', confidence: 0.5 }),                 // attempt 2: low confidence
+    ])
+    const classifier = new IntentClassifier({ adapter })
+    const result = await classifier.classify('eh', ctxBase(), 'trace-th-3')
+    // Retry succeeded at schema level, but the threshold then downgrades it.
+    expect(result.intent).toBe('other')
+    expect(result.confidence).toBe(0.5)
   })
 })

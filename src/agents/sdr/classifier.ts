@@ -16,7 +16,7 @@
 //             the branch.
 
 import { z } from 'zod'
-import { IntentEnum, type Intent } from '../../constants/intents.js'
+import { IntentEnum, CONFIDENCE_THRESHOLD, type Intent } from '../../constants/intents.js'
 import type { ConvContext } from './context.js'
 import { buildContextoString } from './contextStore.js'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
@@ -31,6 +31,40 @@ export const ClassifierOutputSchema = z.object({
 })
 
 export type IntentClassification = z.infer<typeof ClassifierOutputSchema>
+
+// ─── Confidence threshold validator (Fase D) ─────────────────────────────────
+// Pure helper. The system prompt asks the LLM to prefer 'other' on low
+// confidence, but LLMs are unreliable about following meta-rules — we enforce
+// the threshold in code so the FSM never takes a high-stakes branch on a
+// guess. Pre-downgrade (intent, confidence) is preserved in the return tuple
+// so classify() can emit a LangFuse event for the eval dataset.
+//
+// Threshold is strict-less-than: confidence === 0.7 passes. CONFIDENCE_THRESHOLD
+// is the single source of truth, defined in constants/intents.ts.
+
+export interface ThresholdResult {
+  result: IntentClassification
+  downgraded: boolean
+  rawIntent: Intent
+}
+
+export function applyConfidenceThreshold(
+  classification: IntentClassification,
+  threshold: number = CONFIDENCE_THRESHOLD,
+): ThresholdResult {
+  if (classification.confidence < threshold && classification.intent !== 'other') {
+    return {
+      result: {
+        intent: 'other',
+        confidence: classification.confidence,
+        reason: `downgraded from '${classification.intent}' (confidence ${classification.confidence} < ${threshold})`,
+      },
+      downgraded: true,
+      rawIntent: classification.intent,
+    }
+  }
+  return { result: classification, downgraded: false, rawIntent: classification.intent }
+}
 
 // ─── System prompt (compact, with inline few-shot) ───────────────────────────
 // Kept short on purpose — Fase E target is < 200 tokens per prompt. The few-shot
@@ -124,11 +158,12 @@ export class IntentClassifier implements IIntentClassifier {
         temperature: 0,
       })
       const parsed = this.#parseOrThrow(raw)
+      const validated = this.#applyThresholdWithTelemetry(parsed, message, ctx, trace)
       generation.end({
-        output: parsed,
+        output: validated,
         metadata: { latencia_ms: Date.now() - startedAt, attempt: 1 },
       })
-      return parsed
+      return validated
     } catch (err) {
       firstErr = err
     }
@@ -149,16 +184,17 @@ export class IntentClassifier implements IIntentClassifier {
         temperature: 0,
       })
       const parsed2 = this.#parseOrThrow(raw2)
+      const validated2 = this.#applyThresholdWithTelemetry(parsed2, message, ctx, trace)
       trace.event({
         name: 'sdr_classifier_retry_recovered',
         level: 'DEFAULT',
         input: { firstErr: String(firstErr) },
       })
       generation.end({
-        output: parsed2,
+        output: validated2,
         metadata: { latencia_ms: Date.now() - startedAt, attempt: 2, recovered: true },
       })
-      return parsed2
+      return validated2
     } catch (secondErr) {
       // Fallback with full telemetry
       const fallback: IntentClassification = { intent: 'other', confidence: 0, reason: 'classifier exhausted retries' }
@@ -191,6 +227,32 @@ export class IntentClassifier implements IIntentClassifier {
       '',
       `Mensaje del prospecto a clasificar: "${message}"`,
     ].join('\n')
+  }
+
+  // Applies the confidence threshold and emits a LangFuse event on downgrade so
+  // the low-confidence cases land in the eval dataset (Fase D — telemetry of
+  // borderline classifications is what feeds the threshold-tuning work later).
+  #applyThresholdWithTelemetry(
+    parsed: IntentClassification,
+    message: string,
+    ctx: ConvContext,
+    trace: ReturnType<typeof langfuse.trace>,
+  ): IntentClassification {
+    const { result, downgraded, rawIntent } = applyConfidenceThreshold(parsed)
+    if (downgraded) {
+      trace.event({
+        name:  'sdr_classifier_low_confidence_downgrade',
+        level: 'DEFAULT',
+        input: {
+          rawIntent,
+          confidence: parsed.confidence,
+          threshold: CONFIDENCE_THRESHOLD,
+          message:   message.slice(0, 200),
+          ctxSnapshot: this.#snapshotCtx(ctx),
+        },
+      })
+    }
+    return result
   }
 
   #parseOrThrow(raw: string): IntentClassification {
