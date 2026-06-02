@@ -285,6 +285,17 @@ describe('E2E roundtrip — "Ya?" after pitch (real-client regression)', () => {
 
     // ── Gate 6: interaction was logged for audit ──
     expect(saveSDRInteraccion).toHaveBeenCalled()
+
+    // ── Gate 7 (FIX-6): action_taken must be a legacy SDRNode value, never
+    //    the new SDRFsmStateEnum string. Migration 32's CHECK constraint only
+    //    accepts triage|discovery|pitch|close|global_fallback (+ ops actions);
+    //    'closing' would fail the insert in prod. Bug pre-Fase-A — the router
+    //    was passing nextFsmState raw.
+    const LEGAL_LEGACY_NODES = new Set(['triage', 'discovery', 'pitch', 'close', 'global_fallback'])
+    const interactionCall = vi.mocked(saveSDRInteraccion).mock.calls.at(-1)
+    const interactionRow = interactionCall![0] as { action_taken: string }
+    expect(LEGAL_LEGACY_NODES.has(interactionRow.action_taken)).toBe(true)
+    expect(interactionRow.action_taken).toBe('close')
   })
 })
 

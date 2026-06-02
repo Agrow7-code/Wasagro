@@ -304,7 +304,12 @@ ESTRICTO:
     turno: ctx.turnCount,
     tipo: 'inbound',
     contenido: textoOriginal,
-    action_taken: nextFsmState,
+    // The sdr_interacciones.action_taken CHECK constraint (migration 32) only
+    // accepts the legacy SDRNode values (triage/discovery/pitch/close/...). The
+    // new SDRFsmStateEnum has 'pitch_sent', 'closing', 'brochure_sent', etc.
+    // which would FAIL the insert in prod. fsmStateToLegacySDRNode() collapses
+    // the new enum back to the legal legacy form.
+    action_taken: fsmStateToLegacySDRNode(nextFsmState),
     langfuse_trace_id: traceId,
   }, client)
 
