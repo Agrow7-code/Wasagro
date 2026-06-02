@@ -7,7 +7,7 @@
 // this template does not consume ctx.
 
 export function calendarLink(_: { ctx?: unknown; vars?: unknown }): string {
-  const url = process.env['DEMO_BOOKING_URL']
+  const url = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
   return url
     ? `📅 Puedes elegir el horario aquí: ${url}`
     : '¿Qué día y hora te queda mejor la próxima semana? 📅'

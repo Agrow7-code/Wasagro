@@ -24,7 +24,13 @@ Sistema operativo de campo agrícola AI-first. Captura datos en fincas via Whats
 
 | Variable | Descripción | Impacto si falta |
 |---|---|---|
-| `DEMO_BOOKING_URL` | URL de Calendly para demos (ej. `https://calendly.com/...`) | No se envían links de demo |
+| `DEMO_BOOKING_URL` | URL de Calendly para demos (ej. `https://calendly.com/...`) | No se envían links de demo. **Deprecated** — usar `CALCOM_BOOKING_URL` |
+| `CALCOM_BOOKING_URL` | URL de Cal.com para agendar demos (reemplaza `DEMO_BOOKING_URL`) | No se envían links de demo |
+| `CALCOM_WEBHOOK_SECRET` | Secret para verificar firma de webhooks de Cal.com | Webhook de Cal.com rechazado (403) |
+| `CALCOM_API_KEY` | API key de Cal.com (prefijo `cal_`) | No se pueden crear webhooks via API |
+| `FOUNDER_PHONE` | Teléfono del founder para notificaciones de booking | No se notifica al founder por WhatsApp |
+| `FOUNDER_EMAIL` | Email del founder (default: `wasagro@proton.me`) | Se usa el default |
+| `RESEND_API_KEY` | API key de Resend para notificaciones email | No se envía email de booking al founder |
 | `REPORTE_SECRET` | Secret para `POST /reportes/semanal` | Endpoint sin protección |
 | `LANGFUSE_SECRET_KEY` | Clave secreta LangFuse | Sin observabilidad de LLM |
 | `LANGFUSE_PUBLIC_KEY` | Clave pública LangFuse | Sin observabilidad de LLM |

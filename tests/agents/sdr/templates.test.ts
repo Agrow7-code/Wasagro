@@ -101,19 +101,31 @@ describe('brochureSend', () => {
 // ─── calendarLink ────────────────────────────────────────────────────────────
 
 describe('calendarLink', () => {
-  const ORIGINAL_URL = process.env['DEMO_BOOKING_URL']
+  const ORIGINAL_DEMO = process.env['DEMO_BOOKING_URL']
+  const ORIGINAL_CALCOM = process.env['CALCOM_BOOKING_URL']
 
   afterEach(() => {
-    if (ORIGINAL_URL === undefined) delete process.env['DEMO_BOOKING_URL']
-    else process.env['DEMO_BOOKING_URL'] = ORIGINAL_URL
+    if (ORIGINAL_DEMO === undefined) delete process.env['DEMO_BOOKING_URL']
+    else process.env['DEMO_BOOKING_URL'] = ORIGINAL_DEMO
+    if (ORIGINAL_CALCOM === undefined) delete process.env['CALCOM_BOOKING_URL']
+    else process.env['CALCOM_BOOKING_URL'] = ORIGINAL_CALCOM
   })
 
-  it('returns the booking URL when DEMO_BOOKING_URL is set', () => {
-    process.env['DEMO_BOOKING_URL'] = 'https://cal.com/x'
-    expect(calendarLink({})).toContain('https://cal.com/x')
+  it('returns CALCOM_BOOKING_URL when set (takes priority over DEMO_BOOKING_URL)', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
+    process.env['DEMO_BOOKING_URL'] = 'https://calendly.com/old'
+    expect(calendarLink({})).toContain('https://cal.com/wasagro/demo')
+    expect(calendarLink({})).not.toContain('calendly')
   })
 
-  it('falls back to question when DEMO_BOOKING_URL is missing', () => {
+  it('falls back to DEMO_BOOKING_URL when CALCOM_BOOKING_URL is not set', () => {
+    delete process.env['CALCOM_BOOKING_URL']
+    process.env['DEMO_BOOKING_URL'] = 'https://calendly.com/old'
+    expect(calendarLink({})).toContain('https://calendly.com/old')
+  })
+
+  it('falls back to question when neither is set', () => {
+    delete process.env['CALCOM_BOOKING_URL']
     delete process.env['DEMO_BOOKING_URL']
     expect(calendarLink({})).toMatch(/qué día y hora/i)
   })

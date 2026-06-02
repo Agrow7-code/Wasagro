@@ -309,6 +309,7 @@ ESTRICTO:
   if (requires_founder_approval) {
     updateData.status = 'piloto_propuesto'
     updateData.founder_notified_at = new Date().toISOString()
+    updateData.calendar_link_sent_at = new Date().toISOString()
     updateData.deal_brief = {
       draft_message: respuesta,
       fincas_en_cartera: ctx.fincasEstimadas,
@@ -348,6 +349,23 @@ ESTRICTO:
   // to Redis with TTL 24h. Next turn's loadHydratedContext() picks them up.
   // Failure here is non-fatal — graceful degradation documented in ADR-009.
   await persistSessionState(ctx)
+
+  // D24: Enqueue booking reminder (24h) when calendar link was sent
+  if (requires_founder_approval) {
+    try {
+      const { getBoss, isPgBossReady } = await import('../../workers/pgBoss.js')
+      if (isPgBossReady()) {
+        const boss = getBoss()
+        await boss.send('sdr-chaser', {
+          prospecto_id: ctx.prospectId,
+          expected_turn: ctx.turnCount,
+          reminder_type: 'booking',
+        }, { startAfter: 24 * 3600 })
+      }
+    } catch (bossErr) {
+      console.warn('[SDR] No se pudo encolar booking reminder:', bossErr)
+    }
+  }
 }
 
 // ─── Audio inbound handler (FIX-3) ───────────────────────────────────────────

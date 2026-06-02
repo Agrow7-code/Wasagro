@@ -57,7 +57,12 @@ function validarEnvVars(): void {
   }
 
   const opcionales: [string, string][] = [
-    ['DEMO_BOOKING_URL', 'sin esta variable no se podrán enviar links de demo'],
+    ['CALCOM_BOOKING_URL', 'sin esta variable no se podrán enviar links de demo (Cal.com)'],
+    ['CALCOM_WEBHOOK_SECRET', 'sin esta variable el webhook de Cal.com rechazará todas las peticiones'],
+    ['CALCOM_API_KEY', 'sin esta variable no se puede crear/consultar bookings via API'],
+    ['FOUNDER_PHONE', 'sin esta variable no se notificará al founder por WhatsApp cuando se confirme un booking'],
+    ['FOUNDER_EMAIL', 'sin esta variable no se notificará al founder por email (fallback: wasagro@proton.me)'],
+    ['DEMO_BOOKING_URL', 'fallback si CALCOM_BOOKING_URL no está configurado (link estático de Calendly)'],
     ['SUPABASE_ANON_KEY', 'endpoints autenticados usarán service_role en vez de RLS'],
     ['LANGFUSE_SECRET_KEY', 'sin observabilidad LangFuse'],
     ['LANGFUSE_PUBLIC_KEY', 'sin observabilidad LangFuse'],

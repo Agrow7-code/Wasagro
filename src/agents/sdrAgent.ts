@@ -206,18 +206,22 @@ export async function handleFounderApproval(
     if (mensajeAlProspecto) {
       await sender.enviarTexto(prospecto['phone'] as string, mensajeAlProspecto)
 
-      if (isSi || !isNo) {
-        const bookingUrl = process.env['DEMO_BOOKING_URL']
-        const followUp = bookingUrl
-          ? `Perfecto — puedes agendar aquí: ${bookingUrl}`
-          : 'Perfecto — ¿cuándo tienes 20 minutos disponibles?'
-        await sender.enviarTexto(prospecto['phone'] as string, followUp)
-      }
+  if (isSi || !isNo) {
+    const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
+    const followUp = bookingUrl
+      ? `Perfecto — puedes agendar aquí: ${bookingUrl}`
+      : 'Perfecto — ¿cuándo tienes 20 minutos disponibles?'
+    await sender.enviarTexto(prospecto['phone'] as string, followUp)
+  }
 
       trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'], narrativa: prospecto['narrativa_asignada'] } })
     }
 
-    await updateSDRProspecto(prospecto['id'] as string, { status: nuevoStatus }, client)
+    const updatePayload: Record<string, unknown> = { status: nuevoStatus }
+  if ((isSi || !isNo) && (process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL'])) {
+    updatePayload.calendar_link_sent_at = new Date().toISOString()
+  }
+  await updateSDRProspecto(prospecto['id'] as string, updatePayload, client)
 
     await saveSDRInteraccion({
       prospecto_id: prospecto['id'],
@@ -235,9 +239,27 @@ export async function handleFounderApproval(
       ? `❌ Prospecto descartado.`
       : `✅ Tu mensaje fue enviado a ${(prospecto['nombre'] as string | null) ?? (prospecto['phone'] as string)}.`
 
-    await sender.enviarTexto(msg.from, founderConfirm)
-    trace.event({ name: 'sdr_founder_approval', input: { prospecto_id: prospecto['id'], action: actionTaken } })
-    await actualizarMensaje(mensajeId, { status: 'processed' })
+  await sender.enviarTexto(msg.from, founderConfirm)
+  trace.event({ name: 'sdr_founder_approval', input: { prospecto_id: prospecto['id'], action: actionTaken } })
+
+  // D24: Enqueue booking reminder (24h) when calendar link was sent
+  if ((isSi || !isNo) && (process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL'])) {
+    try {
+      const { getBoss, isPgBossReady } = await import('../workers/pgBoss.js')
+      if (isPgBossReady()) {
+        const boss = getBoss()
+        await boss.send('sdr-chaser', {
+          prospecto_id: prospecto['id'],
+          expected_turn: (prospecto['turns_total'] as number) + 1,
+          reminder_type: 'booking',
+        }, { startAfter: 24 * 3600 })
+      }
+    } catch (bossErr) {
+      console.warn('[SDR] No se pudo encolar booking reminder:', bossErr)
+    }
+  }
+
+  await actualizarMensaje(mensajeId, { status: 'processed' })
 
     return true
   } catch (err) {
@@ -343,8 +365,8 @@ export async function handleMeetingConfirmation(
       actionTaken = 'meeting_confirmed'
     } else {
       // Intent 'other' - Respuesta conversacional amigable con el link
-      const bookingUrl = process.env['DEMO_BOOKING_URL']
-      const followUp = bookingUrl
+  const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
+  const followUp = bookingUrl
         ? `No estoy seguro de haberte entendido. Si quieres agendar la demostración, puedes elegir el horario directamente aquí: ${bookingUrl} ⏰`
         : '¿Cuándo tienes 30 minutos disponibles? Dime el día y la hora que mejor te quede.'
       await sender.enviarTexto(msg.from, followUp)

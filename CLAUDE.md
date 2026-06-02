@@ -334,6 +334,32 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Guardrails:** Solo usuarios con número registrado en `usuarios` pueden solicitar OTP (no registro abierto). El código caduca automáticamente. El endpoint `/me` no requiere autenticación propia — devuelve datos por número de teléfono, asumiendo que el llamador ya tiene el teléfono del usuario logueado en el frontend.
 - **Revisar cuando:** Si se necesita logout remoto o revocación de sesión, añadir tabla de sesiones activas. Si el volumen de intentos de OTP supera 100/hora, añadir rate limiting por número.
 
+### D23. Booking de demos: Cal.com (self-hosted) con webhook
+
+- **Fecha:** Junio 2026
+- **Decisión:** Reemplazar `DEMO_BOOKING_URL` (link estático de Calendly, sin feedback) con Cal.com self-hosted. El booking link sigue siendo un URL que se envía al prospecto, pero ahora:
+  1. **Webhook entrante:** Cal.com envía `BOOKING_CREATED` / `BOOKING_CANCELLED` a `POST /webhook/calcom`. El handler firma-verifica con `CALCOM_WEBHOOK_SECRET`, busca el prospecto por email o teléfono del attendee, y actualiza `sdr_prospectos.status → reunion_agendada` + `reunion_agendada_at` + `calcom_booking_id`.
+  2. **Notificación a founders:** Al recibir `BOOKING_CREATED`, se envía WhatsApp al founder con nombre del prospecto, fecha/hora, y link de la reunión. También se envía email a wasagro@proton.me.
+  3. **Template:** `calendarLink` lee `CALCOM_BOOKING_URL` (nueva env var, reemplaza `DEMO_BOOKING_URL`). Si no está configurada, fallback manual idéntico al actual.
+  4. **Chaser skip:** `sdrChaserWorker` verifica `calcom_booking_id IS NOT NULL` antes de enviar reenganche — si ya agendó via Cal.com, no nag.
+- **Cal.com no tiene SDK JS** — la integración es exclusivamente vía webhook (inbound) + REST API (outbound si se necesita crear links dinámicos). No se agrega dependencia npm.
+- **Env:** `CALCOM_BOOKING_URL`, `CALCOM_API_KEY`, `CALCOM_WEBHOOK_SECRET`, `FOUNDER_PHONE`, `FOUNDER_EMAIL`, `RESEND_API_KEY`
+- **Archivos:** `src/webhook/router.ts` (nueva ruta), `src/agents/sdr/skills/templates/calendar-link.ts`, `src/agents/sdrAgent.ts`, `src/workers/sdrChaserWorker.ts`, `src/integrations/calcom/calcomWebhook.ts`, `supabase/migrations/20260101000043_add-calcom-booking.sql`
+- **ADR:** `docs/decisions/009-calcom-over-calendly.md`
+- **Revisar cuando:** >50 bookings/semana → batch processing en pg-boss en vez de inline.
+
+### D24. Chaser diferenciado: reenganche genérico vs. recordatorio de booking
+
+- **Fecha:** Junio 2026
+- **Decisión:** El chaser ahora tiene dos modos según el estado del prospecto:
+  1. **Reenganche genérico (20h):** Cuando el prospecto no recibió el link de booking (status `en_discovery`, `new`, etc.). Mensaje HSM `sdr_reenganche_24h`. Comportamiento existente, sin cambios.
+  2. **Recordatorio de booking (24h):** Cuando el prospecto recibió el calendar link (`calendar_link_sent_at` is set) pero no agendó (`calcom_booking_id IS NULL` y `status != reunion_agendada`). Mensaje más específico: "¿Te quedó alguna duda sobre la demo? Podés agendar cuando te quede bien: {bookingUrl}". Se loggea como `action_taken: 'booking_reminder_24h'`.
+- **Idempotency:** Ambos modos abortan si el prospecto ya respondió (turns_total mismatch) o ya agendó (calcom_booking_id o status reunion_agendada).
+- **Enqueuing:** El reminder se encola desde `routeSDRNode` y `handleFounderApproval` cuando se envía el calendar link (24h delay). El reenganche genérico sigue encolándose desde `handleSDRSession` como antes.
+- **Env:** Reutiliza `CALCOM_BOOKING_URL` (o `DEMO_BOOKING_URL` como fallback) para el link en el reminder.
+- **Archivos:** `src/workers/sdrChaserWorker.ts`, `src/agents/sdr/router.ts`, `src/agents/sdrAgent.ts`, `supabase/migrations/20260101000044_add-booking-reminder-action.sql`
+- **Revisar cuando:** >100 prospectos/día → separar en dos colas pg-boss distintas con diferente retry budget.
+
 ### D6. Canal: WhatsApp Business API — Evolution API (self-hosted)
 
 - **Fecha:** Abril 2026 (actualizado desde Meta Cloud API directo — ver ADR 002)

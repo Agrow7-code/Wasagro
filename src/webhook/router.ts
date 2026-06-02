@@ -4,6 +4,7 @@ import { langfuse } from '../integrations/langfuse.js'
 import { getBoss } from '../workers/pgBoss.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
 import { setIfNotExists } from '../integrations/redis.js'
+import { handleCalcomWebhook } from '../integrations/calcom/calcomWebhook.js'
 
 // Cross-instance dedup for incoming webhooks. Evolution API delivers the same
 // webhook 6-8 times per message; pg-boss singletonKey has a race window when
@@ -99,4 +100,21 @@ webhookRouter.post('/whatsapp', async (c) => {
 
   // HTTP 200 inmediato — el pipeline corre en background (P3: <5s al agricultor)
   return c.json({ status: 'received' }, 200)
+})
+
+// POST /webhook/calcom — Cal.com booking webhook (D23)
+webhookRouter.post('/calcom', async (c) => {
+  const secret = process.env['CALCOM_WEBHOOK_SECRET']
+  if (!secret) {
+    return c.json({ error: 'CALCOM_WEBHOOK_SECRET not configured' }, 500)
+  }
+
+  const rawBody = await c.req.text()
+  const signature = c.req.header('x-cal-signature-256')
+
+  const result = await handleCalcomWebhook(rawBody, signature, secret)
+
+  if (result.status === 'rejected') return c.json({ error: result.detail }, 403)
+  if (result.status === 'error') return c.json({ error: result.detail }, 400)
+  return c.json(result, 200)
 })
