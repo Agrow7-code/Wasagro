@@ -19,6 +19,7 @@ import { getClassifier, type IIntentClassifier } from './classifier.js'
 import { compose, composeCalendarLink } from './composer.js'
 import { TEMPLATES } from './skills/registry.js'
 import { fsmStateToLegacySDRNode } from './contextStore.js'
+import { validateMessage } from './validators.js'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
 
 export interface SDRRouterContext {
@@ -231,7 +232,12 @@ ESTRICTO:
       input: { templateKey: composed.templateKey, state: nextFsmState, intent: turnIntent },
     })
   } else {
-    respuesta = await llm.redactarMensajeSDR(textoOriginal, contextoActual, directiva, traceId)
+    // LLM-generated text. Fase D validators run AFTER the LLM redacts and
+    // BEFORE we cache/send. Templates skip validators on purpose: they're
+    // already vetted deterministic strings. The LLM is the only path that
+    // drifts (missing CTA, false promises, unnecessary apologies).
+    const raw = await llm.redactarMensajeSDR(textoOriginal, contextoActual, directiva, traceId)
+    respuesta = validateMessage(raw, ctx, traceId)
   }
 
   // Cache recent response in Dual-Tier Memory
