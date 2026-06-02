@@ -45,6 +45,7 @@ export const BotActionEnum = z.enum([
   'sent_brochure',
   'sent_calendar_link',
   'sent_meeting_confirmation',
+  'sent_meeting_waiting_ack',
   'sent_graceful_exit',
   'none',
 ])
@@ -147,6 +148,12 @@ function nextFsmState(current: SDRFsmState, intent: Intent): SDRFsmState {
   // Terminal-ish intents short-circuit the FSM
   if (intent === 'declined') return 'declined'
   if (intent === 'booked' && current !== 'meeting_confirmed') return 'meeting_confirmed'
+
+  // meeting_waiting: prospect is in/awaiting the scheduled meeting.
+  // Absorb in both meeting_proposed and meeting_confirmed — never regress.
+  if (intent === 'meeting_waiting') {
+    if (current === 'meeting_proposed' || current === 'meeting_confirmed') return 'meeting_confirmed'
+  }
 
   switch (current) {
     case 'triage':

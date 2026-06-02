@@ -84,6 +84,7 @@ Opciones permitidas — no inventes otras:
 - will_book_later: dice que reserva después / pide el link
 - advance: muestra interés en avanzar, pregunta de continuación corta tras pitch ("ya?", "ok", "cuéntame más")
 - interest: declara interés explícito ("me interesa", "suena bien")
+- meeting_waiting: ya agendó o está esperando la reunión — dice que está en la sala, que espera que lo acepten, que ya entró al link, que está listo para la demo
 - objection_price: presupuesto, costo, caro
 - objection_time: no tiene tiempo
 - objection_trust: dudas de confianza
@@ -120,7 +121,27 @@ Mensaje: "no me interesa, gracias"
 
 Contexto: lastBotAction=ask_question
 Mensaje: "mmm no sé"
-{"intent":"neutro","confidence":0.6}`
+{"intent":"neutro","confidence":0.6}
+
+Contexto: lastBotAction=sent_calendar_link, fsmState=meeting_proposed
+Mensaje: "ya estoy en la reunión esperando que me acepten"
+{"intent":"meeting_waiting","confidence":0.95,"reason":"prospecto ya entró a la reunión agendada"}
+
+Contexto: lastBotAction=sent_calendar_link, fsmState=meeting_proposed
+Mensaje: "estoy en la sala de espera del link"
+{"intent":"meeting_waiting","confidence":0.95,"reason":"prospecto en sala de espera de la demo"}
+
+Contexto: lastBotAction=sent_meeting_confirmation, fsmState=meeting_confirmed
+Mensaje: "ya entré a la videollamada"
+{"intent":"meeting_waiting","confidence":0.95,"reason":"prospecto ya está en la videollamada"}
+
+Contexto: lastBotAction=sent_calendar_link, fsmState=meeting_proposed
+Mensaje: "listo, ya le di entrar al link de la reunión"
+{"intent":"meeting_waiting","confidence":0.9,"reason":"prospecto entró al link de la reunión"}
+
+Contexto: fsmState=meeting_confirmed
+Mensaje: "estoy esperando en la llamada"
+{"intent":"meeting_waiting","confidence":0.9,"reason":"prospecto esperando en la llamada"}`
 
 // ─── The classifier ──────────────────────────────────────────────────────────
 

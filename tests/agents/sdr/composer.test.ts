@@ -27,6 +27,12 @@ describe('resolveTemplate — intent overrides state', () => {
   it('will_book_later -> willBookLater', () => {
     expect(resolveTemplate('closing', 'will_book_later')).toBe('willBookLater')
   })
+
+  it('meeting_waiting -> meetingWaiting regardless of state', () => {
+    expect(resolveTemplate('meeting_proposed', 'meeting_waiting')).toBe('meetingWaiting')
+    expect(resolveTemplate('meeting_confirmed', 'meeting_waiting')).toBe('meetingWaiting')
+    expect(resolveTemplate('closing', 'meeting_waiting')).toBe('meetingWaiting')
+  })
 })
 
 // ─── resolveTemplate state defaults ──────────────────────────────────────────
@@ -84,6 +90,21 @@ describe('compose — full render', () => {
     const r = compose('closing', 'declined', ctx())
     expect(r?.templateKey).toBe('gracefulExit')
   })
+
+  it('meeting_waiting produces meetingWaiting template (no calendar link re-send)', () => {
+    const r = compose('meeting_proposed', 'meeting_waiting', ctx())
+    expect(r).not.toBeNull()
+    expect(r!.templateKey).toBe('meetingWaiting')
+    expect(r!.text.toLowerCase()).not.toContain('calend')
+    expect(r!.text.toLowerCase()).not.toContain('link')
+    expect(r!.text.toLowerCase()).not.toContain('horario')
+  })
+
+  it('meeting_waiting from meeting_confirmed also resolves (never re-sends link)', () => {
+    const r = compose('meeting_confirmed', 'meeting_waiting', ctx())
+    expect(r).not.toBeNull()
+    expect(r!.templateKey).toBe('meetingWaiting')
+  })
 })
 
 // ─── composeCalendarLink ─────────────────────────────────────────────────────
@@ -114,6 +135,7 @@ describe('Fase A guarantees (regression guards)', () => {
       ['closing', 'neutro'],
       ['closing', 'wants_brochure'],
       ['meeting_proposed', 'neutro'],
+      ['meeting_proposed', 'meeting_waiting'],
       ['pitch_sent', 'declined'],
     ] as const
 

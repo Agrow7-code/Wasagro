@@ -171,6 +171,30 @@ describe('reduceContext — FSM transitions', () => {
     const next = reduceContext(ctx, { classification: cls('interest') })
     expect(next.fsmState).toBe('declined')
   })
+
+  it('meeting_proposed + meeting_waiting -> meeting_confirmed (prospect entered the meeting)', () => {
+    const ctx: ConvContext = { ...baseCtx, fsmState: 'meeting_proposed' }
+    const next = reduceContext(ctx, { classification: cls('meeting_waiting') })
+    expect(next.fsmState).toBe('meeting_confirmed')
+  })
+
+  it('meeting_confirmed + meeting_waiting -> meeting_confirmed (absorbs — never regresses)', () => {
+    const ctx: ConvContext = { ...baseCtx, fsmState: 'meeting_confirmed' }
+    const next = reduceContext(ctx, { classification: cls('meeting_waiting') })
+    expect(next.fsmState).toBe('meeting_confirmed')
+  })
+
+  it('meeting_confirmed + neutro -> meeting_confirmed (any intent absorbs)', () => {
+    const ctx: ConvContext = { ...baseCtx, fsmState: 'meeting_confirmed' }
+    const next = reduceContext(ctx, { classification: cls('neutro') })
+    expect(next.fsmState).toBe('meeting_confirmed')
+  })
+
+  it('meeting_confirmed + consulta -> meeting_confirmed (questions after meeting absorb)', () => {
+    const ctx: ConvContext = { ...baseCtx, fsmState: 'meeting_confirmed' }
+    const next = reduceContext(ctx, { classification: cls('consulta') })
+    expect(next.fsmState).toBe('meeting_confirmed')
+  })
 })
 
 describe('reduceContext — derived signals', () => {

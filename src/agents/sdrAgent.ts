@@ -334,6 +334,13 @@ export async function handleMeetingConfirmation(
       const composed = compose('meeting_proposed', 'will_book_later', ctxForTemplate)
       await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto, quedo a la espera!')
       actionTaken = 'meeting_pending'
+    } else if (intencion === 'meeting_waiting') {
+      const composed = compose('meeting_proposed', 'meeting_waiting', ctxForTemplate)
+      await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto! Un miembro del equipo se te une enseguida.')
+      // 'meeting_confirmed' is the legal action_taken value matching the FSM
+      // landing state (context.ts absorbs meeting_waiting -> meeting_confirmed).
+      // Avoids introducing a new CHECK constraint value (FIX-7 lesson).
+      actionTaken = 'meeting_confirmed'
     } else {
       // Intent 'other' - Respuesta conversacional amigable con el link
       const bookingUrl = process.env['DEMO_BOOKING_URL']

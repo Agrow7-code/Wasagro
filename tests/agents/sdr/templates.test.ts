@@ -4,6 +4,7 @@ import { closeOffer } from '../../../src/agents/sdr/skills/templates/close-offer
 import { brochureSend } from '../../../src/agents/sdr/skills/templates/brochure-send.js'
 import { calendarLink } from '../../../src/agents/sdr/skills/templates/calendar-link.js'
 import { meetingConfirm } from '../../../src/agents/sdr/skills/templates/meeting-confirm.js'
+import { meetingWaiting } from '../../../src/agents/sdr/skills/templates/meeting-waiting.js'
 import { gracefulExit } from '../../../src/agents/sdr/skills/templates/graceful-exit.js'
 import { willBookLater } from '../../../src/agents/sdr/skills/templates/will-book-later.js'
 
@@ -120,11 +121,27 @@ describe('calendarLink', () => {
 
 // ─── static templates ───────────────────────────────────────────────────────
 
-describe('meetingConfirm / gracefulExit / willBookLater', () => {
+describe('meetingConfirm / meetingWaiting / gracefulExit / willBookLater', () => {
   it('meetingConfirm is a short positive acknowledgement', () => {
     const text = meetingConfirm({})
     expect(text).toMatch(/perfecto|listo|confirm/i)
     expect(text.length).toBeLessThan(150)
+  })
+
+  it('meetingWaiting never re-sends calendar link or brochure', () => {
+    const text = meetingWaiting({})
+    expect(text).toMatch(/seguida|equipo|avisas/i)
+    expect(text.toLowerCase()).not.toContain('calend')
+    expect(text.toLowerCase()).not.toContain('link')
+    expect(text.toLowerCase()).not.toContain('horario')
+    expect(text.toLowerCase()).not.toContain('brochure')
+    expect(text.toLowerCase()).not.toContain('agendar')
+  })
+
+  it('meetingWaiting is short and warm', () => {
+    const text = meetingWaiting({})
+    expect(text.length).toBeLessThan(150)
+    expect(text).toMatch(/perfecto/i)
   })
 
   it('gracefulExit acknowledges + leaves the door open', () => {
@@ -139,8 +156,9 @@ describe('meetingConfirm / gracefulExit / willBookLater', () => {
     expect(text).toMatch(/cuando tengas|usas el link/i)
   })
 
-  it('all three are deterministic', () => {
+  it('all four are deterministic', () => {
     expect(meetingConfirm({})).toBe(meetingConfirm({}))
+    expect(meetingWaiting({})).toBe(meetingWaiting({}))
     expect(gracefulExit({})).toBe(gracefulExit({}))
     expect(willBookLater({})).toBe(willBookLater({}))
   })

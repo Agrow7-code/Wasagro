@@ -19,6 +19,7 @@ import { closeOffer } from './templates/close-offer.js'
 import { brochureSend } from './templates/brochure-send.js'
 import { calendarLink } from './templates/calendar-link.js'
 import { meetingConfirm } from './templates/meeting-confirm.js'
+import { meetingWaiting } from './templates/meeting-waiting.js'
 import { gracefulExit } from './templates/graceful-exit.js'
 import { willBookLater } from './templates/will-book-later.js'
 import { audioAck } from './templates/audio-ack.js'
@@ -35,6 +36,7 @@ export const TEMPLATES = {
   brochureSend,
   calendarLink,
   meetingConfirm,
+  meetingWaiting,
   gracefulExit,
   willBookLater,
   audioAck,
@@ -54,6 +56,7 @@ export function resolveTemplate(state: SDRFsmState, intent: Intent): TemplateKey
   // the bot was about to DO.
   if (intent === 'wants_brochure') return 'brochureSend'
   if (intent === 'booked') return 'meetingConfirm'
+  if (intent === 'meeting_waiting') return 'meetingWaiting'
   if (intent === 'will_book_later') return 'willBookLater'
   if (intent === 'declined') return 'gracefulExit'
 
@@ -66,7 +69,8 @@ export function resolveTemplate(state: SDRFsmState, intent: Intent): TemplateKey
       return 'calendarLink'
     default:
       // discovery (LLM questions), pitch_sent (LLM body + deterministic CTA),
-      // objection_handling, brochure_sent (follow-up), etc.
+      // objection_handling, brochure_sent (follow-up), meeting_confirmed (absorbed
+      // by intent override above), etc.
       return null
   }
 }

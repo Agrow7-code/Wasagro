@@ -12,6 +12,9 @@ export const IntentEnum = z.enum([
   'advance',
   'interest',
 
+  // Post-meeting — prospect is in/awaiting the scheduled meeting
+  'meeting_waiting',
+
   // Objections (split by type so the FSM can branch)
   'objection_price',
   'objection_time',
@@ -24,7 +27,7 @@ export const IntentEnum = z.enum([
   'consulta',
   'neutro',
 
-  // Fallback — must always be loggeable in Langfuse, never silenced
+  // Fallback — must always be loggeable in LangFuse, never silenced
   'other',
 ])
 

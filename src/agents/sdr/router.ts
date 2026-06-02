@@ -17,10 +17,22 @@ import {
 import { detectRoleFromText } from './roleDetector.js'
 import { getClassifier, type IIntentClassifier } from './classifier.js'
 import { compose, composeCalendarLink } from './composer.js'
-import { TEMPLATES } from './skills/registry.js'
+import { TEMPLATES, resolveTemplate, type TemplateKey } from './skills/registry.js'
 import { fsmStateToLegacySDRNode } from './contextStore.js'
 import { validateMessage } from './validators.js'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
+import type { BotAction } from './context.js'
+
+const TEMPLATE_TO_BOT_ACTION: Record<TemplateKey, BotAction> = {
+  closeOffer: 'sent_pitch',
+  brochureSend: 'sent_brochure',
+  calendarLink: 'sent_calendar_link',
+  meetingConfirm: 'sent_meeting_confirmation',
+  meetingWaiting: 'sent_meeting_waiting_ack',
+  gracefulExit: 'sent_graceful_exit',
+  willBookLater: 'sent_calendar_link',
+  audioAck: 'none',
+}
 
 export interface SDRRouterContext {
   prospecto: Record<string, unknown>
@@ -231,6 +243,17 @@ ESTRICTO:
       level: 'DEFAULT',
       input: { templateKey: composed.templateKey, state: nextFsmState, intent: turnIntent },
     })
+  } else if (nextFsmState === 'meeting_confirmed') {
+    // Post-meeting safety net: if the FSM is in meeting_confirmed but no
+    // template matched (e.g. intent=consulta or neutro after booking),
+    // NEVER fall through to the LLM — it would re-pitch or re-send the
+    // calendar link. Acknowledge and hold.
+    respuesta = '¡Perfecto! Un miembro del equipo se te une enseguida. Cualquier duda me avisas por acá. ✅'
+    trace.event({
+      name: 'sdr_template_used',
+      level: 'DEFAULT',
+      input: { templateKey: 'meetingWaiting_fallback', state: nextFsmState, intent: turnIntent },
+    })
   } else {
     // LLM-generated text. Fase D validators run AFTER the LLM redacts and
     // BEFORE we cache/send. Templates skip validators on purpose: they're
@@ -266,11 +289,14 @@ ESTRICTO:
     })
   }
 
-  ctx = reduceContext(ctx, {
+  const reduceInput: Parameters<typeof reduceContext>[1] = {
     classification: { intent: turnIntent, confidence: classification.confidence },
     extraction,
     botMessage: respuesta,
-  })
+  }
+  if (composed) reduceInput.botAction = TEMPLATE_TO_BOT_ACTION[composed.templateKey]
+
+  ctx = reduceContext(ctx, reduceInput)
 
   // Discovery -> pitch_sent is the only transition the reducer doesn't own:
   // it depends on accumulated data, not on intent. Stamp it here.
@@ -299,7 +325,6 @@ ESTRICTO:
 
   await sender.enviarTexto(ctx.phone, respuesta)
   if (requires_founder_approval) {
-    // Calendar link is also a deterministic template — no copy variance turn-to-turn.
     await sender.enviarTexto(ctx.phone, composeCalendarLink())
     trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: ctx.prospectId } })
   }
