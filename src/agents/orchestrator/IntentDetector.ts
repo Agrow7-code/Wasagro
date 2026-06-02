@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
+import { runTypedClassifier } from '../../integrations/llm/runTypedClassifier.js'
 
 const TipoEventoEnum = z.enum([
   'labor', 'insumo', 'plaga', 'clima', 'cosecha', 'gasto',
@@ -24,8 +25,9 @@ const RespuestaLLMSchema = z.object({
   tipo_forzado: z.union([TipoEventoEnum, z.null()]),
   confianza: z.number().min(0).max(1),
 })
+type RespuestaLLM = z.infer<typeof RespuestaLLMSchema>
 
-const FALLBACK: DeteccionIntento = { tipo: 'nuevo_evento', confianza: 0 }
+const FALLBACK_LLM: RespuestaLLM = { tipo: 'nuevo_evento', tipo_forzado: null, confianza: 0 }
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const SYSTEM_PROMPT = readFileSync(
@@ -49,28 +51,23 @@ export class IntentDetector {
       `Mensaje del usuario: ${input.mensaje_usuario}`,
     ].join('\n')
 
-    try {
-      const raw = await this.adapter.generarTexto(userContent, {
-        systemPrompt: SYSTEM_PROMPT,
-        responseFormat: 'json_object',
-        temperature: 0,
-        traceId,
-        generationName: 'intent-detector',
-        generationInput: input,
-        modelClass: 'fast', // Forzar modelo rápido para el Router
-      })
+    const parsed = await runTypedClassifier({
+      adapter:        this.adapter,
+      systemPrompt:   SYSTEM_PROMPT,
+      userContent,
+      schema:         RespuestaLLMSchema,
+      traceId,
+      classifierName: 'event_intent_detector',
+      fallback:       FALLBACK_LLM,
+      modelClass:     'fast',
+      temperature:    0,
+      generationInput: input,
+    })
 
-      const parsed = RespuestaLLMSchema.safeParse(JSON.parse(raw))
-      if (!parsed.success) return FALLBACK
-
-      const { tipo, tipo_forzado, confianza } = parsed.data
-      const result: DeteccionIntento = { tipo, confianza }
-      if (tipo === 'correccion_tipo' && tipo_forzado) result.tipo_forzado = tipo_forzado
-
-      return result
-    } catch (err) {
-      console.error('[IntentDetector] Error detectando intención:', err)
-      return FALLBACK
+    const result: DeteccionIntento = { tipo: parsed.tipo, confianza: parsed.confianza }
+    if (parsed.tipo === 'correccion_tipo' && parsed.tipo_forzado) {
+      result.tipo_forzado = parsed.tipo_forzado
     }
+    return result
   }
 }

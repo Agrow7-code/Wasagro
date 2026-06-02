@@ -1,11 +1,36 @@
+import { z } from 'zod'
 import type { ILLMAdapter } from './ILLMAdapter.js'
 import type { Langfuse } from 'langfuse'
 import { langfuse as langfuseDefault } from '../langfuse.js'
 import { PromptManager } from '../../pipeline/promptManager.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
-import { LLMError } from './LLMError.js'
 import type { EntradaEvento, ResultadoIntentGate } from '../../types/dominio/EventoCampo.js'
 import { ResultadoIntentGateSchema } from '../../types/dominio/EventoCampo.js'
+import { runTypedClassifier } from './runTypedClassifier.js'
+
+// Raw LLM output schema. Required fields are required to avoid Zod's input-vs-
+// output type split (z.default makes the generic helper unable to infer T cleanly
+// with exactOptionalPropertyTypes). The helper retries once with feedback if
+// the LLM forgets a required field — that's the right correction path.
+const IntentGateRawSchema = z.object({
+  tipos_evento: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+  requiere_imagen_para_confirmar: z.boolean().optional(),
+  motivo_ambiguo: z.string().nullable().optional(),
+  mensaje_clarificacion: z.string().nullable().optional(),
+})
+type IntentGateRaw = z.infer<typeof IntentGateRawSchema>
+
+// Safe default if both attempts fail — no events detected, ask for clarification.
+const RAW_FALLBACK: IntentGateRaw = {
+  tipos_evento: [],
+  confidence: 0,
+  mensaje_clarificacion: '¿Puedes contarme más sobre lo que pasó en la finca?',
+}
+
+const NO_EVENTO_TIPOS = new Set(['saludo', 'consulta', 'ambiguo'])
+
+type IntencionRow = ResultadoIntentGate['intenciones'][number]
 
 export class IntentGate {
   readonly #adapter: ILLMAdapter
@@ -17,135 +42,103 @@ export class IntentGate {
   }
 
   async clasificar(input: EntradaEvento, traceId: string): Promise<ResultadoIntentGate> {
+    // Short-circuit when the caller already knows the event type (forced
+    // routing from upstream). Skip the LLM entirely.
     if (input.tipos_forzados && input.tipos_forzados.length > 0) {
-      return {
-        intenciones: input.tipos_forzados.map(t => ({
-          tipo_evento: t as ResultadoIntentGate['intenciones'][number]['tipo_evento'],
-          confidence: 1,
-          lote_hint: null,
-          producto_hint: null,
-          monto_hint: null,
-        })),
-        es_no_evento: false,
-        tipo_no_evento: null,
-        confidence_general: 1,
-        mensaje_clarificacion: null,
-      }
+      return buildForcedResult(input.tipos_forzados)
     }
-
     if (input.tipo_forzado) {
-      return {
-        intenciones: [{
-          tipo_evento: input.tipo_forzado as ResultadoIntentGate['intenciones'][number]['tipo_evento'],
-          confidence: 1,
-          lote_hint: null,
-          producto_hint: null,
-          monto_hint: null,
-        }],
-        es_no_evento: false,
-        tipo_no_evento: null,
-        confidence_general: 1,
-        mensaje_clarificacion: null,
-      }
+      return buildForcedResult([input.tipo_forzado])
     }
 
-  const systemPrompt = injectarVariables(
-    (await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', traceId)),
-    {
-      FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
-      CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
-    },
-  )
+    const systemPrompt = injectarVariables(
+      (await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', traceId)),
+      {
+        FINCA_NOMBRE:      input.finca_nombre ?? input.finca_id,
+        CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
+      },
+    )
 
-  const userMessage = `Nombre del usuario: ${input.nombre_usuario ?? 'No especificado'}\n\nMensaje: ${input.transcripcion}`
+    const userMessage = `Nombre del usuario: ${input.nombre_usuario ?? 'No especificado'}\n\nMensaje: ${input.transcripcion}`
 
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({
-      name: 'intent_gate_clasificar',
-      model: 'wasagro-intent-gate',
-      input: { transcripcion: input.transcripcion },
+    const raw = await runTypedClassifier({
+      adapter:         this.#adapter,
+      systemPrompt,
+      userContent:     userMessage,
+      schema:          IntentGateRawSchema,
+      traceId,
+      classifierName:  'intent_gate',
+      fallback:        RAW_FALLBACK,
+      modelClass:      'fast',
+      temperature:     0,
+      langfuseClient:  this.#lf,
+      generationInput: { transcripcion: input.transcripcion },
     })
 
-    const inicio = Date.now()
-    try {
-    const textoRaw = await this.#adapter.generarTexto(userMessage, {
-      systemPrompt,
-        responseFormat: 'json_object',
-        traceId,
-        generationName: 'intent_gate',
-        modelClass: 'fast',
-        temperature: 0,
-      })
-
-      const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
-
-      let json: unknown
-      try {
-        json = JSON.parse(texto)
-      } catch {
-        generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `IntentGate devolvió no-JSON: ${texto.slice(0, 100)}`)
-      }
-
-      const raw = json as Record<string, unknown>
-      const tiposRaw = Array.isArray(raw['tipos_evento']) ? raw['tipos_evento'] as string[] : []
-      const confidence = typeof raw['confidence'] === 'number' ? raw['confidence'] : 0.5
-      const requiereImagen = raw['requiere_imagen_para_confirmar'] === true
-      const motivoAmbiguo = typeof raw['motivo_ambiguo'] === 'string' ? raw['motivo_ambiguo'] : null
-      const msgClarif = typeof raw['mensaje_clarificacion'] === 'string' ? raw['mensaje_clarificacion'] : null
-
-      const noEventoTipos = new Set(['saludo', 'consulta', 'ambiguo'])
-      const soloNoEventos = tiposRaw.length > 0 && tiposRaw.every(t => noEventoTipos.has(t))
-
-      if (soloNoEventos) {
-        const tipoNoEvento = tiposRaw.includes('saludo')
-          ? 'saludo' as const
-          : tiposRaw.includes('consulta')
-            ? 'consulta' as const
-            : 'ambiguo' as const
-
-        const result: ResultadoIntentGate = {
-          intenciones: [],
-          es_no_evento: true,
-          tipo_no_evento: tipoNoEvento,
-          confidence_general: confidence,
-          mensaje_clarificacion: msgClarif,
-        }
-
-        generation.end({ output: result, metadata: { latencia_ms: Date.now() - inicio } })
-        return result
-      }
-
-      const intenciones = tiposRaw
-        .filter(t => !noEventoTipos.has(t))
-        .map(t => ({
-          tipo_evento: t as ResultadoIntentGate['intenciones'][number]['tipo_evento'],
-          confidence,
-          lote_hint: null as string | null,
-          producto_hint: null as string | null,
-          monto_hint: null as string | null,
-        }))
-
-      const result: ResultadoIntentGate = {
-        intenciones,
-        es_no_evento: false,
-        tipo_no_evento: null,
-        confidence_general: confidence,
-        mensaje_clarificacion: intenciones.length === 0 ? (msgClarif ?? '¿Puedes contarme más sobre lo que pasó en la finca?') : null,
-      }
-
-      const parsed = ResultadoIntentGateSchema.safeParse(result)
-      if (!parsed.success) {
-        generation.end({ output: result, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `IntentGate schema inválido: ${parsed.error.message}`)
-      }
-
-      generation.end({ output: parsed.data, metadata: { latencia_ms: Date.now() - inicio } })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error en IntentGate: ${String(err)}`, err)
-    }
+    return postProcess(raw)
   }
+}
+
+// ─── Pure helpers ────────────────────────────────────────────────────────────
+
+function buildForcedResult(tipos: readonly string[]): ResultadoIntentGate {
+  return {
+    intenciones: tipos.map(t => ({
+      tipo_evento:    t as IntencionRow['tipo_evento'],
+      confidence:     1,
+      lote_hint:      null,
+      producto_hint:  null,
+      monto_hint:     null,
+    })),
+    es_no_evento: false,
+    tipo_no_evento: null,
+    confidence_general: 1,
+    mensaje_clarificacion: null,
+  }
+}
+
+function postProcess(raw: IntentGateRaw): ResultadoIntentGate {
+  const { tipos_evento, confidence } = raw
+  const msgClarif = raw.mensaje_clarificacion ?? null
+
+  const soloNoEventos = tipos_evento.length > 0 && tipos_evento.every(t => NO_EVENTO_TIPOS.has(t))
+
+  if (soloNoEventos) {
+    const tipoNoEvento = tipos_evento.includes('saludo')
+      ? 'saludo' as const
+      : tipos_evento.includes('consulta')
+        ? 'consulta' as const
+        : 'ambiguo' as const
+    const result: ResultadoIntentGate = {
+      intenciones: [],
+      es_no_evento: true,
+      tipo_no_evento: tipoNoEvento,
+      confidence_general: confidence,
+      mensaje_clarificacion: msgClarif,
+    }
+    // Defensive validation — the schema also runs at the helper boundary, but
+    // post-process can still produce something the outer contract rejects.
+    return ResultadoIntentGateSchema.parse(result)
+  }
+
+  const intenciones = tipos_evento
+    .filter(t => !NO_EVENTO_TIPOS.has(t))
+    .map(t => ({
+      tipo_evento:   t as IntencionRow['tipo_evento'],
+      confidence,
+      lote_hint:     null as string | null,
+      producto_hint: null as string | null,
+      monto_hint:    null as string | null,
+    }))
+
+  const result: ResultadoIntentGate = {
+    intenciones,
+    es_no_evento: false,
+    tipo_no_evento: null,
+    confidence_general: confidence,
+    mensaje_clarificacion: intenciones.length === 0
+      ? (msgClarif ?? '¿Puedes contarme más sobre lo que pasó en la finca?')
+      : null,
+  }
+  return ResultadoIntentGateSchema.parse(result)
 }

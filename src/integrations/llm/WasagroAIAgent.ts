@@ -29,6 +29,7 @@ import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 import { SupabaseTools } from '../../agents/mcp/SupabaseTools.js'
 import { IntentGate } from './IntentGate.js'
+import { runTypedClassifier } from './runTypedClassifier.js'
 
 const EXTRACTOR_POR_TIPO: Record<string, string> = {
   insumo: 'sp-01a-extractor-insumo.md',
@@ -296,33 +297,33 @@ export class WasagroAIAgent implements IWasagroLLM {
   }
 
   async clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string): Promise<import('./IWasagroLLM.js').TipoImagen> {
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'clasificar_imagen', model: 'wasagro-ai-agent', input: { caption: caption ?? null } })
-    try {
-      const promptRaw = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
-      const prompt = promptRaw.replace(
-        '{{CAPTION}}',
-        caption ? `El agricultor escribió junto con la imagen: "${caption}"` : 'El agricultor no escribió texto junto con la imagen.',
-      )
-      const raw = await this.#adapter.generarTexto('Clasifica esta imagen.', {
-        systemPrompt: prompt,
-        responseFormat: 'json_object',
-        imageBase64: base64,
-        imageMimeType: mimeType,
-        traceId,
-        generationName: 'clasificar_imagen',
-        modelClass: 'fast',
-      })
-      const json = JSON.parse(raw.replace(/```json|```/g, '').trim())
-      const tipos = ['plaga_cultivo', 'documento_tabla', 'otro'] as const
-      const tipo = tipos.includes(json.tipo) ? json.tipo : 'otro'
-      generation.end({ output: { tipo, confianza: json.confianza } })
-      return tipo
-    } catch (err) {
-      generation.end({ output: String(err), level: 'ERROR' })
-      trace.event({ name: 'clasificar_imagen_error', level: 'ERROR', input: { error: String(err) } })
-      return 'otro'
-    }
+    const promptRaw = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
+    const prompt = promptRaw.replace(
+      '{{CAPTION}}',
+      caption ? `El agricultor escribió junto con la imagen: "${caption}"` : 'El agricultor no escribió texto junto con la imagen.',
+    )
+
+    const ClasificarImagenSchema = z.object({
+      tipo: z.enum(['plaga_cultivo', 'documento_tabla', 'otro']),
+      confianza: z.number().min(0).max(1).optional(),
+    })
+
+    const result = await runTypedClassifier({
+      adapter:         this.#adapter,
+      systemPrompt:    prompt,
+      userContent:     'Clasifica esta imagen.',
+      schema:          ClasificarImagenSchema,
+      traceId,
+      classifierName:  'clasificar_imagen',
+      fallback:        { tipo: 'otro' as const },
+      modelClass:      'fast',
+      temperature:     0,
+      imageBase64:     base64,
+      imageMimeType:   mimeType,
+      langfuseClient:  this.#lf,
+      generationInput: { caption: caption ?? null },
+    })
+    return result.tipo
   }
 
   async extraerDocumentoOCR(
@@ -661,40 +662,44 @@ Reglas:
   }
 
   async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel> {
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({
-      name: 'clasificar_excel',
-      model: 'wasagro-ai-agent',
-      input: { nombre_archivo: entrada.nombre_archivo, total_filas: entrada.total_filas, columnas: entrada.columnas },
-    })
-    try {
-      const prompt = injectarVariables((await PromptManager.getPrompt('sp-06-clasificar-excel.md', 'prompts/sp-06-clasificar-excel.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
-        FINCA_NOMBRE: entrada.finca_nombre ?? 'No especificada',
+    const prompt = injectarVariables(
+      await PromptManager.getPrompt('sp-06-clasificar-excel.md', 'prompts/sp-06-clasificar-excel.md', traceId),
+      {
+        FINCA_NOMBRE:      entrada.finca_nombre ?? 'No especificada',
         CULTIVO_PRINCIPAL: entrada.cultivo_principal ?? 'No especificado',
-        NOMBRE_ARCHIVO: entrada.nombre_archivo,
-        COLUMNAS: entrada.columnas.join(', '),
-        MUESTRA_FILAS: JSON.stringify(entrada.muestra_filas, null, 2),
-        TOTAL_FILAS: String(entrada.total_filas),
-      })
-      const userContent = `Archivo: ${entrada.nombre_archivo}. Columnas: ${entrada.columnas.join(', ')}. Total filas: ${entrada.total_filas}.`
-      const texto = await this.#adapter.generarTexto(userContent, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
-      let json: unknown
-      try { json = JSON.parse(texto) } catch {
-        generation.end({ output: texto, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Clasificador Excel devolvió no-JSON: ${texto.slice(0, 100)}`)
-      }
-      const parsed = ClasificacionExcelSchema.safeParse(json)
-      if (!parsed.success) {
-        generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Schema clasificación Excel inválido: ${parsed.error.message}`)
-      }
-      generation.end({ output: parsed.data })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error clasificando Excel: ${String(err)}`, err)
+        NOMBRE_ARCHIVO:    entrada.nombre_archivo,
+        COLUMNAS:          entrada.columnas.join(', '),
+        MUESTRA_FILAS:     JSON.stringify(entrada.muestra_filas, null, 2),
+        TOTAL_FILAS:       String(entrada.total_filas),
+      },
+    )
+    const userContent = `Archivo: ${entrada.nombre_archivo}. Columnas: ${entrada.columnas.join(', ')}. Total filas: ${entrada.total_filas}.`
+
+    // Safe fallback: the upstream caller treats 'desconocido' as "ask the user
+    // what this file is about" — that's exactly the right thing to do when the
+    // model gave up. Empty columnas keeps the contract simple downstream.
+    const fallback: ClasificacionExcel = {
+      tipo_datos:           'desconocido',
+      filas_detectadas:     entrada.total_filas,
+      columnas_detectadas:  entrada.columnas,
+      cultivo_detectado:    entrada.cultivo_principal ?? null,
+      confianza:            0,
+      mensaje_confirmacion: 'No pude clasificar el archivo automáticamente. ¿Podés contarme brevemente de qué se trata?',
     }
+
+    return runTypedClassifier({
+      adapter:         this.#adapter,
+      systemPrompt:    prompt,
+      userContent,
+      schema:          ClasificacionExcelSchema,
+      traceId,
+      classifierName:  'clasificar_excel',
+      fallback,
+      modelClass:      'fast',
+      temperature:     0,
+      langfuseClient:  this.#lf,
+      generationInput: { nombre_archivo: entrada.nombre_archivo, total_filas: entrada.total_filas },
+    })
   }
 
   // ─── private ─────────────────────────────────────────────────────────────
