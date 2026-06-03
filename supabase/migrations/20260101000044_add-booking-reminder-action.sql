@@ -26,8 +26,9 @@ CHECK (action_taken IN (
   'pdf_sent',
   'founder_override',
   'brochure_sent',
-  'booking_confirmed_webhook',
-  'meeting_waiting_acked',
-  -- D24: 24h booking reminder (sent when calendar_link_sent_at > 24h and no booking)
-  'booking_reminder_24h'
+ 'booking_confirmed_webhook',
+ 'meeting_waiting_acked',
+ 'booking_cancellation_logged',
+ -- D24: 24h booking reminder (sent when calendar_link_sent_at > 24h and no booking)
+ 'booking_reminder_24h'
 ));

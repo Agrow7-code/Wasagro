@@ -334,11 +334,19 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Guardrails:** Solo usuarios con número registrado en `usuarios` pueden solicitar OTP (no registro abierto). El código caduca automáticamente. El endpoint `/me` no requiere autenticación propia — devuelve datos por número de teléfono, asumiendo que el llamador ya tiene el teléfono del usuario logueado en el frontend.
 - **Revisar cuando:** Si se necesita logout remoto o revocación de sesión, añadir tabla de sesiones activas. Si el volumen de intentos de OTP supera 100/hora, añadir rate limiting por número.
 
+### D25. Intent `meeting_waiting` — ack de post-pitch + FSM sink state
+
+- **Fecha:** Junio 2026
+- **Problema que motivó la decisión:** Prospectos que ya habían aceptado la demo respondían con mensajes como "estoy esperando la reunión" o "ok, nos vemos". El FSM regresaba de `meeting_confirmed` a `meeting_proposed`, causando que el agente re-enviara el link de Calendly o intentara re-pitchear. El prospecto recibía mensajes descontextualizados que erosionaban confianza.
+- **Decisión:** Nuevo intent `meeting_waiting` que funciona como FSM sink state: una vez en `meeting_confirmed`, el agente NUNCA regresa. El router reconoce este intent con un template dedicado (`meetingWaiting`) que envía un ack cálido ("¡Perfecto! Un miembro del equipo se te une enseguida"). Si el FSM está en `meeting_confirmed` y ningún template matchea, el router usa un safety net hardcodeado (nunca LLM — evitaría re-pitchear).
+- **Implementación:** `src/constants/intents.ts` (IntentEnum), `src/agents/sdr/context.ts` (FSM transitions), `src/agents/sdr/classifier.ts` (few-shots), `src/agents/sdr/skills/templates/meeting-waiting.ts`, `src/agents/sdr/router.ts` (safety net + TEMPLATE_TO_BOT_ACTION), `src/agents/sdr/skills/registry.ts` (resolveTemplate rule).
+- **Revisar cuando:** Si se necesita un flujo de re-scheduling (el prospecto pide cambiar la fecha), se necesita un nuevo intent `meeting_reschedule` con su propio D-number.
+
 ### D23. Booking de demos: Cal.com (self-hosted) con webhook
 
 - **Fecha:** Junio 2026
 - **Decisión:** Reemplazar `DEMO_BOOKING_URL` (link estático de Calendly, sin feedback) con Cal.com self-hosted. El booking link sigue siendo un URL que se envía al prospecto, pero ahora:
-  1. **Webhook entrante:** Cal.com envía `BOOKING_CREATED` / `BOOKING_CANCELLED` a `POST /webhook/calcom`. El handler firma-verifica con `CALCOM_WEBHOOK_SECRET`, busca el prospecto por email o teléfono del attendee, y actualiza `sdr_prospectos.status → reunion_agendada` + `reunion_agendada_at` + `calcom_booking_id`.
+  1. **Webhook entrante:** Cal.com envía `BOOKING_CREATED` / `BOOKING_CANCELLED` a `POST /webhook/calcom`. El handler firma-verifica con `CALCOM_WEBHOOK_SECRET`, busca el prospecto por email o teléfono del attendee, y actualiza `sdr_prospectos.status → reunion_agendada` + `reunion_agendada_at` + `calcom_booking_id`. Para `BOOKING_CANCELLED`: NO revierte el status automáticamente (AGENTS.md Rule 3 — no acción irreversible sin aprobación humana). En su lugar, registra `booking_cancelled_at` y notifica al founder para que decida si revierte.
   2. **Notificación a founders:** Al recibir `BOOKING_CREATED`, se envía WhatsApp al founder con nombre del prospecto, fecha/hora, y link de la reunión. También se envía email a wasagro@proton.me.
   3. **Template:** `calendarLink` lee `CALCOM_BOOKING_URL` (nueva env var, reemplaza `DEMO_BOOKING_URL`). Si no está configurada, fallback manual idéntico al actual.
   4. **Chaser skip:** `sdrChaserWorker` verifica `calcom_booking_id IS NOT NULL` antes de enviar reenganche — si ya agendó via Cal.com, no nag.
@@ -354,7 +362,7 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **Decisión:** El chaser ahora tiene dos modos según el estado del prospecto:
   1. **Reenganche genérico (20h):** Cuando el prospecto no recibió el link de booking (status `en_discovery`, `new`, etc.). Mensaje HSM `sdr_reenganche_24h`. Comportamiento existente, sin cambios.
   2. **Recordatorio de booking (24h):** Cuando el prospecto recibió el calendar link (`calendar_link_sent_at` is set) pero no agendó (`calcom_booking_id IS NULL` y `status != reunion_agendada`). Mensaje más específico: "¿Te quedó alguna duda sobre la demo? Podés agendar cuando te quede bien: {bookingUrl}". Se loggea como `action_taken: 'booking_reminder_24h'`.
-- **Idempotency:** Ambos modos abortan si el prospecto ya respondió (turns_total mismatch) o ya agendó (calcom_booking_id o status reunion_agendada).
+- **Idempotency:** Ambos modos abortan si el prospecto ya respondió (turns_total mismatch) o ya agendó (calcom_booking_id presente y booking_cancelled_at ausente). Si el booking fue cancelado, el chaser sí envía reenganche.
 - **Enqueuing:** El reminder se encola desde `routeSDRNode` y `handleFounderApproval` cuando se envía el calendar link (24h delay). El reenganche genérico sigue encolándose desde `handleSDRSession` como antes.
 - **Env:** Reutiliza `CALCOM_BOOKING_URL` (o `DEMO_BOOKING_URL` como fallback) para el link en el reminder.
 - **Archivos:** `src/workers/sdrChaserWorker.ts`, `src/agents/sdr/router.ts`, `src/agents/sdrAgent.ts`, `supabase/migrations/20260101000044_add-booking-reminder-action.sql`

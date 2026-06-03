@@ -8,7 +8,16 @@ vi.mock('../../src/pipeline/supabaseQueries.js', () => ({
 }))
 
 vi.mock('../../src/integrations/whatsapp/index.js', () => ({
-  crearSenderWhatsApp: vi.fn(),
+ crearSenderWhatsApp: vi.fn(),
+}))
+
+vi.mock('../../src/integrations/langfuse.js', () => ({
+ langfuse: {
+ trace: vi.fn(() => ({
+ event: vi.fn(),
+ id: 'test-chaser-trace-id',
+ })),
+ },
 }))
 
 vi.mock('../../src/integrations/supabase.js', () => ({
@@ -82,18 +91,31 @@ describe('sdrChaserWorker', () => {
       )
     })
 
-    it('should abort if prospect already has a Cal.com booking', async () => {
-      await setupProspectoMock({ id: '456', turns_total: 4, phone: '123456', status: 'en_discovery', calcom_booking_id: 'booking-789' })
+ it('should abort if prospect already has a Cal.com booking', async () => {
+ await setupProspectoMock({ id: '456', turns_total: 4, phone: '123456', status: 'en_discovery', calcom_booking_id: 'booking-789' })
 
-      const job = {
-        data: { prospecto_id: '456', expected_turn: 4 }
-      }
+ const job = {
+ data: { prospecto_id: '456', expected_turn: 4 }
+ }
 
-      await sdrChaserHandler(job as any)
+ await sdrChaserHandler(job as any)
 
-      expect(whatsappIndex.crearSenderWhatsApp).not.toHaveBeenCalled()
-      expect(supabaseQueries.saveSDRInteraccion).not.toHaveBeenCalled()
-    })
+ expect(whatsappIndex.crearSenderWhatsApp).not.toHaveBeenCalled()
+ expect(supabaseQueries.saveSDRInteraccion).not.toHaveBeenCalled()
+ })
+
+ it('should NOT abort if prospect has a Cal.com booking but it was cancelled', async () => {
+ await setupProspectoMock({ id: '457', turns_total: 4, phone: '123457', status: 'en_discovery', calcom_booking_id: 'booking-789', booking_cancelled_at: '2026-06-02T12:00:00Z' })
+ const mockSender = setupSenderMock()
+
+ const job = {
+ data: { prospecto_id: '457', expected_turn: 4 }
+ }
+
+ await sdrChaserHandler(job as any)
+
+ expect(whatsappIndex.crearSenderWhatsApp).toHaveBeenCalled()
+ })
   })
 
   describe('booking reminder (reminder_type=booking)', () => {

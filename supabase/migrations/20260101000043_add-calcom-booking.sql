@@ -4,9 +4,10 @@
 
 -- 1. Columns for Cal.com booking tracking
 ALTER TABLE sdr_prospectos
-  ADD COLUMN IF NOT EXISTS calcom_booking_id TEXT,
-  ADD COLUMN IF NOT EXISTS calcom_event_type_id INTEGER,
-  ADD COLUMN IF NOT EXISTS calendar_link_sent_at TIMESTAMPTZ;
+ ADD COLUMN IF NOT EXISTS calcom_booking_id TEXT,
+ ADD COLUMN IF NOT EXISTS calcom_event_type_id INTEGER,
+ ADD COLUMN IF NOT EXISTS calendar_link_sent_at TIMESTAMPTZ,
+ ADD COLUMN IF NOT EXISTS booking_cancelled_at TIMESTAMPTZ;
 
 -- Index: fast lookup when Cal.com webhook arrives with a booking_id
 CREATE INDEX IF NOT EXISTS idx_sdr_prospectos_calcom_booking_id
@@ -37,7 +38,8 @@ CHECK (action_taken IN (
   'pdf_sent',
   'founder_override',
   'brochure_sent',
-  -- D23: Cal.com webhook-driven actions
-  'booking_confirmed_webhook',
-  'meeting_waiting_acked'
+ -- D23: Cal.com webhook-driven actions
+ 'booking_confirmed_webhook',
+ 'meeting_waiting_acked',
+ 'booking_cancellation_logged'
 ));

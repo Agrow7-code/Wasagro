@@ -192,24 +192,29 @@ async function handleBookingCancelled(
 
   const prospecto = data as Record<string, unknown>
 
-  // Revert to piloto_propuesto so the chaser re-engages
-  await updateSDRProspecto(prospecto['id'] as string, {
-    status: 'piloto_propuesto',
-    calcom_booking_id: null,
-  })
+ // Rule 3 (AGENTS.md): Do NOT auto-revert status or nullify booking_id —
+ // that's an irreversible change without human approval. Instead, record
+ // the cancellation timestamp and notify the founder. The founder decides
+ // whether to revert the prospect to piloto_propuesto.
+ await updateSDRProspecto(prospecto['id'] as string, {
+ booking_cancelled_at: new Date().toISOString(),
+ })
 
-  await saveSDRInteraccion({
-    prospecto_id: prospecto['id'],
-    phone: prospecto['phone'],
-    turno: (prospecto['turns_total'] as number) ?? 0,
-    tipo: 'outbound',
-    contenido: `[Cal.com booking cancelled: ${bookingId}]`,
-    action_taken: 'meeting_pending',
-    langfuse_trace_id: traceId,
-  })
+ await saveSDRInteraccion({
+ prospecto_id: prospecto['id'],
+ phone: prospecto['phone'],
+ turno: (prospecto['turns_total'] as number) ?? 0,
+ tipo: 'outbound',
+ contenido: `[Cal.com booking cancelled: ${bookingId}]`,
+ action_taken: 'booking_cancellation_logged',
+ langfuse_trace_id: traceId,
+ })
 
-  trace.event({ name: 'booking_cancelled', input: { prospecto_id: prospecto['id'], bookingId } })
-  return { status: 'ok', detail: `Booking ${bookingId} cancelled for prospecto ${prospecto['id']}` }
+ // Notify founder of cancellation so they can take action
+ await notifyFounderCancellation(prospecto, bookingId)
+
+ trace.event({ name: 'booking_cancelled', input: { prospecto_id: prospecto['id'], bookingId } })
+ return { status: 'ok', detail: `Booking ${bookingId} cancellation logged for prospecto ${prospecto['id']}` }
 }
 
 // ── Prospect lookup ──────────────────────────────────────────────────────────
@@ -325,7 +330,37 @@ async function notifyFounderEmail(
         `</ul>`,
       ].join(''),
     })
-  } catch (err) {
-    console.error('[calcom] Error sending founder email:', err)
-  }
+ } catch (err) {
+ console.error('[calcom] Error sending founder email:', err)
+ }
+}
+
+async function notifyFounderCancellation(
+ prospecto: Record<string, unknown>,
+ bookingId: string,
+): Promise<void> {
+ const founderPhone = process.env['FOUNDER_PHONE']
+ if (!founderPhone) {
+ console.warn('[calcom] FOUNDER_PHONE not set — skipping cancellation WhatsApp notification')
+ return
+ }
+
+ const nombre = (prospecto['nombre'] as string | null) ?? (prospecto['phone'] as string)
+
+ const msg = [
+ `🔴 Booking cancelado`,
+ ``,
+ `Prospecto: ${nombre}`,
+ `Teléfono: ${prospecto['phone']}`,
+ `Booking ID: ${bookingId}`,
+ ``,
+ `El prospecto sigue en status "reunion_agendada". Decidí si lo revertís a piloto_propuesto.`,
+ ].join('\n')
+
+ try {
+ const sender = crearSenderWhatsApp()
+ await sender.enviarTexto(founderPhone, msg)
+ } catch (err) {
+ console.error('[calcom] Error notifying founder of cancellation via WhatsApp:', err)
+ }
 }
