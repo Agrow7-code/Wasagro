@@ -52,12 +52,14 @@ export async function sdrChaserHandler(job: Job<ChaserJobData>) {
 }
 
 async function sendBookingReminder(prospecto: Record<string, unknown>, traceId: string): Promise<void> {
- const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
- const phone = prospecto['phone'] as string
- const nombre = (prospecto['nombre'] as string | null) ?? ''
+  const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
+  const phone = prospecto['phone'] as string
+  const nombre = (prospecto['nombre'] as string | null) ?? ''
+  const prospectoId = prospecto['id'] as string
 
- const saludo = nombre ? `${nombre}, ` : ''
- const linkPart = bookingUrl ? ` Podés agendar cuando te quede bien: ${bookingUrl}` : ' Dime qué día y hora te viene bien y lo coordinamos.'
+  const saludo = nombre ? `${nombre}, ` : ''
+  const urlWithParam = bookingUrl ? `${bookingUrl}?prospecto_id=${encodeURIComponent(prospectoId)}` : ''
+  const linkPart = urlWithParam ? ` Podés agendar cuando te quede bien: ${urlWithParam}` : ' Dime qué día y hora te viene bien y lo coordinamos.'
 
  const mensaje = `${saludo}¿Te quedó alguna duda sobre la demo?${linkPart}`
 

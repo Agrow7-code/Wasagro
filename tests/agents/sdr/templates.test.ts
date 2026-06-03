@@ -129,6 +129,21 @@ describe('calendarLink', () => {
     delete process.env['DEMO_BOOKING_URL']
     expect(calendarLink({})).toMatch(/qué día y hora/i)
   })
+
+  it('appends prospecto_id as query param when provided in vars', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
+    expect(calendarLink({ vars: { prospecto_id: 'abc-123' } })).toContain('?prospecto_id=abc-123')
+  })
+
+  it('does not append prospecto_id when vars has no prospecto_id', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
+    expect(calendarLink({})).not.toContain('prospecto_id')
+  })
+
+  it('encodes prospecto_id with special characters', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
+    expect(calendarLink({ vars: { prospecto_id: 'uuid-with/special' } })).toContain('?prospecto_id=uuid-with%2Fspecial')
+  })
 })
 
 // ─── static templates ───────────────────────────────────────────────────────

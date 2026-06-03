@@ -33,7 +33,10 @@ export function compose(state: SDRFsmState, intent: Intent, ctx: ConvContext): C
 
 // Helper: produce the calendar-link follow-up that ships right after the
 // close offer (or right after a meeting confirmation). Always deterministic.
-// calendarLink ignores ctx/vars but takes the standard input shape.
-export function composeCalendarLink(): string {
-  return TEMPLATES.calendarLink({})
+// prospecto_id is appended as a Cal.com query param so the webhook can match
+// the booking to the prospect reliably.
+export function composeCalendarLink(prospectoId?: string): string {
+  const input: { ctx?: unknown; vars?: Record<string, unknown> } = {}
+  if (prospectoId) input.vars = { prospecto_id: prospectoId }
+  return TEMPLATES.calendarLink(input)
 }

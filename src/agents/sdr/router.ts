@@ -326,7 +326,7 @@ ESTRICTO:
 
   await sender.enviarTexto(ctx.phone, respuesta)
   if (requires_founder_approval) {
-    await sender.enviarTexto(ctx.phone, composeCalendarLink())
+    await sender.enviarTexto(ctx.phone, composeCalendarLink(ctx.prospectId))
     trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: ctx.prospectId } })
   }
 

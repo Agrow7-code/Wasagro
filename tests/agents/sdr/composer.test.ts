@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { compose, composeCalendarLink } from '../../../src/agents/sdr/composer.js'
 import { resolveTemplate } from '../../../src/agents/sdr/skills/registry.js'
 import { createDefaultContext, type ConvContext } from '../../../src/agents/sdr/context.js'
@@ -110,9 +110,29 @@ describe('compose — full render', () => {
 // ─── composeCalendarLink ─────────────────────────────────────────────────────
 
 describe('composeCalendarLink', () => {
+  const ORIGINAL_CALCOM = process.env['CALCOM_BOOKING_URL']
+
+  afterEach(() => {
+    if (ORIGINAL_CALCOM === undefined) delete process.env['CALCOM_BOOKING_URL']
+    else process.env['CALCOM_BOOKING_URL'] = ORIGINAL_CALCOM
+  })
+
   it('returns the calendar link template', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
     const text = composeCalendarLink()
-    expect(text).toMatch(/horario|día|cal|📅/i)
+    expect(text).toMatch(/horario|cal|📅/i)
+  })
+
+  it('passes prospecto_id to template when provided', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
+    const text = composeCalendarLink('prospecto-abc-123')
+    expect(text).toContain('?prospecto_id=prospecto-abc-123')
+  })
+
+  it('omits prospecto_id when not provided', () => {
+    process.env['CALCOM_BOOKING_URL'] = 'https://cal.com/wasagro/demo'
+    const text = composeCalendarLink()
+    expect(text).not.toContain('prospecto_id')
   })
 })
 

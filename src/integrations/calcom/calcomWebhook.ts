@@ -96,7 +96,8 @@ export async function handleCalcomWebhook(
   })
 
   if (BOOKING_EVENTS.has(eventType)) {
-    return await handleBookingCreated(bookingId, attendees, startTime, title, trace.id)
+    const metadata = parsed.payload.metadata ?? {}
+    return await handleBookingCreated(bookingId, attendees, startTime, title, metadata, trace.id)
   }
 
   if (CANCEL_EVENTS.has(eventType)) {
@@ -114,6 +115,7 @@ async function handleBookingCreated(
   attendees: z.infer<typeof AttendeeSchema>[],
   startTime: string,
   title: string,
+  metadata: Record<string, unknown>,
   traceId: string,
 ): Promise<{ status: string; detail?: string }> {
   const trace = langfuse.trace({ id: traceId, name: 'calcom_booking_created' })
@@ -123,8 +125,11 @@ async function handleBookingCreated(
     return { status: 'error', detail: 'Missing bookingId' }
   }
 
-  // Find the prospect by attendee email or phone
-  const prospecto = await findProspectoByAttendee(attendees)
+  // Find the prospect by prospecto_id in metadata (primary) or attendee
+  // email/phone (fallback). The prospecto_id is passed as a query param in
+  // the Cal.com booking URL (?prospecto_id=xxx) and Cal.com preserves it in
+  // payload.metadata — this is the 100% reliable matching path.
+  const prospecto = await findProspectoByAttendee(attendees, metadata)
   if (!prospecto) {
     trace.event({ name: 'prospecto_not_found', level: 'WARNING', input: { attendees } })
     return { status: 'no_prospecto', detail: 'No matching prospect found' }
@@ -221,8 +226,25 @@ async function handleBookingCancelled(
 
 async function findProspectoByAttendee(
   attendees: z.infer<typeof AttendeeSchema>[],
+  metadata?: Record<string, unknown>,
 ): Promise<Record<string, unknown> | null> {
-  // Try phone first (most reliable for WhatsApp-based prospects)
+  // Primary: prospecto_id from Cal.com metadata (set via ?prospecto_id=xxx
+  // query param on the booking URL). This is the 100% reliable matching path.
+  if (metadata) {
+    const prospectoId = metadata['prospecto_id'] as string | undefined
+    if (prospectoId) {
+      const { data } = await supabase
+        .from('sdr_prospectos')
+        .select('*')
+        .eq('id', prospectoId)
+        .maybeSingle()
+      if (data) {
+        return data as Record<string, unknown>
+      }
+    }
+  }
+
+  // Fallback 1: phone match (most reliable for WhatsApp-based prospects)
   for (const att of attendees) {
     const phone = normalizePhone(att.phoneNumber ?? '')
     if (phone) {
@@ -235,20 +257,19 @@ async function findProspectoByAttendee(
     }
   }
 
-  // Fallback to email
+  // Fallback 2: email match
   for (const att of attendees) {
     const email = att.email
     if (email && email !== '') {
-      // Cal.com doesn't store the prospect's WhatsApp phone in the attendee
-      // record unless they provided it at booking time. The metadata field
-      // from the SDR link can carry the phone. Try metadata too.
+      const { data } = await supabase
+        .from('sdr_prospectos')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle()
+      if (data) return data as Record<string, unknown>
     }
   }
 
-  // Last resort: check if any prospecto is in piloto_propuesto without a
-  // calcom_booking_id yet (they were sent the link but haven't been matched)
-  // This is a soft match — only for single-unmatched-prospecto scenarios.
-  // Skip if multiple unmatched prospectos exist (ambiguous).
   return null
 }
 

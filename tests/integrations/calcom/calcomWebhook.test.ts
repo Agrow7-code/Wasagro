@@ -31,12 +31,14 @@ describe('verifyCalcomSignature', () => {
 
 // ── Webhook handler ─────────────────────────────────────────────────────────
 
+const mockMaybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }))
+
 vi.mock('../../../src/integrations/supabase.js', () => ({
   supabase: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          maybeSingle: vi.fn(() => Promise.resolve({ data: null, error: null })),
+          maybeSingle: mockMaybeSingle,
         })),
       })),
     })),
@@ -134,5 +136,30 @@ describe('handleCalcomWebhook', () => {
     const { rawBody, signature } = signBody(body)
     const result = await handleCalcomWebhook(rawBody, signature, secret)
     expect(result.status).toBe('no_prospecto')
+  })
+
+  it('matches prospecto by metadata.prospecto_id (primary path)', async () => {
+    const mockProspecto = {
+      id: 'prospecto-uuid-123',
+      phone: '+593987654321',
+      turns_total: 3,
+      calcom_booking_id: null,
+    }
+    mockMaybeSingle.mockResolvedValueOnce({ data: mockProspecto, error: null })
+
+    const body = {
+      triggerEvent: 'BOOKING_CREATED',
+      payload: {
+        bookingId: 'booking-456',
+        title: 'Demo Wasagro',
+        startTime: '2026-06-20T10:00:00Z',
+        attendees: [],
+        metadata: { prospecto_id: 'prospecto-uuid-123' },
+      },
+    }
+    const { rawBody, signature } = signBody(body)
+    const result = await handleCalcomWebhook(rawBody, signature, secret)
+    expect(result.status).toBe('ok')
+    expect(result.detail).toContain('prospecto-uuid-123')
   })
 })

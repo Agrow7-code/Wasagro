@@ -206,12 +206,14 @@ export async function handleFounderApproval(
     if (mensajeAlProspecto) {
       await sender.enviarTexto(prospecto['phone'] as string, mensajeAlProspecto)
 
-  if (isSi || !isNo) {
-    const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
-    const followUp = bookingUrl
-      ? `Perfecto — puedes agendar aquí: ${bookingUrl}`
-      : 'Perfecto — ¿cuándo tienes 20 minutos disponibles?'
-    await sender.enviarTexto(prospecto['phone'] as string, followUp)
+      if (isSi || !isNo) {
+        const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
+        const prospectoId = prospecto['id'] as string
+        const urlWithParam = bookingUrl ? `${bookingUrl}?prospecto_id=${encodeURIComponent(prospectoId)}` : ''
+        const followUp = urlWithParam
+          ? `Perfecto — puedes agendar aquí: ${urlWithParam}`
+          : 'Perfecto — ¿cuándo tienes 20 minutos disponibles?'
+        await sender.enviarTexto(prospecto['phone'] as string, followUp)
   }
 
       trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: prospecto['id'], narrativa: prospecto['narrativa_asignada'] } })
@@ -365,9 +367,11 @@ export async function handleMeetingConfirmation(
       actionTaken = 'meeting_confirmed'
     } else {
       // Intent 'other' - Respuesta conversacional amigable con el link
-  const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
-  const followUp = bookingUrl
-        ? `No estoy seguro de haberte entendido. Si quieres agendar la demostración, puedes elegir el horario directamente aquí: ${bookingUrl} ⏰`
+      const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
+      const prospectoId = prospecto['id'] as string
+      const urlWithParam = bookingUrl ? `${bookingUrl}?prospecto_id=${encodeURIComponent(prospectoId)}` : ''
+      const followUp = urlWithParam
+        ? `No estoy seguro de haberte entendido. Si quieres agendar la demostración, puedes elegir el horario directamente aquí: ${urlWithParam} ⏰`
         : '¿Cuándo tienes 30 minutos disponibles? Dime el día y la hora que mejor te quede.'
       await sender.enviarTexto(msg.from, followUp)
     }
