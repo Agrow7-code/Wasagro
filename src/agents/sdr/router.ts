@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { ExtraccionSDRSchema } from '../../types/dominio/SDRTypes.js'
 import { updateSDRProspecto, saveSDRInteraccion } from '../../pipeline/supabaseQueries.js'
 import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSender.js'
-import { getCachedContext, setCachedContext } from '../../integrations/redis.js'
+import { getCachedContext, setCachedContext, setIfNotExists } from '../../integrations/redis.js'
 import { reduceContext, computeFsmTransition, type ConvContext, type Intent, type SDRFsmState } from './context.js'
 import {
   loadHydratedContext,
@@ -324,7 +324,32 @@ ESTRICTO:
 
   await updateSDRProspecto(ctx.prospectId, updateData, client)
 
-  await sender.enviarTexto(ctx.phone, respuesta)
+  // TODO [FASE-A]: resolved — defensive brochure dedup via Redis SET NX EX (30s).
+  // The exact root cause of the duplicate post-brochure (worker dup vs Evolution
+  // API redelivery with different wamid vs handler race) was never pinned down.
+  // This guard is the structural fix: at most one brochure send per phone per 30s.
+  // If a future investigation finds the root cause and removes it, this guard
+  // becomes a no-op (setIfNotExists always returns true) — safe either way.
+  let shouldSend = true
+  if (composed?.templateKey === 'brochureSend') {
+    try {
+      const dedupOk = await setIfNotExists(`sdr_brochure_sent:${ctx.phone}`, 30)
+      if (!dedupOk) {
+        shouldSend = false
+        trace.event({
+          name:  'sdr_brochure_dedup_skipped',
+          level: 'WARNING',
+          input: { phone: ctx.phone, prospecto_id: ctx.prospectId },
+        })
+      }
+    } catch (err) {
+      // Redis down → degrade to "send anyway" (current behavior, no regression).
+      console.warn('[SDR router] brochure dedup setIfNotExists failed, sending anyway:', err)
+    }
+  }
+  if (shouldSend) {
+    await sender.enviarTexto(ctx.phone, respuesta)
+  }
   if (requires_founder_approval) {
     await sender.enviarTexto(ctx.phone, composeCalendarLink(ctx.prospectId))
     trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: ctx.prospectId } })

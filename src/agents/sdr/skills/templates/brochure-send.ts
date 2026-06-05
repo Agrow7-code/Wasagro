@@ -9,9 +9,10 @@ import { segmentoToBrochureSlug } from '../../roleDetector.js'
 // The URL base is WASAGRO_BROCHURE_URL (env). Default kept for the unlikely
 // case the var disappears in prod.
 
-// TODO [FASE-A]: mensaje duplicado post-brochure
-// Causa: posible worker duplicado o singletonKey no cubre este path de Evolution API
-// Investigar después de que Redis wiring esté estable
+// Dedup defensivo: router.ts envuelve esta send con setIfNotExists
+// ('sdr_brochure_sent:<phone>', TTL 30s) y emite sdr_brochure_dedup_skipped
+// a LangFuse si rechaza. La template en sí es pura — el guard vive en el
+// boundary del send. Ver router.ts ~L327.
 export function brochureSend({ ctx }: { ctx: ConvContext }): string {
   const slug = segmentoToBrochureSlug(ctx.segmento)
   const base = process.env['WASAGRO_BROCHURE_URL'] ?? 'https://wasagro.vercel.app/brochure'
