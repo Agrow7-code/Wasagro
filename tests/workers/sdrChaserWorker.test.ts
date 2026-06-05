@@ -132,7 +132,7 @@ describe('sdrChaserWorker', () => {
 
       expect(mockSender.enviarTexto).toHaveBeenCalledWith(
         '549111234',
-        'María, ¿Te quedó alguna duda sobre la demo? Podés agendar cuando te quede bien: https://cal.example.com/demo'
+        'María, ¿Te quedó alguna duda sobre la demo? Podés agendar cuando te quede bien: https://cal.example.com/demo?prospecto_id=789'
       )
       expect(supabaseQueries.saveSDRInteraccion).toHaveBeenCalledWith(
         expect.objectContaining({ action_taken: 'booking_reminder_24h' })
