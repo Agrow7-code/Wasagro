@@ -1,6 +1,5 @@
 import { langfuse } from '../../integrations/langfuse.js'
 import type { NormalizedMessage } from '../../integrations/whatsapp/NormalizedMessage.js'
-import type { ContextoOnboardingAgricultor } from '../../types/dominio/Onboarding.js'
 import { timedFetch } from '../../integrations/timedFetch.js'
 import {
   getUserByPhone,
@@ -16,6 +15,16 @@ import {
   actualizarMensaje,
   updateFincaCoordenadas,
 } from '../supabaseQueries.js'
+import {
+  reduceOnboardingContext,
+  mapDatosToExtraction,
+} from '../../agents/onboarding/context.js'
+import {
+  hydrateOnboardingContext,
+  toContextoConversacion,
+  toContextoAgricultor,
+  serializeContextForSession,
+} from '../../agents/onboarding/contextStore.js'
 
 async function geocodeAndUpdateFinca(fincaId: string, address: string, traceId: string): Promise<void> {
   try {
@@ -71,17 +80,19 @@ export async function handleOnboardingAdmin(
     }
   }
 
-  const contexto = {
-    historial: (session.contexto_parcial['historial'] as Array<{ rol: 'usuario' | 'agente'; contenido: string }>) ?? [],
-    preguntas_realizadas: session.clarification_count,
-    datos_recolectados: (session.contexto_parcial['datos'] as Record<string, unknown>) ?? {},
-  }
+  // Fase F-2: hidratar OnboardingContext desde la sesión (legacy bag o key 'ctx'
+  // si fue persistida por una corrida previa post-migración) + reduce con el
+  // mensaje entrante del usuario antes de llamar al LLM.
+  const ctx0 = hydrateOnboardingContext(session, usuario, 'admin')
+  const ctxIn = reduceOnboardingContext(ctx0, { userMessage: texto })
 
-  const resultado = await _llm!.onboardarAdmin(texto, contexto, traceId)
+  const resultado = await _llm!.onboardarAdmin(texto, toContextoConversacion(ctxIn), traceId)
   const datos = resultado.datos_extraidos ?? {}
 
-  // P6: persist consent exactly once when the user accepts
-  const consentAlreadySaved = Boolean(session.contexto_parcial['consent_saved'])
+  // P6: persist consent exactly once when the user accepts. ctx0.consentimiento
+  // captura el "ya fue confirmado alguna vez" (monotónico por reducer), así que
+  // el guard idempotente sobrevive a writes parciales/retries del worker.
+  const consentAlreadySaved = ctx0.consentimiento
   if (datos.consentimiento === true && !consentAlreadySaved) {
     await saveUserConsent({ user_id: usuario.id, phone: msg.from, tipo: 'datos', texto_mostrado: CONSENT_TEXT_ADMIN, aceptado: true })
       .catch(err => {
@@ -128,23 +139,24 @@ export async function handleOnboardingAdmin(
     }
   }
 
-  const nextStep = session.clarification_count + 1
-  if (!resultado.onboarding_completo && nextStep >= MAX_ONBOARDING_STEPS) {
-    langfuse.trace({ id: traceId }).event({ name: 'onboarding_admin_max_steps', level: 'WARNING', input: { steps: nextStep } })
+  // Reduce con la respuesta del LLM: extracción, paso, completitud, mensaje del bot
+  // (que se appendea al historial vía el reducer).
+  const ctxNext = reduceOnboardingContext(ctxIn, {
+    extraction:         mapDatosToExtraction(datos),
+    pasoCompletado:     resultado.paso_completado,
+    pasoSiguiente:      resultado.siguiente_paso,
+    onboardingCompleto: resultado.onboarding_completo,
+    botMessage:         resultado.mensaje_para_usuario,
+  })
+
+  if (!ctxNext.onboardingCompleto && ctxNext.pasoSiguiente >= MAX_ONBOARDING_STEPS) {
+    langfuse.trace({ id: traceId }).event({ name: 'onboarding_admin_max_steps', level: 'WARNING', input: { steps: ctxNext.pasoSiguiente } })
   }
 
   await updateSession(session.session_id, {
-    clarification_count: resultado.onboarding_completo ? 0 : Math.min(nextStep, MAX_ONBOARDING_STEPS),
-    contexto_parcial: {
-      historial: [
-        ...contexto.historial,
-        { rol: 'usuario' as const, contenido: texto },
-        { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario },
-      ],
-      datos: { ...contexto.datos_recolectados, ...(resultado.datos_extraidos ?? {}) },
-      consent_saved: datos.consentimiento === true ? true : consentAlreadySaved,
-    },
-    status: resultado.onboarding_completo || nextStep >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
+    clarification_count: ctxNext.onboardingCompleto ? 0 : Math.min(ctxNext.pasoSiguiente, MAX_ONBOARDING_STEPS),
+    contexto_parcial:    serializeContextForSession(ctxNext),
+    status:              ctxNext.onboardingCompleto || ctxNext.pasoSiguiente >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
@@ -183,27 +195,23 @@ export async function handleOnboardingAgricultor(
     }
   }
 
-  const historialPrevio = (session.contexto_parcial['historial'] as Array<{ rol: 'usuario' | 'agente'; contenido: string }>) ?? []
-  const datosPrevios = (session.contexto_parcial['datos'] as Record<string, unknown>) ?? {}
+  // Fase F-2: hidratar contexto + reducir mensaje entrante antes de llamar al LLM.
+  const ctx0Agr = hydrateOnboardingContext(session, usuario, 'agricultor')
+  const ctxInAgr = reduceOnboardingContext(ctx0Agr, { userMessage: texto })
 
-  // Construir lista de fincas disponibles para inyectar en el prompt
+  // Lista de fincas disponibles para inyectar en el prompt (derivada de DB,
+  // no se persiste en ctx — se calcula en cada turno).
   const fincas = await getFincasDisponibles()
   const fincasDisponibles = fincas.length > 0
     ? fincas.map(f => `- ${f.finca_id}: ${f.nombre} (${f.cultivo_principal ?? 'cultivo no especificado'})`).join('\n')
     : 'No hay fincas registradas aún'
 
-  const contexto: ContextoOnboardingAgricultor = {
-    historial: historialPrevio,
-    paso_actual: session.clarification_count,
-    datos_recolectados: datosPrevios,
-    fincas_disponibles: fincasDisponibles,
-  }
-
-  const resultado = await _llm!.onboardarAgricultor(texto, contexto, traceId)
+  const resultado = await _llm!.onboardarAgricultor(texto, toContextoAgricultor(ctxInAgr, fincasDisponibles), traceId)
   const datosAgr = resultado.datos_extraidos ?? {}
 
-  // P6: persist consent exactly once when the agricultor accepts
-  const consentAlreadySavedAgr = Boolean(session.contexto_parcial['consent_saved'])
+  // P6: persist consent exactly once. ctx0Agr.consentimiento es monotónico —
+  // guardrail idempotente igual que en el flow admin.
+  const consentAlreadySavedAgr = ctx0Agr.consentimiento
   if (datosAgr.consentimiento === true && !consentAlreadySavedAgr) {
     await saveUserConsent({ user_id: usuario.id, phone: msg.from, tipo: 'datos', texto_mostrado: CONSENT_TEXT_AGRICULTOR, aceptado: true })
       .catch(err => {
@@ -253,23 +261,23 @@ export async function handleOnboardingAgricultor(
     })
   }
 
-  const nextStepAgr = session.clarification_count + 1
-  if (!resultado.onboarding_completo && nextStepAgr >= MAX_ONBOARDING_STEPS) {
-    langfuse.trace({ id: traceId }).event({ name: 'onboarding_agricultor_max_steps', level: 'WARNING', input: { steps: nextStepAgr } })
+  // Reduce con la respuesta del LLM (extracción, paso, completitud, mensaje bot).
+  const ctxNextAgr = reduceOnboardingContext(ctxInAgr, {
+    extraction:         mapDatosToExtraction(datosAgr),
+    pasoCompletado:     resultado.paso_completado,
+    pasoSiguiente:      resultado.siguiente_paso,
+    onboardingCompleto: resultado.onboarding_completo,
+    botMessage:         resultado.mensaje_para_usuario,
+  })
+
+  if (!ctxNextAgr.onboardingCompleto && ctxNextAgr.pasoSiguiente >= MAX_ONBOARDING_STEPS) {
+    langfuse.trace({ id: traceId }).event({ name: 'onboarding_agricultor_max_steps', level: 'WARNING', input: { steps: ctxNextAgr.pasoSiguiente } })
   }
 
   await updateSession(session.session_id, {
-    clarification_count: resultado.onboarding_completo ? 0 : Math.min(nextStepAgr, MAX_ONBOARDING_STEPS),
-    contexto_parcial: {
-      historial: [
-        ...historialPrevio,
-        { rol: 'usuario' as const, contenido: texto },
-        { rol: 'agente' as const, contenido: resultado.mensaje_para_usuario },
-      ],
-      datos: { ...datosPrevios, ...(resultado.datos_extraidos ?? {}) },
-      consent_saved: datosAgr.consentimiento === true ? true : consentAlreadySavedAgr,
-    },
-    status: resultado.onboarding_completo || nextStepAgr >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
+    clarification_count: ctxNextAgr.onboardingCompleto ? 0 : Math.min(ctxNextAgr.pasoSiguiente, MAX_ONBOARDING_STEPS),
+    contexto_parcial:    serializeContextForSession(ctxNextAgr),
+    status:              ctxNextAgr.onboardingCompleto || ctxNextAgr.pasoSiguiente >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)

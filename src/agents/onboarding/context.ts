@@ -240,17 +240,18 @@ function extractDatosForLLM(ctx: OnboardingContext): Record<string, unknown> {
 }
 
 // Map DatosExtraidosOnboarding (snake_case from LLM response) to ExtractionUpdate
-// (camelCase reducer input). Handles every field as optional.
+// (camelCase reducer input). Accepts undefined-or-null inputs so DatosExtraidosOnboarding
+// (which has every field optional+nullable per Zod schema) can be passed directly.
 export function mapDatosToExtraction(datos: {
-  nombre?:                  string | null
-  rol?:                     string | null
-  consentimiento?:          boolean | null
-  finca_nombre?:            string | null
-  finca_ubicacion_texto?:   string | null
-  finca_id?:                string | null
-  cultivo_principal?:       string | null
-  pais?:                    string | null
-  lotes?:                   Array<{ nombre_coloquial: string; hectareas: number | null }>
+  nombre?:                  string  | null | undefined
+  rol?:                     string  | null | undefined
+  consentimiento?:          boolean | null | undefined
+  finca_nombre?:            string  | null | undefined
+  finca_ubicacion_texto?:   string  | null | undefined
+  finca_id?:                string  | null | undefined
+  cultivo_principal?:       string  | null | undefined
+  pais?:                    string  | null | undefined
+  lotes?:                   Array<{ nombre_coloquial: string; hectareas: number | null }> | undefined
 }): ExtractionUpdate {
   const out: ExtractionUpdate = {}
   if (datos.nombre                !== undefined) out.nombre              = datos.nombre
