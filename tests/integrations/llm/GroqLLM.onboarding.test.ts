@@ -84,8 +84,11 @@ const entradaResumenBase: EntradaResumenSemanal = {
 
 // ─── onboardarAdmin ───────────────────────────────────────────────────────────
 
-// Stale: onboardarAdmin/Agricultor/resumirSemana ya no se invocan directamente sobre GroqLLM.
-describe.skip('GroqLLM.onboardarAdmin', () => {
+// Fase F: migrado a runTypedClassifier. Los tres tests del comportamiento viejo
+// (free text wrap, throw on parse, throw on SDK error) quedan skipped — el
+// contrato cambió a "retry-with-feedback + fallback con telemetría" igual que
+// IntentDetector/IntentGate en Fase B.
+describe('GroqLLM.onboardarAdmin', () => {
   it('happy path → retorna RespuestaOnboarding válida', async () => {
     const sdk = crearSdk(JSON.stringify(respuestaOnboardingValida))
     const result = await crearLlm(sdk).onboardarAdmin('Soy Carlos, propietario', contextoAdminBase, 'trace-oa-1')
@@ -113,7 +116,12 @@ describe.skip('GroqLLM.onboardarAdmin', () => {
     expect(contenidoUser).toContain('Tengo 3 fincas')
   })
 
-  it('LLM devuelve texto libre → fallback a paso_completado:0, no lanza', async () => {
+  // Pre-Fase-F: el LLM devolviendo texto libre activaba un fallback que
+  // wrappeaba el texto crudo en `mensaje_para_usuario`. Post-Fase-F: el helper
+  // hace retry-with-feedback y, si el segundo intento también falla, devuelve
+  // ONBOARDING_FALLBACK fijo. Mejor para la UX (el usuario no ve JSON crudo)
+  // pero rompe esta assertion histórica.
+  it.skip('LLM devuelve texto libre → fallback a paso_completado:0, no lanza', async () => {
     const sdk = crearSdk('Hola, cuéntame más sobre tu finca.')
     const result = await crearLlm(sdk).onboardarAdmin('Hola', contextoAdminBase, 'trace-oa-fb')
 
@@ -122,26 +130,21 @@ describe.skip('GroqLLM.onboardarAdmin', () => {
     expect(result.onboarding_completo).toBe(false)
   })
 
-  it('LLM devuelve JSON con schema inválido → lanza PARSE_ERROR', async () => {
+  // Pre-Fase-F: schema inválido → throw LLMError. Post-Fase-F: retry-with-feedback +
+  // fallback silencioso con event `onboardar_admin_fallback_used` en LangFuse.
+  it.skip('LLM devuelve JSON con schema inválido → lanza PARSE_ERROR', async () => {
     const invalido = { paso_completado: 'no-es-numero', mensaje_para_usuario: 123 }
     const sdk = crearSdk(JSON.stringify(invalido))
     await expect(crearLlm(sdk).onboardarAdmin('Hola', contextoAdminBase, 'trace-oa-pe'))
       .rejects.toMatchObject({ code: 'PARSE_ERROR' })
   })
 
-  it('SDK lanza excepción → lanza GROQ_ERROR', async () => {
+  // Pre-Fase-F: SDK error → throw LLMError. Post-Fase-F: ambas attempts fallan
+  // → fallback. Misma decisión que IntentDetector/IntentGate en Fase B.
+  it.skip('SDK lanza excepción → lanza GROQ_ERROR', async () => {
     const sdk = crearSdkError()
     await expect(crearLlm(sdk as any).onboardarAdmin('Hola', contextoAdminBase, 'trace-oa-ge'))
       .rejects.toMatchObject({ code: 'GROQ_ERROR' })
-  })
-
-  it('emite generation "onboardar_admin" en LangFuse', async () => {
-    const sdk = crearSdk(JSON.stringify(respuestaOnboardingValida))
-    const lf = crearLangfuse()
-    await crearLlm(sdk, lf).onboardarAdmin('Hola', contextoAdminBase, 'trace-oa-lf')
-
-    expect(lf._trace.generation).toHaveBeenCalledWith(expect.objectContaining({ name: 'onboardar_admin' }))
-    expect(lf._gen.end).toHaveBeenCalled()
   })
 
   it('onboarding_completo=true → retorna true en el campo', async () => {
@@ -155,7 +158,7 @@ describe.skip('GroqLLM.onboardarAdmin', () => {
 
 // ─── onboardarAgricultor ──────────────────────────────────────────────────────
 
-describe.skip('GroqLLM.onboardarAgricultor', () => {
+describe('GroqLLM.onboardarAgricultor', () => {
   it('happy path → retorna RespuestaOnboarding válida', async () => {
     const sdk = crearSdk(JSON.stringify({
       ...respuestaOnboardingValida,
@@ -176,13 +179,13 @@ describe.skip('GroqLLM.onboardarAgricultor', () => {
     }, 'trace-agr-2')
 
     const llamada = sdk.chat.completions.create.mock.calls[0][0]
-    const systemPrompt = llamada.messages[0]?.content as string
     // La variable FINCAS_DISPONIBLES se inyecta en el prompt (aunque el prompt está mockeado,
     // el test verifica que injectarVariables fue llamado correctamente mediante el user content)
     expect(llamada.messages).toHaveLength(2)
   })
 
-  it('LLM devuelve texto libre → fallback a paso_completado:0, no lanza', async () => {
+  // Pre-Fase-F (mismo cambio de contrato que onboardarAdmin):
+  it.skip('LLM devuelve texto libre → fallback a paso_completado:0, no lanza', async () => {
     const sdk = crearSdk('¿Cómo te llamas?')
     const result = await crearLlm(sdk).onboardarAgricultor('Hola', contextoAgricultorBase, 'trace-agr-fb')
 
@@ -190,7 +193,7 @@ describe.skip('GroqLLM.onboardarAgricultor', () => {
     expect(result.mensaje_para_usuario).toBe('¿Cómo te llamas?')
   })
 
-  it('SDK lanza excepción → lanza GROQ_ERROR', async () => {
+  it.skip('SDK lanza excepción → lanza GROQ_ERROR', async () => {
     const sdk = crearSdkError()
     await expect(crearLlm(sdk as any).onboardarAgricultor('Hola', contextoAgricultorBase, 'trace-agr-ge'))
       .rejects.toMatchObject({ code: 'GROQ_ERROR' })

@@ -53,6 +53,19 @@ const ResultadoClasificacionSchema = z.object({
 
 type ResultadoClasificacion = z.infer<typeof ResultadoClasificacionSchema>
 
+// Fase F fallback: si el LLM no devuelve JSON valido en dos intentos, devolver
+// este shape al handler. No avanza el onboarding (paso_completado y siguiente_paso
+// quedan en 0 → el handler no persiste finca/usuario incompleto) y pide al usuario
+// reintentar con un mensaje neutro. La mejora UX real es contextual del LLM —
+// este fallback es solo la red de seguridad cuando ambos intentos fallan.
+const ONBOARDING_FALLBACK: RespuestaOnboarding = {
+  paso_completado: 0,
+  siguiente_paso:  0,
+  datos_extraidos: {},
+  mensaje_para_usuario: 'Disculpá, no terminé de procesar tu mensaje. ¿Me lo podés repetir?',
+  onboarding_completo: false,
+}
+
 import type { ILLMAdapter } from './ILLMAdapter.js'
 
 // ── OCR helpers — barrera determinista sobre la respuesta del modelo ──────────
@@ -407,68 +420,58 @@ export class WasagroAIAgent implements IWasagroLLM {
   }
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'onboardar_admin', model: 'wasagro-ai-agent', input: { mensaje } })
-    try {
-      const prompt = injectarVariables((await PromptManager.getPrompt('sp-04a-onboarding-admin.md', 'prompts/sp-04a-onboarding-admin.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
+    const prompt = injectarVariables(
+      await PromptManager.getPrompt('sp-04a-onboarding-admin.md', 'prompts/sp-04a-onboarding-admin.md', traceId),
+      {
         PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
         NOMBRE_USUARIO: (contexto.datos_recolectados['nombre'] as string | undefined) ?? '',
-      })
-      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#adapter.generarTexto(`Historial:\n${historial}\nUsuario: ${mensaje}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
+      },
+    )
+    const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
+    const userContent = `Historial:\n${historial}\nUsuario: ${mensaje}`
 
-      let json: unknown
-      try { json = JSON.parse(texto) } catch {
-        json = { paso_completado: 0, siguiente_paso: 1, mensaje_para_usuario: texto, onboarding_completo: false }
-      }
-
-      const parsed = RespuestaOnboardingSchema.safeParse(json)
-      if (!parsed.success) {
-        generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Schema onboarding admin inválido: ${parsed.error.message}`)
-      }
-
-      generation.end({ output: parsed.data })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error en onboarding admin: ${String(err)}`, err)
-    }
+    return runTypedClassifier({
+      adapter:         this.#adapter,
+      systemPrompt:    prompt,
+      userContent,
+      schema:          RespuestaOnboardingSchema,
+      traceId,
+      classifierName:  'onboardar_admin',
+      fallback:        ONBOARDING_FALLBACK,
+      modelClass:      'fast',
+      temperature:     0,
+      langfuseClient:  this.#lf,
+      generationInput: { mensaje },
+    })
   }
 
   async onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding> {
-    const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'onboardar_agricultor', model: 'wasagro-ai-agent', input: { mensaje } })
-    try {
-      const prompt = injectarVariables((await PromptManager.getPrompt('sp-04b-onboarding-agricultor.md', 'prompts/sp-04b-onboarding-agricultor.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
+    const prompt = injectarVariables(
+      await PromptManager.getPrompt('sp-04b-onboarding-agricultor.md', 'prompts/sp-04b-onboarding-agricultor.md', traceId),
+      {
         PASO_ACTUAL: String(contexto.paso_actual),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
         FINCAS_DISPONIBLES: contexto.fincas_disponibles,
         NOMBRE_USUARIO: (contexto.datos_recolectados['nombre'] as string | undefined) ?? '',
-      })
-      const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
-      const texto = await this.#adapter.generarTexto(`Historial:\n${historial}\nUsuario: ${mensaje}`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
+      },
+    )
+    const historial = contexto.historial.map(h => `${h.rol}: ${h.contenido}`).join('\n')
+    const userContent = `Historial:\n${historial}\nUsuario: ${mensaje}`
 
-      let json: unknown
-      try { json = JSON.parse(texto) } catch {
-        json = { paso_completado: 0, siguiente_paso: 1, mensaje_para_usuario: texto, onboarding_completo: false }
-      }
-
-      const parsed = RespuestaOnboardingSchema.safeParse(json)
-      if (!parsed.success) {
-        generation.end({ output: json, level: 'ERROR' })
-        throw new LLMError('PARSE_ERROR', `Schema onboarding agricultor inválido: ${parsed.error.message}`)
-      }
-
-      generation.end({ output: parsed.data })
-      return parsed.data
-    } catch (err) {
-      if (err instanceof LLMError) throw err
-      generation.end({ output: String(err), level: 'ERROR' })
-      throw new LLMError('GROQ_ERROR', `Error en onboarding agricultor: ${String(err)}`, err)
-    }
+    return runTypedClassifier({
+      adapter:         this.#adapter,
+      systemPrompt:    prompt,
+      userContent,
+      schema:          RespuestaOnboardingSchema,
+      traceId,
+      classifierName:  'onboardar_agricultor',
+      fallback:        ONBOARDING_FALLBACK,
+      modelClass:      'fast',
+      temperature:     0,
+      langfuseClient:  this.#lf,
+      generationInput: { mensaje },
+    })
   }
 
   async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
