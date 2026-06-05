@@ -23,6 +23,7 @@ import { meetingWaiting } from './templates/meeting-waiting.js'
 import { gracefulExit } from './templates/graceful-exit.js'
 import { willBookLater } from './templates/will-book-later.js'
 import { audioAck } from './templates/audio-ack.js'
+import { outOfScopeCultivo } from './templates/out-of-scope-cultivo.js'
 
 export interface TemplateInput {
   ctx: ConvContext
@@ -40,6 +41,7 @@ export const TEMPLATES = {
   gracefulExit,
   willBookLater,
   audioAck,
+  outOfScopeCultivo,
 } as const
 
 export type TemplateKey = keyof typeof TEMPLATES

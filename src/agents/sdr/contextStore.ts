@@ -82,9 +82,12 @@ export function fsmStateToLegacySDRNode(state: SDRFsmState): string {
   }
 }
 
-// TODO [H1-expansion]: cultivos fuera de scope no se comunican al prospecto
-// Si cultivo ∉ ['cacao','banano','cafe','pina'] → responder honestamente:
-// "Actualmente optimizado para cacao y banano — te anotamos para hortalizas cuando esté listo"
+// El mapping incluye cultivos fuera de MVP (aguacate, palma, arroz, maiz) para
+// que el SDR pueda detectarlos y responder honestamente via el template
+// outOfScopeCultivo — el router chequea isMVPCultivo(ctx.cultivo) tras la
+// extraccion y, si no esta en scope, manda la copy "te anotamos para mas
+// adelante" + emite sdr_out_of_scope_cultivo a LangFuse para construir el
+// waitlist manual. Resuelve el TODO [H1-expansion] historico.
 function mapCultivo(c: string | null | undefined): Cultivo | null {
   if (!c) return null
   const lower = c.toLowerCase()

@@ -6,7 +6,7 @@ import { ExtraccionSDRSchema } from '../../types/dominio/SDRTypes.js'
 import { updateSDRProspecto, saveSDRInteraccion } from '../../pipeline/supabaseQueries.js'
 import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSender.js'
 import { getCachedContext, setCachedContext, setIfNotExists } from '../../integrations/redis.js'
-import { reduceContext, computeFsmTransition, type ConvContext, type Intent, type SDRFsmState } from './context.js'
+import { reduceContext, computeFsmTransition, isMVPCultivo, type ConvContext, type Intent, type SDRFsmState } from './context.js'
 import {
   loadHydratedContext,
   persistSessionState,
@@ -32,6 +32,7 @@ const TEMPLATE_TO_BOT_ACTION: Record<TemplateKey, BotAction> = {
   gracefulExit: 'sent_graceful_exit',
   willBookLater: 'sent_calendar_link',
   audioAck: 'none',
+  outOfScopeCultivo: 'sent_graceful_exit',
 }
 
 export interface SDRRouterContext {
@@ -153,6 +154,67 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
     await updateSDRProspecto(ctx.prospectId, updateData, client)
     await sender.enviarTexto(ctx.phone, 'Soy el asistente de Wasagro, un sistema para operaciones agrícolas. Creo que te has equivocado de número. ¡Que tengas un buen día! 👋')
     return
+  }
+
+  // ── 4b. Out-of-scope cultivo shortcut (TODO [H1-expansion] resuelto) ──────
+  //    Si el cultivo (extraido nuevo OR ya en ctx) NO esta en MVP_CULTIVOS,
+  //    mandar la copy honesta UNA VEZ por phone (TTL 24h via Redis dedup) y
+  //    bajar la FSM a dormant para que las turnos siguientes no re-piteen.
+  //
+  //    Gate: solo dispara en estados tempranos (triage/discovery). Despues de
+  //    pitch_sent es tarde — el prospecto ya recibio pitch y no queremos
+  //    "pull the rug" con "actually no atendemos tu cultivo" mid-funnel. Si
+  //    el cultivo non-MVP no se detecto en discovery, mejor seguir con el LLM.
+  //
+  //    El reducer invariant "confirmed wins" protege contra hallucinations:
+  //    si ctx.cultivo ya era MVP y la extraction trae aguacate, effectiveCultivo
+  //    sigue siendo el MVP y no entra en este branch.
+  const extractedCultivo = extraccionValidada
+    ? mapExtraccionToUpdate(extraccionValidada).cultivo ?? null
+    : null
+  const effectiveCultivo = ctx.cultivo ?? extractedCultivo
+  const isEarlyFunnel = ctx.fsmState === 'triage' || ctx.fsmState === 'discovery'
+  if (isEarlyFunnel && effectiveCultivo && !isMVPCultivo(effectiveCultivo)) {
+    let dedupOk = true
+    try {
+      dedupOk = await setIfNotExists(`sdr_out_of_scope_sent:${ctx.phone}`, 86400)
+    } catch (err) {
+      console.warn('[SDR router] out-of-scope dedup setIfNotExists failed, sending anyway:', err)
+    }
+    if (dedupOk) {
+      const respuesta = TEMPLATES.outOfScopeCultivo({ ctx: { ...ctx, cultivo: effectiveCultivo } })
+      trace.event({
+        name:  'sdr_out_of_scope_cultivo',
+        level: 'WARNING',
+        input: { phone: ctx.phone, prospecto_id: ctx.prospectId, cultivo: effectiveCultivo },
+      })
+
+      // Reduce con intent neutral + extraction del cultivo + override fsmState
+      // a dormant para que la conversacion no se reabra con un pitch.
+      let nextCtx = reduceContext(ctx, {
+        classification: { intent: 'consulta', confidence: 1 },
+        extraction:     extractedCultivo ? { cultivo: extractedCultivo } : {},
+        botMessage:     respuesta,
+        botAction:      'sent_graceful_exit',
+      })
+      nextCtx = { ...nextCtx, fsmState: 'dormant' }
+
+      const updateData = computeLegacyUpdate(nextCtx, initial)
+      updateData['status'] = 'dormant'
+      await updateSDRProspecto(nextCtx.prospectId, updateData, client)
+      await sender.enviarTexto(nextCtx.phone, respuesta)
+      await saveSDRInteraccion({
+        prospecto_id:      nextCtx.prospectId,
+        phone:             nextCtx.phone,
+        turno:             nextCtx.turnCount,
+        tipo:              'inbound',
+        contenido:         textoOriginal,
+        action_taken:      'graceful_exit',
+        langfuse_trace_id: traceId,
+      }, client)
+      await persistSessionState(nextCtx)
+      return
+    }
   }
 
   // ── 5. Classify intent (Fase B: typed enum + retry-with-feedback) ────────

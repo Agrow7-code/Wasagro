@@ -17,6 +17,19 @@ export const CultivoEnum = z.enum([
 ])
 export type Cultivo = z.infer<typeof CultivoEnum>
 
+// MVP cultivos donde Wasagro está optimizado HOY. Cuando el prospecto declara
+// uno que NO está acá, el SDR responde honestamente y lo registra en
+// LangFuse para el waitlist manual (TODO [H1-expansion] resuelto). Lista
+// derivada de CLAUDE.md §Identidad — "Cultivos prioritarios: cacao, banano,
+// café de exportación" + piña (pedido específico del TODO original).
+export const MVP_CULTIVOS = ['cacao', 'banano', 'cafe', 'pina'] as const
+export type MVPCultivo = (typeof MVP_CULTIVOS)[number]
+
+export function isMVPCultivo(cultivo: Cultivo | null): cultivo is MVPCultivo {
+  if (!cultivo) return false
+  return (MVP_CULTIVOS as readonly string[]).includes(cultivo)
+}
+
 export const SegmentoEnum = z.enum([
   'exportadora', 'cooperativa', 'agricultor', 'ong', 'desconocido',
 ])
