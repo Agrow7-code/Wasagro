@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "vercel-build": "cd landing && npm install && npm run build"
+    "vercel-build": "cd landing && npm install && npm run build",
+    "prompts:sync": "tsx scripts/sync-prompts-to-langfuse.ts"
   },
   "dependencies": {
     "@deepgram/sdk": "^5.1.0",
