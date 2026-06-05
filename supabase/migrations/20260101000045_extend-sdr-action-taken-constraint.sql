@@ -1,5 +1,12 @@
 -- FIX-7: extend sdr_interacciones.action_taken CHECK constraint.
 --
+-- Renamed from 20260101000040_ to 20260101000045_ on 2026-06-04 to resolve a
+-- numeric prefix collision with 20260101000040_rls-hardening-and-auth-guards.sql.
+-- The migration is fully idempotent (DROP IF EXISTS + ADD with the full allowed
+-- list), so it is safe to re-apply in any environment where the old name was
+-- already committed to supabase_migrations.schema_migrations — the existing
+-- constraint gets dropped and recreated with the same shape.
+--
 -- The handlers in sdrAgent.ts have been writing values that were never on the
 -- allowed list:
 --   * handleFounderApproval writes 'founder_override' when the founder replies
