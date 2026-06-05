@@ -17,6 +17,7 @@ import type {
   ContextoConversacion,
   ContextoOnboardingAgricultor,
 } from '../../types/dominio/Onboarding.js'
+import { getRedisClient } from '../../integrations/redis.js'
 
 // Shape we actually consume from `sesiones_activas` rows.
 export interface OnboardingSessionRow {
@@ -153,5 +154,66 @@ export function serializeContextForSession(ctx: OnboardingContext): Record<strin
     historial:     ctx.historial,
     datos:         datosForLLM(ctx),
     consent_saved: ctx.consentimiento,
+  }
+}
+
+// ─── Redis cache layer (TTL 24h) ────────────────────────────────────────────
+// Supabase `sesiones_activas` is the source of truth — Redis is a hot-path
+// cache to avoid the Postgres round-trip on every turn of a short-lived
+// onboarding (≤10 turns). If Redis is down/missing, hydrate falls back to
+// Supabase transparently. If Redis has corrupt/drifted data, safeParse rejects
+// it and we also fall back. Same graceful-degradation policy as SDR commit 3.
+
+const ONBOARDING_CACHE_TTL_SECONDS = 24 * 3600
+
+function cacheKey(phone: string): string {
+  return `onboarding_session:${phone}`
+}
+
+export async function loadCachedOnboardingContext(phone: string): Promise<OnboardingContext | null> {
+  if (!phone) return null
+  try {
+    const client = getRedisClient()
+    const raw = await client.get(cacheKey(phone))
+    if (!raw) return null
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      // Corrupt — next persist overwrites.
+      return null
+    }
+    const validated = OnboardingContextSchema.safeParse(parsed)
+    if (!validated.success) {
+      // Schema drift (new field added since cache was written). Discard and
+      // fall back to Supabase. Next persist re-hydrates the cache.
+      return null
+    }
+    return validated.data
+  } catch (err) {
+    console.warn('[onboarding contextStore] loadCachedOnboardingContext failed:', err)
+    return null
+  }
+}
+
+export async function cacheOnboardingContext(ctx: OnboardingContext): Promise<void> {
+  if (!ctx.phone) return
+  try {
+    const client = getRedisClient()
+    await client.set(cacheKey(ctx.phone), JSON.stringify(ctx), 'EX', ONBOARDING_CACHE_TTL_SECONDS)
+  } catch (err) {
+    // Non-fatal — Supabase is source of truth. Next turn just pays the
+    // Postgres round-trip until Redis recovers.
+    console.warn('[onboarding contextStore] cacheOnboardingContext failed:', err)
+  }
+}
+
+export async function invalidateOnboardingCache(phone: string): Promise<void> {
+  if (!phone) return
+  try {
+    const client = getRedisClient()
+    await client.del(cacheKey(phone))
+  } catch {
+    // Non-fatal. TTL will expire it within 24h anyway.
   }
 }

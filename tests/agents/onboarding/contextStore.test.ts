@@ -1,15 +1,42 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+// Redis mock: in-memory Map drives every cache call. Has to be set up BEFORE
+// importing contextStore.
+const fakeRedis = new Map<string, string>()
+
+vi.mock('../../../src/integrations/redis.js', () => ({
+  getRedisClient: () => ({
+    get: vi.fn(async (k: string) => fakeRedis.get(k) ?? null),
+    set: vi.fn(async (k: string, v: string) => {
+      fakeRedis.set(k, v)
+      return 'OK'
+    }),
+    del: vi.fn(async (k: string) => {
+      const had = fakeRedis.has(k)
+      fakeRedis.delete(k)
+      return had ? 1 : 0
+    }),
+  }),
+}))
+
 import {
   hydrateOnboardingContext,
   toContextoConversacion,
   toContextoAgricultor,
   serializeContextForSession,
+  loadCachedOnboardingContext,
+  cacheOnboardingContext,
+  invalidateOnboardingCache,
   type OnboardingSessionRow,
 } from '../../../src/agents/onboarding/contextStore.js'
 import {
   createDefaultContext,
   reduceOnboardingContext,
 } from '../../../src/agents/onboarding/context.js'
+
+beforeEach(() => {
+  fakeRedis.clear()
+})
 
 const USER = { id: 'u-1', phone: '+593900000000' }
 
@@ -230,5 +257,129 @@ describe('serializeContextForSession', () => {
     )
     // The hydrate path takes the `ctx` key first, ignoring clarification_count.
     expect(rehydrated).toEqual(original)
+  })
+})
+
+// ─── Redis cache layer ──────────────────────────────────────────────────────
+
+describe('cacheOnboardingContext + loadCachedOnboardingContext', () => {
+  it('roundtrip: cache → load returns identical ctx', async () => {
+    const ctx = reduceOnboardingContext(
+      createDefaultContext('u-1', '+593900000000', 'admin'),
+      { extraction: { nombre: 'Carlos', consentimiento: true }, pasoCompletado: 1, pasoSiguiente: 2 },
+    )
+    await cacheOnboardingContext(ctx)
+    const loaded = await loadCachedOnboardingContext('+593900000000')
+    expect(loaded).toEqual(ctx)
+  })
+
+  it('load on miss returns null', async () => {
+    const loaded = await loadCachedOnboardingContext('+593999999999')
+    expect(loaded).toBeNull()
+  })
+
+  it('load with empty phone returns null', async () => {
+    const loaded = await loadCachedOnboardingContext('')
+    expect(loaded).toBeNull()
+  })
+
+  it('cache with empty phone is a no-op (no Redis write)', async () => {
+    const ctx = createDefaultContext('u-1', '', 'admin')
+    await cacheOnboardingContext(ctx)
+    expect(fakeRedis.size).toBe(0)
+  })
+
+  it('load discards corrupt JSON (returns null, no throw)', async () => {
+    fakeRedis.set('onboarding_session:+593900000000', 'not-json')
+    const loaded = await loadCachedOnboardingContext('+593900000000')
+    expect(loaded).toBeNull()
+  })
+
+  it('load discards entries that fail schema validation (drift)', async () => {
+    // Missing required fields → safeParse fails → null.
+    fakeRedis.set('onboarding_session:+593900000000', JSON.stringify({ userId: 'x' }))
+    const loaded = await loadCachedOnboardingContext('+593900000000')
+    expect(loaded).toBeNull()
+  })
+
+  it('cache key uses onboarding_session:<phone> namespace', async () => {
+    const ctx = createDefaultContext('u-1', '+593987654321', 'admin')
+    await cacheOnboardingContext(ctx)
+    expect(fakeRedis.has('onboarding_session:+593987654321')).toBe(true)
+  })
+
+  it('cache writes serialize the full ctx (not just session-scoped fields)', async () => {
+    const ctx = reduceOnboardingContext(
+      createDefaultContext('u-1', '+593900000000', 'agricultor'),
+      { extraction: { nombre: 'Pedro', cultivoPrincipal: 'cacao', fincaId: 'F002' } },
+    )
+    await cacheOnboardingContext(ctx)
+    const raw = fakeRedis.get('onboarding_session:+593900000000')!
+    const parsed = JSON.parse(raw)
+    expect(parsed.nombre).toBe('Pedro')
+    expect(parsed.cultivoPrincipal).toBe('cacao')
+    expect(parsed.fincaId).toBe('F002')
+    expect(parsed.tipoFlujo).toBe('agricultor')
+  })
+})
+
+describe('invalidateOnboardingCache', () => {
+  it('removes the cached entry', async () => {
+    const ctx = createDefaultContext('u-1', '+593900000000', 'admin')
+    await cacheOnboardingContext(ctx)
+    expect(fakeRedis.size).toBe(1)
+    await invalidateOnboardingCache('+593900000000')
+    expect(fakeRedis.size).toBe(0)
+  })
+
+  it('no-op on empty phone', async () => {
+    const ctx = createDefaultContext('u-1', '+593900000000', 'admin')
+    await cacheOnboardingContext(ctx)
+    await invalidateOnboardingCache('')
+    expect(fakeRedis.size).toBe(1)
+  })
+
+  it('no-op on missing key', async () => {
+    await invalidateOnboardingCache('+593999999999')
+    // No throw, no state change.
+    expect(fakeRedis.size).toBe(0)
+  })
+})
+
+describe('cache layer integration with hydrate', () => {
+  it('Redis hit beats Supabase row hydrate (handler uses Redis-first)', async () => {
+    const ctxFromRedis = reduceOnboardingContext(
+      createDefaultContext('u-1', '+593900000000', 'admin'),
+      { extraction: { nombre: 'Carlos-from-redis' } },
+    )
+    await cacheOnboardingContext(ctxFromRedis)
+
+    // Even if Supabase has stale-looking data, Redis wins (this is what the
+    // handler does: `loadCachedOnboardingContext(phone) ?? hydrate(session...)`).
+    const cached = await loadCachedOnboardingContext('+593900000000')
+    expect(cached?.nombre).toBe('Carlos-from-redis')
+
+    // Sanity: hydrate from a different session row would give a different value
+    const fromRow = hydrateOnboardingContext(
+      { session_id: 's', contexto_parcial: { datos: { nombre: 'Carlos-from-supabase' } }, clarification_count: 0 },
+      USER,
+      'admin',
+    )
+    expect(fromRow.nombre).toBe('Carlos-from-supabase')
+  })
+
+  it('Redis miss → handler should hydrate from Supabase row (graceful degradation)', async () => {
+    // Simulate empty cache (Redis miss or expired TTL).
+    const cached = await loadCachedOnboardingContext('+593900000000')
+    expect(cached).toBeNull()
+
+    // Handler fallback: hydrate from session.
+    const session: OnboardingSessionRow = {
+      session_id: 's',
+      contexto_parcial: { datos: { nombre: 'Carlos' } },
+      clarification_count: 0,
+    }
+    const fallback = hydrateOnboardingContext(session, USER, 'admin')
+    expect(fallback.nombre).toBe('Carlos')
   })
 })

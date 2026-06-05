@@ -24,6 +24,8 @@ import {
   toContextoConversacion,
   toContextoAgricultor,
   serializeContextForSession,
+  loadCachedOnboardingContext,
+  cacheOnboardingContext,
 } from '../../agents/onboarding/contextStore.js'
 
 async function geocodeAndUpdateFinca(fincaId: string, address: string, traceId: string): Promise<void> {
@@ -80,10 +82,11 @@ export async function handleOnboardingAdmin(
     }
   }
 
-  // Fase F-2: hidratar OnboardingContext desde la sesión (legacy bag o key 'ctx'
-  // si fue persistida por una corrida previa post-migración) + reduce con el
-  // mensaje entrante del usuario antes de llamar al LLM.
-  const ctx0 = hydrateOnboardingContext(session, usuario, 'admin')
+  // Fase F-2 commit 3: Redis cache primero (TTL 24h) — evita el parsing del
+  // bag legacy de Supabase en turnos sucesivos. Fallback a hydrate-desde-row
+  // si Redis miss / corrupt / drift. Supabase sigue siendo source of truth.
+  const ctx0 = (await loadCachedOnboardingContext(msg.from))
+    ?? hydrateOnboardingContext(session, usuario, 'admin')
   const ctxIn = reduceOnboardingContext(ctx0, { userMessage: texto })
 
   const resultado = await _llm!.onboardarAdmin(texto, toContextoConversacion(ctxIn), traceId)
@@ -159,6 +162,10 @@ export async function handleOnboardingAdmin(
     status:              ctxNext.onboardingCompleto || ctxNext.pasoSiguiente >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
 
+  // Cache después de Supabase (source-of-truth first). Si Redis falla, no
+  // fatal — próximo turno paga el round-trip a Postgres hasta que Redis vuelva.
+  await cacheOnboardingContext(ctxNext)
+
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
   await actualizarMensaje(mensajeId, { status: 'processed' })
 }
@@ -195,8 +202,9 @@ export async function handleOnboardingAgricultor(
     }
   }
 
-  // Fase F-2: hidratar contexto + reducir mensaje entrante antes de llamar al LLM.
-  const ctx0Agr = hydrateOnboardingContext(session, usuario, 'agricultor')
+  // Fase F-2 commit 3: cache Redis primero, fallback a hydrate-from-row.
+  const ctx0Agr = (await loadCachedOnboardingContext(msg.from))
+    ?? hydrateOnboardingContext(session, usuario, 'agricultor')
   const ctxInAgr = reduceOnboardingContext(ctx0Agr, { userMessage: texto })
 
   // Lista de fincas disponibles para inyectar en el prompt (derivada de DB,
@@ -279,6 +287,9 @@ export async function handleOnboardingAgricultor(
     contexto_parcial:    serializeContextForSession(ctxNextAgr),
     status:              ctxNextAgr.onboardingCompleto || ctxNextAgr.pasoSiguiente >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
   })
+
+  // Cache después de Supabase (source-of-truth first).
+  await cacheOnboardingContext(ctxNextAgr)
 
   await _sender!.enviarTexto(msg.from, resultado.mensaje_para_usuario)
   await actualizarMensaje(mensajeId, { status: 'processed' })
