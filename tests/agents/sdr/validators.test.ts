@@ -142,6 +142,41 @@ describe('noUnnecessaryApology', () => {
     )
     expect(out.triggered).toBe(false)
   })
+
+  // Regression — TODO [FASE-A] composer disculpa innecesaria en discovery.
+  // El TODO sugería un template determinístico de discovery. Decisión opuesta:
+  // el LLM contextual gana al genérico y este validator ya cubre el bug.
+  // Estos tests fijan las variantes específicas que motivaron el TODO original.
+  describe('regression: discovery turn apology variants (TODO [FASE-A])', () => {
+    it('strips "Disculpá la pregunta de antes" en turno de discovery', () => {
+      const out = noUnnecessaryApology.apply(
+        'Disculpá la pregunta de antes. ¿En qué país está tu finca?',
+        ctx({ lastBotAction: 'ask_question', fsmState: 'discovery' }),
+      )
+      expect(out.triggered).toBe(true)
+      expect(out.fixed).toBe('¿En qué país está tu finca?')
+    })
+
+    it('strips "Disculpá si fui poco claro" + preserva la pregunta de discovery', () => {
+      const out = noUnnecessaryApology.apply(
+        'Disculpá si te confundí con la pregunta. ¿Cómo registran las labores hoy — papel, Excel u otro sistema?',
+        ctx({ lastBotAction: 'ask_question', fsmState: 'discovery' }),
+      )
+      expect(out.triggered).toBe(true)
+      expect(out.fixed).toContain('¿Cómo registran las labores hoy')
+      expect(out.fixed).not.toMatch(/^\s*disculp/i)
+    })
+
+    it('no aplica cuando la disculpa NO está al inicio (validator es leading-only)', () => {
+      // Es intencional: si el LLM se disculpa en medio del cuerpo (no al
+      // inicio), no la tocamos — puede ser parte legítima del mensaje.
+      const out = noUnnecessaryApology.apply(
+        'Wasagro registra todo con un audio. Disculpá la insistencia, ¿te suena para tu finca?',
+        ctx({ lastBotAction: 'ask_question', fsmState: 'discovery' }),
+      )
+      expect(out.triggered).toBe(false)
+    })
+  })
 })
 
 // ─── pipe ────────────────────────────────────────────────────────────────────

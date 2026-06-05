@@ -18,9 +18,15 @@ export interface ComposeResult {
   text: string
 }
 
-// TODO [FASE-A] composer: disculpa innecesaria en turno de discovery
-// Causa: instrucción de confirmar datos aunque no haya pregunta previa en el turno anterior
-// Fix: template determinístico de discovery en composer.ts (Fase A)
+// Discovery questions intentionally fall through to the LLM (return null) so
+// each pregunta puede ser contextual ("¿Cómo manejás las dosis de mancozeb en
+// el lote 3?" gana al genérico "¿Cómo registran hoy las labores?"). El bug
+// histórico de la disculpa innecesaria ("Disculpá la pregunta anterior...")
+// está cubierto por el validator `noUnnecessaryApology` (Fase D, 2cf2940) que
+// strip-leading lo que matchee /^\s*(disculp[áa]|perdón)/i. Si el validator
+// dispara > 10% en 24h, el SP-SDR-03 prompt está rotto y necesita fix, no un
+// nuevo template determinista — ese es el principio "validators como
+// observabilidad" del ADR-009 §Fase D.
 //
 // Returns the rendered message + the template key used (for telemetry).
 // Returns null when no template applies — caller uses LLM.
