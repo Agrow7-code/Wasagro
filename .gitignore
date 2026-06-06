@@ -16,6 +16,14 @@ dist/
 # Supabase local runtime
 supabase/.temp/
 
+# Skill-registry cache local (el .md vive en el repo, el cache no)
+.atl/.skill-registry.cache.json
+.atl/*.cache.json
+
+# Manuales de producto en docx — viven en Notion por SSOT (CLAUDE.md §SSOT)
+# Si hace falta commitear un .docx puntual, usar `git add -f <file>`.
+*.docx
+
 # OS
 .DS_Store
 Thumbs.db
