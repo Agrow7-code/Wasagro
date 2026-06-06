@@ -1,11 +1,10 @@
-// TODO [H1-expansion] resolved — out-of-scope cultivo handling.
+// Non-MVP cultivo handling — política CLAUDE.md §Identidad: nunca rechazar.
 //
 // 1. isMVPCultivo helper: pure boolean check against MVP_CULTIVOS.
-// 2. outOfScopeCultivo template: deterministic copy that honors the cultivo
-//    label + invites the prospect to waitlist.
-// 3. Router branch: when post-extraction cultivo is non-MVP AND not already
-//    notified, fires the template + emits sdr_out_of_scope_cultivo event +
-//    transitions to dormant. Dedup via Redis SET NX EX 24h.
+// 2. outOfScopeCultivo template: invitación a coordinar (NO rechazo).
+// 3. Router branch: cuando un cultivo non-MVP se detecta en triage/discovery,
+//    manda el invite + calendar link como dos bubbles, FSM va a
+//    meeting_proposed (no dormant), encola booking reminder 24h, dedup TTL 24h.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
@@ -39,7 +38,7 @@ describe('isMVPCultivo (pure helper)', () => {
 
 // ─── outOfScopeCultivo template ─────────────────────────────────────────────
 
-describe('outOfScopeCultivo template', () => {
+describe('outOfScopeCultivo template (invitación, no rechazo)', () => {
   const ctxFor = (cultivo: Cultivo | null) => ({
     ...createDefaultContext('p-1', '+593900000000'),
     cultivo,
@@ -49,12 +48,11 @@ describe('outOfScopeCultivo template', () => {
     const text = outOfScopeCultivo({ ctx: ctxFor('aguacate') })
     expect(text).toContain('aguacate')
     expect(text).toMatch(/cacao, banano y café/i)
-    expect(text).toMatch(/te anoto/i)
   })
 
-  it('uses "ese cultivo" generic phrasing when cultivo is "otro"', () => {
+  it('uses "tu cultivo" generic phrasing when cultivo is "otro"', () => {
     const text = outOfScopeCultivo({ ctx: ctxFor('otro') })
-    expect(text).toContain('ese cultivo')
+    expect(text).toContain('tu cultivo')
     expect(text).not.toContain('otro')
   })
 
@@ -63,11 +61,18 @@ describe('outOfScopeCultivo template', () => {
     expect(text).toContain('tu cultivo')
   })
 
-  it('mentions all 3 MVP cultivos in the copy (mantener honestidad)', () => {
+  it('mentions all 3 MVP cultivos in the copy (honestidad sobre el foco actual)', () => {
     const text = outOfScopeCultivo({ ctx: ctxFor('palma') })
     expect(text).toMatch(/cacao/i)
     expect(text).toMatch(/banano/i)
     expect(text).toMatch(/café/i)
+  })
+
+  it('invites to coordinate a meeting (NOT a rejection)', () => {
+    const text = outOfScopeCultivo({ ctx: ctxFor('palma') })
+    expect(text.toLowerCase()).toMatch(/coordin(amos|ar)|reuni(ón|on)|20 minutos/i)
+    // The copy must NOT use rejection language
+    expect(text.toLowerCase()).not.toMatch(/te anoto|aviso apenas|más adelante/i)
   })
 
   it('closes with a question (consistent con endsWithQuestion validator)', () => {
@@ -80,6 +85,8 @@ describe('outOfScopeCultivo template', () => {
     expect(text.toLowerCase()).not.toContain('casos de éxito')
     expect(text.toLowerCase()).not.toContain('testimonios')
     expect(text.toLowerCase()).not.toMatch(/funciona perfecto para/i)
+    // Tampoco prometer timeline de implementación
+    expect(text.toLowerCase()).not.toMatch(/en \d+ (semana|mes)/i)
   })
 })
 
@@ -115,9 +122,10 @@ vi.mock('../../../src/pipeline/supabaseQueries.js', () => ({
   actualizarMensaje: vi.fn(async () => {}),
 }))
 
+const pgBossSend = vi.fn(async () => 'jobid')
 vi.mock('../../../src/workers/pgBoss.js', () => ({
-  getBoss: () => ({ send: vi.fn(async () => 'jobid') }),
-  isPgBossReady: () => false,
+  getBoss: () => ({ send: pgBossSend }),
+  isPgBossReady: () => true,
 }))
 
 vi.mock('../../../src/integrations/langfuse.js', () => {
@@ -200,42 +208,58 @@ async function runRouterTurn(cultivoExtracted: string | null, prospectoOverrides
 beforeEach(() => {
   fakeRedis.clear()
   langfuseEvents.length = 0
+  pgBossSend.mockClear()
   vi.clearAllMocks()
 })
 
-describe('Router branch: out-of-scope cultivo', () => {
-  it('fires outOfScopeCultivo template when extraction returns non-MVP cultivo', async () => {
+describe('Router branch: non-MVP cultivo invite', () => {
+  it('fires outOfScopeCultivo template + calendar link bubble when cultivo is non-MVP', async () => {
     const { sender, llm } = await runRouterTurn('palma')
 
-    expect(sender.enviarTexto).toHaveBeenCalledTimes(1)
-    const sent = sender.enviarTexto.mock.calls[0]![1]
-    expect(sent).toMatch(/palma/i)
-    expect(sent).toMatch(/cacao, banano y café/i)
-    // Pre-empts the normal flow: the LLM redaction never ran (short-circuit
-    // happens before classify/compose).
+    // Two bubbles: invite + calendar link
+    expect(sender.enviarTexto).toHaveBeenCalledTimes(2)
+    const invite = sender.enviarTexto.mock.calls[0]![1]
+    expect(invite).toMatch(/palma/i)
+    expect(invite).toMatch(/cacao, banano y café/i)
+    expect(invite).toMatch(/coordin(amos|ar)/i)
+
+    // The LLM redaction never ran (short-circuit before classify/compose).
     expect(llm.redactarMensajeSDR).not.toHaveBeenCalled()
   })
 
-  it('emits sdr_out_of_scope_cultivo LangFuse event with cultivo + phone', async () => {
+  it('emits sdr_non_mvp_cultivo_invite LangFuse event with cultivo + phone', async () => {
     await runRouterTurn('arroz')
-    const event = langfuseEvents.find(e => e.name === 'sdr_out_of_scope_cultivo')
+    const event = langfuseEvents.find(e => e.name === 'sdr_non_mvp_cultivo_invite')
     expect(event).toBeDefined()
-    expect(event?.level).toBe('WARNING')
     expect(event?.input).toMatchObject({ cultivo: 'arroz', phone: PHONE })
   })
 
-  it('dedup: second turn with same non-MVP cultivo does NOT re-fire template', async () => {
+  it('enqueues sdr-chaser booking reminder (24h)', async () => {
+    await runRouterTurn('palma')
+    expect(pgBossSend).toHaveBeenCalledWith(
+      'sdr-chaser',
+      expect.objectContaining({ prospecto_id: 'p-1', reminder_type: 'booking' }),
+      expect.objectContaining({ startAfter: 24 * 3600 }),
+    )
+  })
+
+  it('updates prospecto with status piloto_propuesto + calendar_link_sent_at', async () => {
+    await runRouterTurn('palma')
+    expect(supabaseQueries.updateSDRProspecto).toHaveBeenCalled()
+    const updateArgs = vi.mocked(supabaseQueries.updateSDRProspecto).mock.calls[0]!
+    const updateData = updateArgs[1] as Record<string, unknown>
+    expect(updateData['status']).toBe('piloto_propuesto')
+    expect(updateData['calendar_link_sent_at']).toEqual(expect.any(String))
+  })
+
+  it('dedup: second turn with same non-MVP cultivo does NOT re-fire invite', async () => {
     await runRouterTurn('palma')
     expect(fakeRedis.has(`sdr_out_of_scope_sent:${PHONE}`)).toBe(true)
 
-    // Reset langfuse + sender for the second turn
     langfuseEvents.length = 0
     const { sender } = await runRouterTurn('palma')
 
-    // First send was suppressed (dedup blocked) — the LLM path should take over,
-    // OR the conversation is dormant so a different branch fires. The KEY assertion:
-    // sdr_out_of_scope_cultivo event must NOT have been emitted a second time.
-    expect(langfuseEvents.some(e => e.name === 'sdr_out_of_scope_cultivo')).toBe(false)
+    expect(langfuseEvents.some(e => e.name === 'sdr_non_mvp_cultivo_invite')).toBe(false)
   })
 
   it('does NOT fire for MVP cultivos (cacao, banano, cafe, pina)', async () => {
@@ -243,25 +267,24 @@ describe('Router branch: out-of-scope cultivo', () => {
       fakeRedis.clear()
       langfuseEvents.length = 0
       await runRouterTurn(cultivo)
-      expect(langfuseEvents.some(e => e.name === 'sdr_out_of_scope_cultivo'))
+      expect(langfuseEvents.some(e => e.name === 'sdr_non_mvp_cultivo_invite'))
         .toBe(false)
     }
   })
 
   it('does NOT fire when ctx.cultivo is already MVP and extraction proposes non-MVP (reducer invariant)', async () => {
     // Prospect previously declared cacao (MVP). LLM hallucinates aguacate.
-    // The "confirmed wins" invariant means effectiveCultivo stays cacao.
     await runRouterTurn('aguacate', { cultivo_principal: 'cacao' })
-    expect(langfuseEvents.some(e => e.name === 'sdr_out_of_scope_cultivo')).toBe(false)
+    expect(langfuseEvents.some(e => e.name === 'sdr_non_mvp_cultivo_invite')).toBe(false)
   })
 
   it('does NOT fire when extraction returns no cultivo at all', async () => {
     await runRouterTurn(null)
-    expect(langfuseEvents.some(e => e.name === 'sdr_out_of_scope_cultivo')).toBe(false)
+    expect(langfuseEvents.some(e => e.name === 'sdr_non_mvp_cultivo_invite')).toBe(false)
   })
 
-  // Gate explícito por estado FSM. Decision: "pull the rug" mid-funnel es peor
-  // que continuar el flujo. Si la deteccion no ocurrio en triage/discovery,
+  // Gate explícito por estado FSM. Decision: cambiar de pista mid-funnel
+  // confunde al prospecto. Si la detección no ocurrió en triage/discovery,
   // dejamos al LLM seguir.
   it('does NOT fire when fsmState is past discovery (pitch_sent or later)', async () => {
     fakeRedis.set(`sdr_session:${PHONE}`, JSON.stringify({
@@ -274,6 +297,6 @@ describe('Router branch: out-of-scope cultivo', () => {
       clarificationTurnsUsed: 0,
     }))
     await runRouterTurn('palma', { sdr_node: 'pitch' })
-    expect(langfuseEvents.some(e => e.name === 'sdr_out_of_scope_cultivo')).toBe(false)
+    expect(langfuseEvents.some(e => e.name === 'sdr_non_mvp_cultivo_invite')).toBe(false)
   })
 })

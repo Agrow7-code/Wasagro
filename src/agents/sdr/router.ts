@@ -32,7 +32,7 @@ const TEMPLATE_TO_BOT_ACTION: Record<TemplateKey, BotAction> = {
   gracefulExit: 'sent_graceful_exit',
   willBookLater: 'sent_calendar_link',
   audioAck: 'none',
-  outOfScopeCultivo: 'sent_graceful_exit',
+  outOfScopeCultivo: 'sent_calendar_link',
 }
 
 // Best-effort persistence. The contract: once the prospect has received the bot
@@ -187,19 +187,25 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
     return
   }
 
-  // ── 4b. Out-of-scope cultivo shortcut (TODO [H1-expansion] resuelto) ──────
-  //    Si el cultivo (extraido nuevo OR ya en ctx) NO esta en MVP_CULTIVOS,
-  //    mandar la copy honesta UNA VEZ por phone (TTL 24h via Redis dedup) y
-  //    bajar la FSM a dormant para que las turnos siguientes no re-piteen.
+  // ── 4b. Non-MVP cultivo: invitar a coordinar reunión (no rechazar) ────────
+  //    Política CLAUDE.md §Identidad: "Si llega un cliente de otro país u otro
+  //    cultivo, se trabaja con él. Nunca rechazar a un cliente por geografía o
+  //    cultivo." Antes este branch mandaba "te anotamos para más adelante" y
+  //    bajaba FSM a dormant — eso era rechazo de facto. Ahora reconocemos el
+  //    cultivo, somos honestos sobre el foco actual, y mandamos el calendar
+  //    link directo para coordinar una llamada de exploración.
   //
-  //    Gate: solo dispara en estados tempranos (triage/discovery). Despues de
-  //    pitch_sent es tarde — el prospecto ya recibio pitch y no queremos
-  //    "pull the rug" con "actually no atendemos tu cultivo" mid-funnel. Si
-  //    el cultivo non-MVP no se detecto en discovery, mejor seguir con el LLM.
+  //    Gate: solo dispara en estados tempranos (triage/discovery). Después de
+  //    pitch_sent es tarde — el prospecto ya recibió pitch del producto MVP y
+  //    cambiar la pista mid-funnel confunde.
   //
-  //    El reducer invariant "confirmed wins" protege contra hallucinations:
-  //    si ctx.cultivo ya era MVP y la extraction trae aguacate, effectiveCultivo
-  //    sigue siendo el MVP y no entra en este branch.
+  //    Dedup TTL 24h: si el prospecto ya recibió el invite, no re-spammear.
+  //    Después de mandado, FSM va a 'meeting_proposed' (no dormant) para que
+  //    el chaser de booking (D24) trabaje y el flow siga vivo si el prospecto
+  //    pregunta algo más antes de agendar.
+  //
+  //    "Confirmed wins" invariant: si ctx.cultivo ya era MVP y la extraction
+  //    trae aguacate, effectiveCultivo sigue siendo el MVP y no entra acá.
   const extractedCultivo = extraccionValidada
     ? mapExtraccionToUpdate(extraccionValidada).cultivo ?? null
     : null
@@ -215,34 +221,31 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
     if (dedupOk) {
       const respuesta = TEMPLATES.outOfScopeCultivo({ ctx: { ...ctx, cultivo: effectiveCultivo } })
       trace.event({
-        name:  'sdr_out_of_scope_cultivo',
-        level: 'WARNING',
+        name:  'sdr_non_mvp_cultivo_invite',
+        level: 'DEFAULT',
         input: { phone: ctx.phone, prospecto_id: ctx.prospectId, cultivo: effectiveCultivo },
       })
 
-      // Reduce con intent neutral + extraction del cultivo + override fsmState
-      // a dormant para que la conversacion no se reabra con un pitch.
       let nextCtx = reduceContext(ctx, {
-        classification: { intent: 'consulta', confidence: 1 },
+        classification: { intent: 'interest', confidence: 1 },
         extraction:     extractedCultivo ? { cultivo: extractedCultivo } : {},
         botMessage:     respuesta,
-        botAction:      'sent_graceful_exit',
+        botAction:      'sent_calendar_link',
       })
-      nextCtx = { ...nextCtx, fsmState: 'dormant' }
+      nextCtx = { ...nextCtx, fsmState: 'meeting_proposed' }
 
-      // SEND first, PERSIST after — root cause of the 2026-06-06 prospect
-      // incident: this branch fired for cultivo='arroz', UPDATE failed with
-      // CHECK constraint violation (sdr_node='global_fallback' not allowed
-      // until migration 49), and the prospect saw the recovery message
-      // instead of the honest out-of-scope copy.
+      // SEND first (invite + calendar link as two bubbles, same pattern as
+      // the main close flow), PERSIST after with tolerance.
       await sender.enviarTexto(nextCtx.phone, respuesta)
+      await sender.enviarTexto(nextCtx.phone, composeCalendarLink(nextCtx.prospectId))
 
       const updateData = computeLegacyUpdate(nextCtx, initial)
-      updateData['status'] = 'dormant'
+      updateData['status'] = 'piloto_propuesto'
+      updateData['calendar_link_sent_at'] = new Date().toISOString()
       await safePersist(() => updateSDRProspecto(nextCtx.prospectId, updateData, client), {
         trace,
         eventName: 'sdr_update_failed',
-        meta: { prospecto_id: nextCtx.prospectId, fsmState: nextCtx.fsmState, path: 'out_of_scope_cultivo', updateKeys: Object.keys(updateData) },
+        meta: { prospecto_id: nextCtx.prospectId, fsmState: nextCtx.fsmState, path: 'non_mvp_cultivo_invite', updateKeys: Object.keys(updateData) },
       })
       await safePersist(() => saveSDRInteraccion({
         prospecto_id:      nextCtx.prospectId,
@@ -250,18 +253,35 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
         turno:             nextCtx.turnCount,
         tipo:              'inbound',
         contenido:         textoOriginal,
-        action_taken:      'graceful_exit',
+        action_taken:      fsmStateToLegacySDRNode(nextCtx.fsmState),
         langfuse_trace_id: traceId,
       }, client), {
         trace,
         eventName: 'sdr_interaccion_save_failed',
-        meta: { prospecto_id: nextCtx.prospectId, path: 'out_of_scope_cultivo' },
+        meta: { prospecto_id: nextCtx.prospectId, path: 'non_mvp_cultivo_invite' },
       })
       await safePersist(() => persistSessionState(nextCtx), {
         trace,
         eventName: 'sdr_session_persist_failed',
-        meta: { prospecto_id: nextCtx.prospectId, path: 'out_of_scope_cultivo' },
+        meta: { prospecto_id: nextCtx.prospectId, path: 'non_mvp_cultivo_invite' },
       })
+
+      // D24: booking reminder 24h. Mismo job que el close flow normal. El
+      // chaser verifica calcom_booking_id antes de enviar — si el prospecto
+      // ya agendó, no nag.
+      try {
+        const { getBoss, isPgBossReady } = await import('../../workers/pgBoss.js')
+        if (isPgBossReady()) {
+          const boss = getBoss()
+          await boss.send('sdr-chaser', {
+            prospecto_id:  nextCtx.prospectId,
+            expected_turn: nextCtx.turnCount,
+            reminder_type: 'booking',
+          }, { startAfter: 24 * 3600 })
+        }
+      } catch (bossErr) {
+        console.warn('[SDR] No se pudo encolar booking reminder (non-MVP invite):', bossErr)
+      }
       return
     }
   }

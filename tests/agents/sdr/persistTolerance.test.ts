@@ -91,10 +91,14 @@ function makeSender() {
   }
 }
 
+// MVP cultivo (cacao) so the turn goes through the main flow, not the
+// non-MVP cultivo invite branch. Those tests are exercising the persist
+// tolerance contract of the main path; the non-MVP branch has its own
+// tests in outOfScopeCultivo.test.ts.
 function makeLlm() {
   return {
     extraerDatosSDR: vi.fn(async () => ({
-      fincas_en_cartera: 4, cultivo_principal: 'arroz', pais: 'EC',
+      fincas_en_cartera: 4, cultivo_principal: 'cacao', pais: 'EC',
       sistema_actual: 'papel', es_spam: false, pregunta_precio: false,
     })),
     redactarMensajeSDR: vi.fn(async () => 'reply'),
