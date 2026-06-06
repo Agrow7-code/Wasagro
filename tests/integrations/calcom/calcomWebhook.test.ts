@@ -60,6 +60,7 @@ vi.mock('../../../src/integrations/langfuse.js', () => ({
   langfuse: {
     trace: vi.fn(() => ({
       event: vi.fn(),
+      score: vi.fn(),
       id: 'test-trace-id',
     })),
   },

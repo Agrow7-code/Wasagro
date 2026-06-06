@@ -29,6 +29,7 @@ import { buildSDRContexto } from './sdrUtils.js'
 import { ClasificacionExcelSchema, type ClasificacionExcel, type EntradaClasificacionExcel } from '../../types/dominio/Excel.js'
 import { SupabaseTools } from '../../agents/mcp/SupabaseTools.js'
 import { IntentGate } from './IntentGate.js'
+import type { CostContext } from './IWasagroLLM.js'
 import { runTypedClassifier } from './runTypedClassifier.js'
 
 const EXTRACTOR_POR_TIPO: Record<string, string> = {
@@ -66,7 +67,7 @@ const ONBOARDING_FALLBACK: RespuestaOnboarding = {
   onboarding_completo: false,
 }
 
-import type { ILLMAdapter } from './ILLMAdapter.js'
+import type { ILLMAdapter, LLMGeneracionOpciones } from './ILLMAdapter.js'
 
 // ── OCR helpers — barrera determinista sobre la respuesta del modelo ──────────
 
@@ -122,11 +123,19 @@ export class WasagroAIAgent implements IWasagroLLM {
     this.#intentGate = new IntentGate(adapter, lf)
   }
 
-  async clasificarIntenciones(input: EntradaEvento, traceId: string): Promise<ResultadoIntentGate> {
-    return this.#intentGate.clasificar(input, traceId)
+  #costOpts(costCtx?: CostContext): Pick<LLMGeneracionOpciones, 'orgId' | 'fincaId'> {
+    if (!costCtx) return {}
+    const out: Record<string, string> = {}
+    if (costCtx.orgId) out['orgId'] = costCtx.orgId
+    if (costCtx.fincaId) out['fincaId'] = costCtx.fincaId
+    return out as Pick<LLMGeneracionOpciones, 'orgId' | 'fincaId'>
   }
 
-  async extraerEventos(input: EntradaEvento, traceId: string): Promise<ExtraccionMultiEvento> {
+  async clasificarIntenciones(input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<ResultadoIntentGate> {
+    return this.#intentGate.clasificar(input, traceId, costCtx)
+  }
+
+  async extraerEventos(input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<ExtraccionMultiEvento> {
     const trace = this.#lf.trace({ id: traceId })
 
     let clasificacion: ResultadoClasificacion;
@@ -136,7 +145,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     } else if (input.tipo_forzado) {
       clasificacion = { tipos_evento: [input.tipo_forzado as any], confidence: 1, requiere_imagen_para_confirmar: false, motivo_ambiguo: null, mensaje_clarificacion: null }
     } else {
-      clasificacion = await this.#clasificar(input, traceId)
+      clasificacion = await this.#clasificar(input, traceId, costCtx)
     }
 
     if (clasificacion.tipos_evento.length === 1) {
@@ -177,11 +186,12 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
 
   const tipoElegido = tiposValidos[0]!
-  const eventoExtraido = await this.#extraerEspecializado(
-    { ...clasificacion, tipos_evento: [tipoElegido] } as ResultadoClasificacion,
-    tipoElegido,
+    const eventoExtraido = await this.#extraerEspecializado(
+      { ...clasificacion, tipos_evento: [tipoElegido] } as ResultadoClasificacion,
+      tipoElegido,
       input,
       traceId,
+      costCtx,
     );
 
     return {
@@ -190,7 +200,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
+  async corregirTranscripcion(raw: string, traceId: string, costCtx?: CostContext): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
     const promptName = 'sp-02-post-correccion-stt.md'
     const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
@@ -199,7 +209,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     if (pc) genOpts['prompt'] = pc
     const generation = trace.generation(genOpts as any)
     try {
-      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'stt_post_correction' })
+      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'stt_post_correction', ...this.#costOpts(costCtx) })
       generation.end({ output: corrected })
       return corrected.trim()
     } catch (err) {
@@ -208,7 +218,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async describirImagenVisual(imageUrl: string, traceId: string): Promise<string> {
+  async describirImagenVisual(imageUrl: string, traceId: string, costCtx?: CostContext): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
     const promptName = 'sp-03a-vision-describe.md'
     const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
@@ -238,6 +248,7 @@ export class WasagroAIAgent implements IWasagroLLM {
           traceId,
           generationName: `vision_describe_attempt_${intentos + 1}`,
           modelClass: 'ultra',
+          ...this.#costOpts(costCtx),
         })
 
         texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
@@ -271,7 +282,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string): Promise<DiagnosticoV2VK> {
+  async diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<DiagnosticoV2VK> {
     const trace = this.#lf.trace({ id: traceId })
     const promptName = 'sp-03b-diagnostico-v2vk.md'
     const rawPrompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
@@ -297,7 +308,8 @@ export class WasagroAIAgent implements IWasagroLLM {
         responseFormat: 'json_object',
         traceId,
         generationName: 'v2vk_diagnose',
-        modelClass: 'reasoning' // Modelo analítico cruzando síntomas con RAG
+        modelClass: 'reasoning',
+        ...this.#costOpts(costCtx),
       })
       
       const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()
@@ -322,7 +334,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string): Promise<import('./IWasagroLLM.js').TipoImagen> {
+  async clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string, costCtx?: CostContext): Promise<import('./IWasagroLLM.js').TipoImagen> {
     const imgPromptName = 'sp-03c-clasificador-imagen.md'
     const promptRaw = await PromptManager.getPrompt(imgPromptName, `prompts/${imgPromptName}`, traceId)
     const prompt = promptRaw.replace(
@@ -336,20 +348,21 @@ export class WasagroAIAgent implements IWasagroLLM {
     })
 
     const result = await runTypedClassifier({
-      adapter:         this.#adapter,
-      systemPrompt:    prompt,
-      userContent:     'Clasifica esta imagen.',
-      schema:          ClasificarImagenSchema,
+      adapter: this.#adapter,
+      systemPrompt: prompt,
+      userContent: 'Clasifica esta imagen.',
+      schema: ClasificarImagenSchema,
       traceId,
-      classifierName:  'clasificar_imagen',
-      fallback:        { tipo: 'otro' as const },
-      modelClass:      'fast',
-      temperature:     0,
-      imageBase64:     base64,
-      imageMimeType:   mimeType,
-      langfuseClient:  this.#lf,
+      classifierName: 'clasificar_imagen',
+      fallback: { tipo: 'otro' as const },
+      modelClass: 'fast',
+      temperature: 0,
+      imageBase64: base64,
+      imageMimeType: mimeType,
+      langfuseClient: this.#lf,
       generationInput: { caption: caption ?? null },
-      promptClient:    PromptManager.getPromptClient(imgPromptName),
+      promptClient: PromptManager.getPromptClient(imgPromptName),
+      ...this.#costOpts(costCtx),
     })
     return result.tipo
   }
@@ -359,6 +372,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     mimeType: string,
     contexto: ContextoOCR,
     traceId: string,
+    costCtx?: CostContext,
   ): Promise<ResultadoOCR> {
     const MAX_OCR_RETRIES = 2
     const trace = this.#lf.trace({ id: traceId })
@@ -388,15 +402,16 @@ export class WasagroAIAgent implements IWasagroLLM {
         : `Corrección requerida (intento ${attempt}/${MAX_OCR_RETRIES}). Tu respuesta anterior falló la validación de esquema. Errores específicos: ${lastZodErrors}. Devuelve el JSON COMPLETO corregido siguiendo estrictamente el esquema del system prompt.`
 
       try {
-        const raw = await this.#adapter.generarTexto(userContent, {
-          systemPrompt: prompt,
-          responseFormat: 'json_object',
-          imageBase64: base64,
-          imageMimeType: mimeType,
-          traceId,
-          generationName: `ocr_documento_attempt_${attempt}`,
-          modelClass: 'ocr',
-        })
+      const raw = await this.#adapter.generarTexto(userContent, {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        traceId,
+        generationName: `ocr_documento_attempt_${attempt}`,
+        modelClass: 'ocr',
+        ...this.#costOpts(costCtx),
+      })
 
         const texto = raw.replace(/```json|```/g, '').trim()
         let json: unknown
@@ -439,7 +454,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     return fallback
   }
 
-  async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
+  async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding> {
     const promptName = 'sp-04a-onboarding-admin.md'
     const prompt = injectarVariables(
       await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId),
@@ -453,22 +468,23 @@ export class WasagroAIAgent implements IWasagroLLM {
     const userContent = `Historial:\n${historial}\nUsuario: ${mensaje}`
 
     return runTypedClassifier({
-      adapter:         this.#adapter,
-      systemPrompt:    prompt,
+      adapter: this.#adapter,
+      systemPrompt: prompt,
       userContent,
-      schema:          RespuestaOnboardingSchema,
+      schema: RespuestaOnboardingSchema,
       traceId,
-      classifierName:  'onboardar_admin',
-      fallback:        ONBOARDING_FALLBACK,
-      modelClass:      'fast',
-      temperature:     0,
-      langfuseClient:  this.#lf,
+      classifierName: 'onboardar_agricultor',
+      fallback: ONBOARDING_FALLBACK,
+      modelClass: 'fast',
+      temperature: 0,
+      langfuseClient: this.#lf,
       generationInput: { mensaje },
-      promptClient:    PromptManager.getPromptClient(promptName),
+      promptClient: PromptManager.getPromptClient(promptName),
+      ...this.#costOpts(costCtx),
     })
   }
 
-  async onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding> {
+  async onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding> {
     const promptName = 'sp-04b-onboarding-agricultor.md'
     const prompt = injectarVariables(
       await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId),
@@ -498,7 +514,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     })
   }
 
-  async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
+  async resumirSemana(entrada: EntradaResumenSemanal, traceId: string, costCtx?: CostContext): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
     const resumenPromptName = 'sp-05-resumen-semanal.md'
     // Prefetch para que getPromptClient devuelva el PromptClient cacheado.
@@ -544,7 +560,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         FORECAST_SEMANAL:   forecastTexto,
         PLAGAS_POR_NIVEL:   plagasTexto,
       })
-      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'resumen_semanal' })
+      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'resumen_semanal', ...this.#costOpts(costCtx) })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -564,7 +580,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async extraerDatosSDR(textoMensaje: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR> {
+  async extraerDatosSDR(textoMensaje: string, contextoActual: string, traceId: string, costCtx?: CostContext): Promise<ExtraccionSDR> {
     const trace = this.#lf.trace({ id: traceId })
     const extPromptName = 'SP-SDR-02-extractor.md'
     const prompt = await PromptManager.getPrompt(extPromptName, `sdr/prompts/${extPromptName}`, traceId)
@@ -581,13 +597,14 @@ export class WasagroAIAgent implements IWasagroLLM {
     try {
       const userContent = `Contexto Actual del Prospecto:\n${contextoActual}\n\nMensaje Actual: ${textoMensaje}`
 
-      const texto = await this.#adapter.generarTexto(userContent, { 
-        systemPrompt: prompt, 
-        responseFormat: 'json_object', 
-        traceId, 
+      const texto = await this.#adapter.generarTexto(userContent, {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        traceId,
         generationName: 'extraer_sdr',
-        modelClass: 'fast', // Enrutamiento rápido
-        temperature: 0
+        modelClass: 'fast',
+        temperature: 0,
+        ...this.#costOpts(costCtx),
       })
       const latencia = Date.now() - inicio
 
@@ -616,7 +633,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     }
   }
 
-  async redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string): Promise<string> {
+  async redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string, costCtx?: CostContext): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
     const redactPromptName = 'SP-SDR-03-writer.md'
     const prompt = await PromptManager.getPrompt(redactPromptName, `sdr/prompts/${redactPromptName}`, traceId)
@@ -632,12 +649,13 @@ export class WasagroAIAgent implements IWasagroLLM {
     try {
       const userContent = `Contexto del Prospecto:\n${contextoActual}\n\nÚltimo mensaje del usuario: "${mensajeUsuario}"\n\n=== DIRECTIVA OBLIGATORIA ===\n${directiva}`
 
-      const texto = await this.#adapter.generarTexto(userContent, { 
-        systemPrompt: prompt, 
-        responseFormat: 'text', 
-        traceId, 
+      const texto = await this.#adapter.generarTexto(userContent, {
+        systemPrompt: prompt,
+        responseFormat: 'text',
+        traceId,
         generationName: 'redactar_sdr',
         modelClass: 'fast',
+        ...this.#costOpts(costCtx),
       })
 
       generation.end({ output: texto })
@@ -654,6 +672,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     opciones: readonly string[],
     contexto: string,
     traceId: string,
+    costCtx?: CostContext,
   ): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
@@ -680,6 +699,7 @@ Reglas:
         generationName: 'clasificar_intencion_sdr',
         modelClass: 'fast',
         temperature: 0,
+        ...this.#costOpts(costCtx),
       })
       const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim()
       let parsed: unknown
@@ -702,7 +722,7 @@ Reglas:
     }
   }
 
-  async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel> {
+  async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string, costCtx?: CostContext): Promise<ClasificacionExcel> {
     const excelPromptName = 'sp-06-clasificar-excel.md'
     const prompt = injectarVariables(
       await PromptManager.getPrompt(excelPromptName, `prompts/${excelPromptName}`, traceId),
@@ -730,24 +750,25 @@ Reglas:
     }
 
     return runTypedClassifier({
-      adapter:         this.#adapter,
-      systemPrompt:    prompt,
+      adapter: this.#adapter,
+      systemPrompt: prompt,
       userContent,
-      schema:          ClasificacionExcelSchema,
+      schema: ClasificacionExcelSchema,
       traceId,
-      classifierName:  'clasificar_excel',
+      classifierName: 'clasificar_excel',
       fallback,
-      modelClass:      'fast',
-      temperature:     0,
-      langfuseClient:  this.#lf,
+      modelClass: 'fast',
+      temperature: 0,
+      langfuseClient: this.#lf,
       generationInput: { nombre_archivo: entrada.nombre_archivo, total_filas: entrada.total_filas },
-      promptClient:    PromptManager.getPromptClient(excelPromptName),
+      promptClient: PromptManager.getPromptClient(excelPromptName),
+      ...this.#costOpts(costCtx),
     })
   }
 
   // ─── private ─────────────────────────────────────────────────────────────
 
-  async #clasificar(input: EntradaEvento, traceId: string): Promise<ResultadoClasificacion> {
+  async #clasificar(input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<ResultadoClasificacion> {
     const prompt = injectarVariables((await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
       FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
       CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
@@ -769,8 +790,9 @@ Reglas:
         responseFormat: 'json_object',
         traceId,
         generationName: 'event_classify',
-        modelClass: 'fast', // Enrutamiento ultra-rápido (Flash)
-        temperature: 0 // CRÍTICO: 0 para clasificación determinista
+        modelClass: 'fast',
+        temperature: 0,
+        ...this.#costOpts(costCtx),
       })
       
       // Limpiar Markdown si existe
@@ -802,6 +824,7 @@ Reglas:
     tipo_evento: string,
     input: EntradaEvento,
     traceId: string,
+    costCtx?: CostContext,
   ): Promise<EventoCampoExtraido> {
     const promptFile = EXTRACTOR_POR_TIPO[tipo_evento] ?? 'sp-01-extraccion-evento.md'
 
@@ -835,14 +858,15 @@ Reglas:
 
     while (iterations < maxIterations) {
       try {
-        const textoRaw = await this.#adapter.generarTexto(conversationHistory, { 
-          systemPrompt, 
-          responseFormat: 'json_object', 
-          traceId, 
-          generationName: `llamar_react_iter_${iterations}`,
-          modelClass: 'reasoning',
-          tools: SupabaseTools
-        })
+      const textoRaw = await this.#adapter.generarTexto(conversationHistory, {
+        systemPrompt,
+        responseFormat: 'json_object',
+        traceId,
+        generationName: `llamar_react_iter_${iterations}`,
+        modelClass: 'reasoning',
+        tools: SupabaseTools,
+        ...this.#costOpts(costCtx),
+      })
 
         // Limpiar Markdown si el LLM envolvió la respuesta
         const texto = textoRaw.replace(/```json/g, '').replace(/```/g, '').trim()

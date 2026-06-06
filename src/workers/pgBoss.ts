@@ -3,7 +3,7 @@ import { procesarMensajeEntrante } from '../pipeline/procesarMensajeEntrante.js'
 import { sendOTPViaWhatsApp } from '../auth/whatsappAuthService.js'
 import { langfuse } from '../integrations/langfuse.js'
 import { crearLLM } from '../integrations/llm/index.js'
-import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
+import type { IWasagroLLM, CostContext } from '../integrations/llm/IWasagroLLM.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/EventoCampo.js'
 import { marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
@@ -38,6 +38,7 @@ async function procesarIntencionWorker(
     sessionId: string
     mensajeId: string
     usuarioId: string
+    orgId?: string
     fincaId: string
     transaccionOriginal: string
     phone: string
@@ -61,7 +62,7 @@ async function procesarIntencionWorker(
       tipos_forzados: [data.tipo_evento] as NonNullable<EntradaEvento['tipos_forzados']>,
     }
 
-    const multiExtraction = await llm.extraerEventos(entrada, data.traceId)
+    const multiExtraction = await llm.extraerEventos(entrada, data.traceId, data.orgId ? { orgId: data.orgId, fincaId: data.fincaId } satisfies CostContext : undefined)
 
     if (multiExtraction.eventos.length === 0 || multiExtraction.eventos[0]?.tipo_evento === 'sin_evento') {
       await marcarIntencionFallida(data.sessionId, jobId, 'sin_evento_detectado')
@@ -140,7 +141,9 @@ async function procesarIntencionWorker(
         }).eq('session_id', data.sessionId)
 
         if (destinatario) {
-          await sender.enviarTexto(destinatario, ext.pregunta_sugerida).catch(() => {})
+          await sender.enviarTexto(destinatario, ext.pregunta_sugerida).catch(err => {
+            console.warn('[pgBoss procesarIntencion] fallo al enviar pregunta de clarificación:', err)
+          })
         }
 
         // Si esta era la última intención, revisamos si hay otras que completaron bien para avisar
@@ -148,7 +151,9 @@ async function procesarIntencionWorker(
           // Extraemos las que NO son de clarificación
           const completadasReales = actualizadas.filter(i => i.status === 'completed' && !i.evento_extraido?._es_clarificacion)
           if (completadasReales.length > 0) {
-            await sender.enviarTexto(destinatario, `(Y ya registré los otros ${completadasReales.length} reportes ✅)`).catch(() => {})
+            await sender.enviarTexto(destinatario, `(Y ya registré los otros ${completadasReales.length} reportes ✅)`).catch(err => {
+              console.warn('[pgBoss procesarIntencion] fallo al enviar resumen de completadas:', err)
+            })
           }
         }
       }
@@ -276,12 +281,16 @@ async function procesarIntencionWorker(
     if (isServerError) {
       console.error(`[procesar-intencion] 🛑 STOP — Server error en job ${jobId}: ${errMsg}`)
       await marcarIntencionFallida(data.sessionId, jobId, `server_error:${errMsg}`)
-      if (data.phone) await sender.enviarTexto(data.phone, 'Tuve un problema técnico procesando tu reporte. Por favor intenta de nuevo en unos minutos. ⚠️').catch(()=>{})
+      if (data.phone) await sender.enviarTexto(data.phone, 'Tuve un problema técnico procesando tu reporte. Por favor intenta de nuevo en unos minutos. ⚠️').catch(sendErr => {
+        console.warn('[pgBoss procesarIntencion] fallo al notificar server_error al usuario:', sendErr)
+      })
       generation.end({ output: { status: 'server_error', error: errMsg }, level: 'ERROR' })
     } else {
       console.error(`[procesar-intencion] Error en job ${jobId}:`, err)
       await marcarIntencionFallida(data.sessionId, jobId, `error:${errMsg}`)
-      if (data.phone) await sender.enviarTexto(data.phone, 'No pude extraer todos los datos de tu mensaje. Por favor revisa y envía un nuevo reporte. ⚠️').catch(()=>{})
+      if (data.phone) await sender.enviarTexto(data.phone, 'No pude extraer todos los datos de tu mensaje. Por favor revisa y envía un nuevo reporte. ⚠️').catch(sendErr => {
+        console.warn('[pgBoss procesarIntencion] fallo al notificar error de extracción al usuario:', sendErr)
+      })
       generation.end({ output: { status: 'error', error: errMsg }, level: 'ERROR' })
     }
 

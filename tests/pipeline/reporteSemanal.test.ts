@@ -140,6 +140,8 @@ describe('generarYEnviarReportes', () => {
           eventos: eventosBase,
         }),
         expect.any(String),
+        // Third arg: costCtx propagated for D27 cost tracking attribution.
+        expect.objectContaining({ orgId: expect.any(String), fincaId: 'F001' }),
       )
     })
   })

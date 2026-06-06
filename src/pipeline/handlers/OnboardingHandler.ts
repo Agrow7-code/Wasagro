@@ -43,6 +43,7 @@ async function geocodeAndUpdateFinca(fincaId: string, address: string, traceId: 
   }
 }
 import { _sender, _llm } from '../procesarMensajeEntrante.js'
+import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { transcribirAudio } from '../sttService.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 
@@ -99,7 +100,7 @@ export async function handleOnboardingAdmin(
     ?? hydrateOnboardingContext(session, usuario, 'admin')
   const ctxIn = reduceOnboardingContext(ctx0, { userMessage: texto })
 
-  const resultado = await _llm!.onboardarAdmin(texto, toContextoConversacion(ctxIn), traceId)
+  const resultado = await _llm!.onboardarAdmin(texto, toContextoConversacion(ctxIn), traceId, { orgId: usuario.org_id, fincaId: usuario.finca_id ?? undefined } satisfies CostContext)
   const datos = resultado.datos_extraidos ?? {}
 
   // P6: persist consent exactly once when the user accepts. ctx0.consentimiento
@@ -129,9 +130,15 @@ export async function handleOnboardingAdmin(
           cultivo_principal: datos.cultivo_principal ?? null,
           ubicacion: datos.finca_ubicacion_texto ?? null,
         })
-        // Geocodificar dirección para centrar el mapa en el dashboard
+        // Geocodificar dirección para centrar el mapa en el dashboard.
+        // Fire-and-forget — el onboarding no debe bloquearse por una API
+        // externa lenta de Nominatim. Si falla, el dashboard simplemente
+        // muestra la finca sin coordenadas y se geocodifica en el próximo
+        // edit manual.
         if (datos.finca_ubicacion_texto) {
-          geocodeAndUpdateFinca(fincaId, datos.finca_ubicacion_texto, traceId).catch(() => {})
+          geocodeAndUpdateFinca(fincaId, datos.finca_ubicacion_texto, traceId).catch(err => {
+            console.warn('[OnboardingHandler] geocodeAndUpdateFinca falló (no-bloqueante):', err)
+          })
         }
         const lotes = datos.lotes ?? []
         for (const [i, lote] of lotes.entries()) {
@@ -231,7 +238,7 @@ export async function handleOnboardingAgricultor(
     ? fincas.map(f => `- ${f.finca_id}: ${f.nombre} (${f.cultivo_principal ?? 'cultivo no especificado'})`).join('\n')
     : 'No hay fincas registradas aún'
 
-  const resultado = await _llm!.onboardarAgricultor(texto, toContextoAgricultor(ctxInAgr, fincasDisponibles), traceId)
+  const resultado = await _llm!.onboardarAgricultor(texto, toContextoAgricultor(ctxInAgr, fincasDisponibles), traceId, { orgId: usuario.org_id, fincaId: usuario.finca_id ?? undefined } satisfies CostContext)
   const datosAgr = resultado.datos_extraidos ?? {}
 
   // P6: persist consent exactly once. ctx0Agr.consentimiento es monotónico —

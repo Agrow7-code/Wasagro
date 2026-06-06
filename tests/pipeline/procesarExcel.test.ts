@@ -94,6 +94,8 @@ describe('handleDocumento', () => {
     expect(llm.clasificarExcel).toHaveBeenCalledWith(
       expect.objectContaining({ nombre_archivo: 'ventas.csv', total_filas: 3 }),
       'trace-1',
+      // Third arg: costCtx for D27. usuarioBase has no org_id so it's undefined.
+      undefined,
     )
     expect(sender.enviarTexto).toHaveBeenCalledWith(
       '593987654321',
@@ -170,6 +172,7 @@ describe('handleDocumento', () => {
     expect(llm.clasificarExcel).toHaveBeenCalledWith(
       expect.objectContaining({ columnas: ['fecha', 'cantidad', 'precio'] }),
       'trace-1',
+      undefined,
     )
   })
 })

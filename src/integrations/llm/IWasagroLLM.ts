@@ -17,19 +17,26 @@ export interface ContextoOCR {
   lista_lotes?: string | undefined
 }
 
+export interface CostContext {
+  orgId: string
+  // Explicit `| undefined` so call sites under `exactOptionalPropertyTypes: true`
+  // can pass `fincaId: usuario.finca_id ?? undefined` without conditional spreads.
+  fincaId?: string | undefined
+}
+
 export interface IWasagroLLM {
-  clasificarIntenciones(input: EntradaEvento, traceId: string): Promise<ResultadoIntentGate>
-  extraerEventos(input: EntradaEvento, traceId: string): Promise<ExtraccionMultiEvento>
-  corregirTranscripcion(raw: string, traceId: string): Promise<string>
-  describirImagenVisual(imageUrl: string, traceId: string): Promise<string>
-  diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string): Promise<DiagnosticoV2VK>
-  clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string): Promise<TipoImagen>
-  extraerDocumentoOCR(base64: string, mimeType: string, contexto: ContextoOCR, traceId: string): Promise<ResultadoOCR>
-  onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding>
-  onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding>
-  resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal>
-  extraerDatosSDR(texto: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR>
-  redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string): Promise<string>
-  clasificarIntencionSDR(texto: string, opciones: readonly string[], contexto: string, traceId: string): Promise<string>
-  clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel>
+  clasificarIntenciones(input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<ResultadoIntentGate>
+  extraerEventos(input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<ExtraccionMultiEvento>
+  corregirTranscripcion(raw: string, traceId: string, costCtx?: CostContext): Promise<string>
+  describirImagenVisual(imageUrl: string, traceId: string, costCtx?: CostContext): Promise<string>
+  diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<DiagnosticoV2VK>
+  clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string, costCtx?: CostContext): Promise<TipoImagen>
+  extraerDocumentoOCR(base64: string, mimeType: string, contexto: ContextoOCR, traceId: string, costCtx?: CostContext): Promise<ResultadoOCR>
+  onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding>
+  onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding>
+  resumirSemana(entrada: EntradaResumenSemanal, traceId: string, costCtx?: CostContext): Promise<ResumenSemanal>
+  extraerDatosSDR(texto: string, contextoActual: string, traceId: string, costCtx?: CostContext): Promise<ExtraccionSDR>
+  redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string, costCtx?: CostContext): Promise<string>
+  clasificarIntencionSDR(texto: string, opciones: readonly string[], contexto: string, traceId: string, costCtx?: CostContext): Promise<string>
+  clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string, costCtx?: CostContext): Promise<ClasificacionExcel>
 }

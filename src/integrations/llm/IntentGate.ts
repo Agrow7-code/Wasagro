@@ -4,6 +4,7 @@ import type { Langfuse } from 'langfuse'
 import { langfuse as langfuseDefault } from '../langfuse.js'
 import { PromptManager } from '../../pipeline/promptManager.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
+import type { CostContext } from './IWasagroLLM.js'
 import type { EntradaEvento, ResultadoIntentGate } from '../../types/dominio/EventoCampo.js'
 import { ResultadoIntentGateSchema } from '../../types/dominio/EventoCampo.js'
 import { runTypedClassifier } from './runTypedClassifier.js'
@@ -41,7 +42,7 @@ export class IntentGate {
     this.#lf = lf ?? langfuseDefault
   }
 
-  async clasificar(input: EntradaEvento, traceId: string): Promise<ResultadoIntentGate> {
+  async clasificar(input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<ResultadoIntentGate> {
     // Short-circuit when the caller already knows the event type (forced
     // routing from upstream). Skip the LLM entirely.
     if (input.tipos_forzados && input.tipos_forzados.length > 0) {
@@ -63,18 +64,20 @@ export class IntentGate {
     const userMessage = `Nombre del usuario: ${input.nombre_usuario ?? 'No especificado'}\n\nMensaje: ${input.transcripcion}`
 
     const raw = await runTypedClassifier({
-      adapter:         this.#adapter,
+      adapter: this.#adapter,
       systemPrompt,
-      userContent:     userMessage,
-      schema:          IntentGateRawSchema,
+      userContent: userMessage,
+      schema: IntentGateRawSchema,
       traceId,
-      classifierName:  'intent_gate',
-      fallback:        RAW_FALLBACK,
-      modelClass:      'fast',
-      temperature:     0,
-      langfuseClient:  this.#lf,
+      classifierName: 'intent_gate',
+      fallback: RAW_FALLBACK,
+      modelClass: 'fast',
+      temperature: 0,
+      langfuseClient: this.#lf,
       generationInput: { transcripcion: input.transcripcion },
-      promptClient:    PromptManager.getPromptClient(clasPromptName),
+      promptClient: PromptManager.getPromptClient(clasPromptName),
+      orgId: costCtx?.orgId,
+      fincaId: costCtx?.fincaId,
     })
 
     return postProcess(raw)

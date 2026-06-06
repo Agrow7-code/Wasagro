@@ -1,7 +1,7 @@
 import { langfuse } from '../integrations/langfuse.js'
 import type { NormalizedMessage } from '../integrations/whatsapp/NormalizedMessage.js'
 import type { IWhatsAppSender } from '../integrations/whatsapp/IWhatsAppSender.js'
-import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
+import type { IWasagroLLM, CostContext } from '../integrations/llm/IWasagroLLM.js'
 import type { FilaExcel, EntradaClasificacionExcel } from '../types/dominio/Excel.js'
 import {
   getOrCreateSession,
@@ -79,7 +79,7 @@ async function parsearArchivo(buffer: Buffer, mimetype: string, nombre: string):
 
 export async function handleDocumento(
   msg: NormalizedMessage,
-  usuario: { id: string; finca_id: string | null; finca_nombre?: string; cultivo_principal?: string },
+  usuario: { id: string; finca_id: string | null; org_id?: string; finca_nombre?: string; cultivo_principal?: string },
   mensajeId: string,
   traceId: string,
   sender: IWhatsAppSender,
@@ -112,7 +112,7 @@ export async function handleDocumento(
     }
     if (usuario.finca_nombre !== undefined) entradaExcel.finca_nombre = usuario.finca_nombre
     if (usuario.cultivo_principal !== undefined) entradaExcel.cultivo_principal = usuario.cultivo_principal
-    const clasificacion = await llm.clasificarExcel(entradaExcel, traceId)
+    const clasificacion = await llm.clasificarExcel(entradaExcel, traceId, usuario.org_id ? { orgId: usuario.org_id, fincaId: usuario.finca_id ?? undefined } satisfies CostContext : undefined)
 
     trace.event({ name: 'excel_clasificado', input: { tipo: clasificacion.tipo_datos, filas: clasificacion.filas_detectadas, confianza: clasificacion.confianza } })
 

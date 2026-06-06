@@ -1,5 +1,5 @@
 import { langfuse } from '../integrations/langfuse.js'
-import type { IWasagroLLM } from '../integrations/llm/IWasagroLLM.js'
+import type { IWasagroLLM, CostContext } from '../integrations/llm/IWasagroLLM.js'
 import type { IWhatsAppSender } from '../integrations/whatsapp/IWhatsAppSender.js'
 import type { EntradaResumenSemanal } from '../types/dominio/Resumen.js'
 import { getEventosByFincaRango, getAdminsByFinca, getFincasConCoordenadas, getFincasActivas, getPlagasPorNivelSemanal, type PlaguaNivelResumen } from './supabaseQueries.js'
@@ -44,6 +44,7 @@ export async function generarYEnviarReportes(
       const coords  = coordsMap.get(finca.finca_id) ?? null
       const enviado = await procesarReporteFinca(
         finca.finca_id,
+        finca.org_id,
         finca.nombre,
         finca.cultivo_principal ?? 'no especificado',
         finca.pais ?? 'EC',
@@ -65,6 +66,7 @@ export async function generarYEnviarReportes(
 
 async function procesarReporteFinca(
   fincaId: string,
+  orgId: string,
   fincaNombre: string,
   cultivoPrincipal: string,
   pais: string,
@@ -118,7 +120,7 @@ async function procesarReporteFinca(
 
   let resumen
   try {
-    resumen = await llm.resumirSemana(entrada as EntradaResumenSemanal, trace.id)
+    resumen = await llm.resumirSemana(entrada as EntradaResumenSemanal, trace.id, { orgId, fincaId } satisfies CostContext)
   } catch (err) {
     trace.event({ name: 'error_llm_resumen', level: 'ERROR', input: { finca_id: fincaId, error: String(err) } })
     throw err

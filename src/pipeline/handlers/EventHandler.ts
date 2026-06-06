@@ -22,6 +22,7 @@ import {
 import { transcribirAudio } from '../sttService.js'
 import { handleDocumento, procesarFilasExcelConfirmadas } from '../procesarExcel.js'
 import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES_ADMIN } from '../procesarMensajeEntrante.js'
+import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
 
@@ -55,11 +56,13 @@ export async function handleEvento(
 ): Promise<void> {
   // Trace de event pipeline — tags por pipeline + tipo media + rol del usuario.
   langfuse.trace({
-    id:       traceId,
-    name:     'event_pipeline',
-    tags:     ['event', msg.tipo, usuario.rol],
+    id: traceId,
+    name: 'event_pipeline',
+    tags: ['event', msg.tipo, usuario.rol],
     metadata: { usuario_id: usuario.id, phone: msg.from, finca_id: usuario.finca_id ?? null, org_id: usuario.org_id },
   })
+
+  const costCtx: CostContext | undefined = usuario.org_id ? { orgId: usuario.org_id, fincaId: usuario.finca_id ?? undefined } : undefined
 
   // Approval command: "aprobar [nombre]" from jefe/propietario (text only, before audio processing)
   if (msg.tipo === 'texto' && ROLES_ADMIN.has(usuario.rol) && usuario.finca_id) {
@@ -93,7 +96,7 @@ export async function handleEvento(
   // Documento (XLSX / CSV) — clasificar y pedir confirmación
   if (msg.tipo === 'documento') {
     const finca = usuario.finca_id ? await getFincaById(usuario.finca_id) : null
-    const docUsuario: { id: string; finca_id: string | null; finca_nombre?: string; cultivo_principal?: string } = { id: usuario.id, finca_id: usuario.finca_id }
+    const docUsuario: { id: string; finca_id: string | null; org_id?: string; finca_nombre?: string; cultivo_principal?: string } = { id: usuario.id, finca_id: usuario.finca_id, org_id: usuario.org_id }
     if (finca?.nombre !== undefined) docUsuario.finca_nombre = finca.nombre
     if (finca?.cultivo_principal != null) docUsuario.cultivo_principal = finca.cultivo_principal
     await handleDocumento(
@@ -174,16 +177,16 @@ export async function handleEvento(
     const lista_lotes = lotes.map(l => `- ${l.lote_id}: "${l.nombre_coloquial}"`).join('\n') || 'Sin lotes'
 
     try {
-      const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId, msg.texto ?? undefined)
+      const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId, msg.texto ?? undefined, costCtx)
 
       langfuse.trace({ id: traceId }).event({ name: 'imagen_clasificada', input: { tipo: tipoImagen } })
 
       if (tipoImagen === 'documento_tabla') {
-        const ocr = await _llm!.extraerDocumentoOCR(media.base64, media.mimeType, {
-          finca_nombre: finca?.nombre,
-          cultivo_principal: finca?.cultivo_principal ?? undefined,
-          lista_lotes,
-        }, traceId)
+      const ocr = await _llm!.extraerDocumentoOCR(media.base64, media.mimeType, {
+        finca_nombre: finca?.nombre,
+        cultivo_principal: finca?.cultivo_principal ?? undefined,
+        lista_lotes,
+      }, traceId, costCtx)
 
         const eventoId = await saveEvento({
           finca_id: usuario.finca_id!,
@@ -222,6 +225,7 @@ export async function handleEvento(
       const descripcionVisual = await _llm!.describirImagenVisual(
         `data:${media.mimeType};base64,${media.base64}`,
         traceId,
+        costCtx,
       )
 
       const contextoRag = usuario.finca_id && _ragRetriever
@@ -236,7 +240,7 @@ export async function handleEvento(
         finca_nombre: finca?.nombre,
         cultivo_principal: finca?.cultivo_principal ?? undefined,
         pais: finca?.pais,
-      }, traceId)
+      }, traceId, costCtx)
 
       const tipoEventoFinal = diagnostico.tipo_evento_sugerido === 'sin_evento' || !diagnostico.tipo_evento_sugerido
         ? 'observacion'
@@ -443,12 +447,13 @@ export async function handleEvento(
       : transcripcion
 
     const tipoPrevio = (stored.extracted_data?.[0]?.tipo_evento ?? 'nota_libre') as Parameters<NonNullable<typeof _intentDetector>['detectar']>[0]['tipo_previo']
-    const intencion = _intentDetector
-      ? await _intentDetector.detectar(
-          { mensaje_usuario: transcripcion, tipo_previo: tipoPrevio, transcripcion_previa: stored.transcripcion_original ?? '' },
-          traceId,
-        )
-      : { tipo: 'nuevo_evento' as const, confianza: 0 }
+  const intencion = _intentDetector
+    ? await _intentDetector.detectar(
+      { mensaje_usuario: transcripcion, tipo_previo: tipoPrevio, transcripcion_previa: stored.transcripcion_original ?? '' },
+      traceId,
+      costCtx,
+    )
+    : { tipo: 'nuevo_evento' as const, confianza: 0 }
 
     const entradaCorreccion: EntradaEvento = {
       transcripcion: transcripcionMerged,
@@ -464,7 +469,7 @@ export async function handleEvento(
         : {}),
     }
 
-    const multiExtractionCorreccion = await _llm!.extraerEventos(entradaCorreccion, traceId)
+      const multiExtractionCorreccion = await _llm!.extraerEventos(entradaCorreccion, traceId, costCtx)
 
     if (multiExtractionCorreccion.eventos.length > 0 && !multiExtractionCorreccion.eventos.every(e => e.tipo_evento === 'sin_evento')) {
       const eventosValidos = multiExtractionCorreccion.eventos.filter(e => e.tipo_evento !== 'sin_evento')
@@ -575,7 +580,7 @@ export async function handleEvento(
     ...(session.contexto_parcial['extracted_data'] ? { estado_parcial: session.contexto_parcial['extracted_data'] as EventoCampoExtraido[] } : {}),
   }
 
-  const intentResult = await _llm!.clasificarIntenciones(entrada, traceId)
+      const intentResult = await _llm!.clasificarIntenciones(entrada, traceId, costCtx)
 
   if (intentResult.es_no_evento) {
     if (intentResult.tipo_no_evento === 'saludo') {
@@ -614,6 +619,7 @@ export async function handleEvento(
       sessionId: session.session_id,
       mensajeId,
       usuarioId: usuario.id,
+      orgId: usuario.org_id,
       fincaId: usuario.finca_id,
       transaccionOriginal: transcripcion,
       phone: msg.from,

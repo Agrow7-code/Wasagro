@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
+import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { runTypedClassifier } from '../../integrations/llm/runTypedClassifier.js'
 
 const TipoEventoEnum = z.enum([
@@ -44,7 +45,7 @@ export interface IntentDetectorInput {
 export class IntentDetector {
   constructor(private readonly adapter: ILLMAdapter) {}
 
-  async detectar(input: IntentDetectorInput, traceId: string): Promise<DeteccionIntento> {
+  async detectar(input: IntentDetectorInput, traceId: string, costCtx?: CostContext): Promise<DeteccionIntento> {
     const userContent = [
       `Tipo de evento previo: ${input.tipo_previo}`,
       `Transcripción previa: ${input.transcripcion_previa}`,
@@ -52,16 +53,18 @@ export class IntentDetector {
     ].join('\n')
 
     const parsed = await runTypedClassifier({
-      adapter:        this.adapter,
-      systemPrompt:   SYSTEM_PROMPT,
+      adapter: this.adapter,
+      systemPrompt: SYSTEM_PROMPT,
       userContent,
-      schema:         RespuestaLLMSchema,
+      schema: RespuestaLLMSchema,
       traceId,
       classifierName: 'event_intent_detector',
-      fallback:       FALLBACK_LLM,
-      modelClass:     'fast',
-      temperature:    0,
+      fallback: FALLBACK_LLM,
+      modelClass: 'fast',
+      temperature: 0,
       generationInput: input,
+      orgId: costCtx?.orgId,
+      fincaId: costCtx?.fincaId,
     })
 
     const result: DeteccionIntento = { tipo: parsed.tipo, confianza: parsed.confianza }

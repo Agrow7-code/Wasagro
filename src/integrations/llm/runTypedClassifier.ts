@@ -49,6 +49,12 @@ export interface RunTypedOptions<T> {
   // versión en el dashboard. Si el prompt vino del disco (sync no fue corrido),
   // promptClient debe ser null y el linking se skipea silenciosamente.
   promptClient?: unknown | null
+  // Cost attribution — threads orgId/fincaId into LLMGeneracionOpciones so
+  // adapters can record llm_call_costs per org. Explicit `| undefined` is
+  // required under `exactOptionalPropertyTypes: true` so call sites can
+  // forward `costCtx?.orgId` without conditional spreads.
+  orgId?: string | undefined
+  fincaId?: string | undefined
 }
 
 export interface RunTypedTelemetry {
@@ -75,6 +81,7 @@ export async function runTypedClassifierWithTelemetry<T>(opts: RunTypedOptions<T
     imageBase64, imageMimeType, langfuseClient,
     generationInput,
     promptClient,
+    orgId, fincaId,
   } = opts
 
   const lf = langfuseClient ?? defaultLangfuse
@@ -105,6 +112,8 @@ export async function runTypedClassifierWithTelemetry<T>(opts: RunTypedOptions<T
       temperature,
       imageBase64,
       imageMimeType,
+      orgId,
+      fincaId,
     }))
     const data = parseAndValidate(raw, schema)
     generation.end({
@@ -132,6 +141,8 @@ export async function runTypedClassifierWithTelemetry<T>(opts: RunTypedOptions<T
       temperature,
       imageBase64,
       imageMimeType,
+      orgId,
+      fincaId,
     }))
     const data = parseAndValidate(raw2, schema)
     trace.event({
@@ -176,6 +187,8 @@ interface BuildCallOptsInput {
   temperature: number
   imageBase64?: string | undefined
   imageMimeType?: string | undefined
+  orgId?: string | undefined
+  fincaId?: string | undefined
 }
 
 // Constructs the adapter options bag, omitting optional image fields entirely
@@ -183,15 +196,17 @@ interface BuildCallOptsInput {
 // imageBase64: undefined is not the same as not including the key).
 function buildCallOpts(opts: BuildCallOptsInput): Parameters<ILLMAdapter['generarTexto']>[1] {
   const out: Parameters<ILLMAdapter['generarTexto']>[1] = {
-    systemPrompt:    opts.systemPrompt,
-    responseFormat:  'json_object',
-    traceId:         opts.traceId,
-    generationName:  opts.generationName,
-    modelClass:      opts.modelClass,
-    temperature:     opts.temperature,
+    systemPrompt: opts.systemPrompt,
+    responseFormat: 'json_object',
+    traceId: opts.traceId,
+    generationName: opts.generationName,
+    modelClass: opts.modelClass,
+    temperature: opts.temperature,
   }
   if (opts.imageBase64 !== undefined) out.imageBase64 = opts.imageBase64
   if (opts.imageMimeType !== undefined) out.imageMimeType = opts.imageMimeType
+  if (opts.orgId !== undefined) out.orgId = opts.orgId
+  if (opts.fincaId !== undefined) out.fincaId = opts.fincaId
   return out
 }
 
