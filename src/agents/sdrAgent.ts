@@ -12,6 +12,7 @@ import {
   actualizarMensaje,
 } from '../pipeline/supabaseQueries.js'
 import { setIfNotExists } from '../integrations/redis.js'
+import { scoreTerminalTransition } from './sdr/outcomeScoring.js'
 
 const MAX_SDR_TURNS = 4 // Reducido para cerrar más rápido
 
@@ -419,6 +420,28 @@ export async function handleMeetingConfirmation(
       await sender.enviarTexto(msg.from, followUp)
     }
 
+    // SDR funnel scoring: convert handler-level actionTaken → FSM-equivalent
+    // terminal state and emit score. Only fires when the prospect actually
+    // landed in a terminal outcome (booked/declined). The other branches
+    // (wants_brochure, will_book_later, other) leave the prospect in
+    // meeting_proposed and don't get scored — they're still in-flight.
+    const terminalTo = actionTaken === 'meeting_confirmed'
+      ? 'meeting_confirmed' as const
+      : actionTaken === 'graceful_exit'
+        ? 'declined' as const
+        : null
+    if (terminalTo) {
+      scoreTerminalTransition(trace, 'meeting_proposed', terminalTo, {
+        prospectoId: prospecto['id'] as string,
+        phone:       msg.from,
+        narrativa:   (prospecto['narrativa_asignada'] as string | null) ?? null,
+        cultivo:     (prospecto['cultivo_principal'] as string | null) ?? null,
+        segmento:    (prospecto['segmento_icp'] as string | null) ?? null,
+        turnCount:   (prospecto['turns_total'] as number) + 1,
+        source:      'meeting_confirmation',
+      })
+    }
+
     await saveSDRInteraccion({
       prospecto_id: prospecto['id'],
       phone: msg.from,
@@ -432,7 +455,26 @@ export async function handleMeetingConfirmation(
     await actualizarMensaje(mensajeId, { status: 'processed' })
     return true
   } catch (err) {
-    console.error('[SDR] Error en handleMeetingConfirmation:', err)
+    // AGENTS.md Rule 4: todo error queda registrado en observabilidad. Antes
+    // este catch solo loggeaba a console; ahora también emite a LangFuse con
+    // stack + diagnóstico (mismo patrón que handleSDRSession).
+    const detail = {
+      message: err instanceof Error ? err.message : String(err),
+      stack:   err instanceof Error ? err.stack?.slice(0, 2000) : undefined,
+      name:    err instanceof Error ? err.name : undefined,
+      phone:   msg.from,
+      wamid:   msg.wamid,
+    }
+    console.error('[SDR] Error en handleMeetingConfirmation:', detail)
+    try {
+      langfuse.trace({ id: traceId }).event({
+        name:  'sdr_meeting_confirmation_error',
+        level: 'ERROR',
+        input: detail,
+      })
+    } catch {
+      // langfuse client falla → degrade silencioso, ya loggeamos a console
+    }
     return false
   }
 }

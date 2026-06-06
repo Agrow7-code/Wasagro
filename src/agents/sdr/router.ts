@@ -20,6 +20,7 @@ import { compose, composeCalendarLink } from './composer.js'
 import { TEMPLATES, resolveTemplate, type TemplateKey } from './skills/registry.js'
 import { fsmStateToLegacySDRNode } from './contextStore.js'
 import { validateMessage } from './validators.js'
+import { scoreTerminalTransition } from './outcomeScoring.js'
 import type { ILLMAdapter } from '../../integrations/llm/ILLMAdapter.js'
 import type { BotAction } from './context.js'
 
@@ -435,6 +436,20 @@ ESTRICTO:
     ctx = { ...ctx, fsmState: 'pitch_sent' }
   }
 
+  // SDR funnel scoring: when the FSM lands on a terminal state (meeting_confirmed,
+  // declined, dormant), emit a numeric score to LangFuse so conversion-rate
+  // widgets can group by model/prompt-version/narrativa. Idempotent: only fires
+  // when the previous state was different.
+  scoreTerminalTransition(trace, initial.ctx.fsmState, ctx.fsmState, {
+    prospectoId: ctx.prospectId,
+    phone:       ctx.phone,
+    narrativa:   (prospecto['narrativa_asignada'] as string | null) ?? null,
+    cultivo:     ctx.cultivo,
+    segmento:    ctx.segmento,
+    turnCount:   ctx.turnCount,
+    source:      'router',
+  })
+
   // ── 8. SEND first, PERSIST after (with tolerance) ─────────────────────────
   // Order matters: the prospect must receive their reply even if DB persistence
   // fails. A failed UPDATE/INSERT used to throw all the way up to handleSDRSession,
@@ -561,6 +576,17 @@ async function handleAudioInbound(
     classification,
     extraction: {},
     botMessage: respuesta,
+  })
+
+  // SDR funnel scoring — same contract as the text path.
+  scoreTerminalTransition(trace, ctxIn.fsmState, ctx.fsmState, {
+    prospectoId: ctx.prospectId,
+    phone:       ctx.phone,
+    narrativa:   (rctx.prospecto['narrativa_asignada'] as string | null) ?? null,
+    cultivo:     ctx.cultivo,
+    segmento:    ctx.segmento,
+    turnCount:   ctx.turnCount,
+    source:      'router',
   })
 
   trace.event({

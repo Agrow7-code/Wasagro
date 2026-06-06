@@ -165,6 +165,21 @@ async function handleBookingCreated(
     langfuse_trace_id: traceId,
   })
 
+  // SDR funnel score: booking confirmed via Cal.com → meeting_confirmed (+1).
+  // The duplicate-booking guard above already covers idempotency: if this
+  // webhook fires twice for the same bookingId, the score is only emitted on
+  // the first run.
+  const { scoreTerminalTransition } = await import('../../agents/sdr/outcomeScoring.js')
+  scoreTerminalTransition(trace, 'meeting_proposed', 'meeting_confirmed', {
+    prospectoId: prospecto['id'] as string,
+    phone:       prospecto['phone'] as string,
+    narrativa:   (prospecto['narrativa_asignada'] as string | null) ?? null,
+    cultivo:     (prospecto['cultivo_principal'] as string | null) ?? null,
+    segmento:    (prospecto['segmento_icp'] as string | null) ?? null,
+    turnCount:   (prospecto['turns_total'] as number) ?? 0,
+    source:      'calcom_webhook',
+  })
+
   // Notify founder
   await notifyFounderBooking(prospecto, reunionAgendadaAt, title, bookingId)
 
