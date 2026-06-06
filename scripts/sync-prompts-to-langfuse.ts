@@ -107,6 +107,13 @@ async function main(): Promise<void> {
   }
 
   console.log(`\nDone. pushed=${pushed} skipped=${skipped} failed=${failed}`)
+
+  if (pushed > 0 && !args.dryRun) {
+    const host = process.env['LANGFUSE_HOST'] ?? 'https://cloud.langfuse.com'
+    console.log(`\n  → Verificá la sección Prompts: ${host}/prompts`)
+    console.log(`  → Smoke test del setup: npm run langfuse:status`)
+  }
+
   if (failed > 0) process.exit(1)
 }
 
