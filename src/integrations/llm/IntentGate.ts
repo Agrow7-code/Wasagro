@@ -51,8 +51,9 @@ export class IntentGate {
       return buildForcedResult([input.tipo_forzado])
     }
 
+    const clasPromptName = 'sp-00-clasificador.md'
     const systemPrompt = injectarVariables(
-      (await PromptManager.getPrompt('sp-00-clasificador.md', 'prompts/sp-00-clasificador.md', traceId)),
+      (await PromptManager.getPrompt(clasPromptName, `prompts/${clasPromptName}`, traceId)),
       {
         FINCA_NOMBRE:      input.finca_nombre ?? input.finca_id,
         CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
@@ -73,6 +74,7 @@ export class IntentGate {
       temperature:     0,
       langfuseClient:  this.#lf,
       generationInput: { transcripcion: input.transcripcion },
+      promptClient:    PromptManager.getPromptClient(clasPromptName),
     })
 
     return postProcess(raw)

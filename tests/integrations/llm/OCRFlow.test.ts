@@ -16,6 +16,8 @@ vi.mock('../../../src/integrations/langfuse.js', () => ({
 vi.mock('../../../src/pipeline/promptManager.js', () => ({
   PromptManager: {
     getPrompt: vi.fn().mockResolvedValue('Prompt de OCR con {{FINCA_NOMBRE}} {{CULTIVO_PRINCIPAL}} {{LISTA_LOTES}}'),
+    getPromptClient: vi.fn().mockReturnValue(null),
+    clearCache: vi.fn(),
   },
 }))
 

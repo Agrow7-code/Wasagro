@@ -192,9 +192,13 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'corregir_transcripcion', model: 'wasagro/orchestrator', input: { raw } })
+    const promptName = 'sp-02-post-correccion-stt.md'
+    const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+    const genOpts: Record<string, unknown> = { name: 'corregir_transcripcion', model: 'wasagro/orchestrator', input: { raw } }
+    const pc = PromptManager.getPromptClient(promptName)
+    if (pc) genOpts['prompt'] = pc
+    const generation = trace.generation(genOpts as any)
     try {
-      const prompt = (await PromptManager.getPrompt('sp-02-post-correccion-stt.md', 'prompts/sp-02-post-correccion-stt.md', typeof traceId !== 'undefined' ? traceId : undefined))
       const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'stt_post_correction' })
       generation.end({ output: corrected })
       return corrected.trim()
@@ -206,9 +210,13 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async describirImagenVisual(imageUrl: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'describir_imagen', model: 'wasagro/orchestrator' })
+    const promptName = 'sp-03a-vision-describe.md'
+    const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+    const genOpts: Record<string, unknown> = { name: 'describir_imagen', model: 'wasagro/orchestrator' }
+    const pc = PromptManager.getPromptClient(promptName)
+    if (pc) genOpts['prompt'] = pc
+    const generation = trace.generation(genOpts as any)
     try {
-      const prompt = (await PromptManager.getPrompt('sp-03a-vision-describe.md', 'prompts/sp-03a-vision-describe.md', typeof traceId !== 'undefined' ? traceId : undefined))
       
       let intentos = 0
       let texto = ''
@@ -265,13 +273,18 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string): Promise<DiagnosticoV2VK> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'diagnosticar_v2vk', model: 'wasagro/orchestrator', input: { descripcionVisual } })
+    const promptName = 'sp-03b-diagnostico-v2vk.md'
+    const rawPrompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+    const genOpts: Record<string, unknown> = { name: 'diagnosticar_v2vk', model: 'wasagro/orchestrator', input: { descripcionVisual } }
+    const pc = PromptManager.getPromptClient(promptName)
+    if (pc) genOpts['prompt'] = pc
+    const generation = trace.generation(genOpts as any)
     try {
       if (!contextoRAG || contextoRAG === 'Sin contexto agronómico disponible.') {
         trace.event({ name: 'v2vk_empty_rag', level: 'WARNING', input: { descripcionVisual } })
       }
 
-      const prompt = injectarVariables((await PromptManager.getPrompt('sp-03b-diagnostico-v2vk.md', 'prompts/sp-03b-diagnostico-v2vk.md', typeof traceId !== 'undefined' ? traceId : undefined)), {
+      const prompt = injectarVariables(rawPrompt, {
         FINCA_NOMBRE: input.finca_nombre ?? input.finca_id,
         CULTIVO_PRINCIPAL: input.cultivo_principal ?? 'No especificado',
         PAIS: input.pais ?? 'EC',
@@ -310,7 +323,8 @@ export class WasagroAIAgent implements IWasagroLLM {
   }
 
   async clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string): Promise<import('./IWasagroLLM.js').TipoImagen> {
-    const promptRaw = await PromptManager.getPrompt('sp-03c-clasificador-imagen.md', 'prompts/sp-03c-clasificador-imagen.md', traceId)
+    const imgPromptName = 'sp-03c-clasificador-imagen.md'
+    const promptRaw = await PromptManager.getPrompt(imgPromptName, `prompts/${imgPromptName}`, traceId)
     const prompt = promptRaw.replace(
       '{{CAPTION}}',
       caption ? `El agricultor escribió junto con la imagen: "${caption}"` : 'El agricultor no escribió texto junto con la imagen.',
@@ -335,6 +349,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       imageMimeType:   mimeType,
       langfuseClient:  this.#lf,
       generationInput: { caption: caption ?? null },
+      promptClient:    PromptManager.getPromptClient(imgPromptName),
     })
     return result.tipo
   }
@@ -347,10 +362,15 @@ export class WasagroAIAgent implements IWasagroLLM {
   ): Promise<ResultadoOCR> {
     const MAX_OCR_RETRIES = 2
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'ocr_documento', model: 'wasagro-ocr-tier', input: { tipo_contexto: contexto.cultivo_principal } })
+    const ocrPromptName = 'sp-03d-ocr-documento.md'
+    const rawOcrPrompt = await PromptManager.getPrompt(ocrPromptName, `prompts/${ocrPromptName}`, traceId)
+    const ocrGenOpts: Record<string, unknown> = { name: 'ocr_documento', model: 'wasagro-ocr-tier', input: { tipo_contexto: contexto.cultivo_principal } }
+    const ocrPc = PromptManager.getPromptClient(ocrPromptName)
+    if (ocrPc) ocrGenOpts['prompt'] = ocrPc
+    const generation = trace.generation(ocrGenOpts as any)
 
     const prompt = injectarVariables(
-      await PromptManager.getPrompt('sp-03d-ocr-documento.md', 'prompts/sp-03d-ocr-documento.md', traceId),
+      rawOcrPrompt,
       {
         FINCA_NOMBRE: contexto.finca_nombre ?? 'No especificada',
         CULTIVO_PRINCIPAL: contexto.cultivo_principal ?? 'No especificado',
@@ -480,7 +500,13 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'resumir_semana', model: 'wasagro/orchestrator', input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
+    const resumenPromptName = 'sp-05-resumen-semanal.md'
+    // Prefetch para que getPromptClient devuelva el PromptClient cacheado.
+    await PromptManager.getPrompt(resumenPromptName, `prompts/${resumenPromptName}`, traceId)
+    const resumenGenOpts: Record<string, unknown> = { name: 'resumir_semana', model: 'wasagro/orchestrator', input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } }
+    const resumenPc = PromptManager.getPromptClient(resumenPromptName)
+    if (resumenPc) resumenGenOpts['prompt'] = resumenPc
+    const generation = trace.generation(resumenGenOpts as any)
     try {
       const forecastTexto = entrada.forecast
         ? [
@@ -540,15 +566,19 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async extraerDatosSDR(textoMensaje: string, contextoActual: string, traceId: string): Promise<ExtraccionSDR> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({
+    const extPromptName = 'SP-SDR-02-extractor.md'
+    const prompt = await PromptManager.getPrompt(extPromptName, `sdr/prompts/${extPromptName}`, traceId)
+    const extGenOpts: Record<string, unknown> = {
       name: 'extraer_datos_sdr',
       model: 'wasagro/orchestrator',
       input: { mensaje: textoMensaje },
-    })
+    }
+    const extPc = PromptManager.getPromptClient(extPromptName)
+    if (extPc) extGenOpts['prompt'] = extPc
+    const generation = trace.generation(extGenOpts as any)
 
     const inicio = Date.now()
     try {
-      const prompt = await PromptManager.getPrompt('SP-SDR-02-extractor.md', 'sdr/prompts/SP-SDR-02-extractor.md', traceId)
       const userContent = `Contexto Actual del Prospecto:\n${contextoActual}\n\nMensaje Actual: ${textoMensaje}`
 
       const texto = await this.#adapter.generarTexto(userContent, { 
@@ -588,14 +618,18 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async redactarMensajeSDR(mensajeUsuario: string, contextoActual: string, directiva: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({
+    const redactPromptName = 'SP-SDR-03-writer.md'
+    const prompt = await PromptManager.getPrompt(redactPromptName, `sdr/prompts/${redactPromptName}`, traceId)
+    const redactGenOpts: Record<string, unknown> = {
       name: 'redactar_mensaje_sdr',
       model: 'wasagro/orchestrator',
       input: { directiva },
-    })
+    }
+    const redactPc = PromptManager.getPromptClient(redactPromptName)
+    if (redactPc) redactGenOpts['prompt'] = redactPc
+    const generation = trace.generation(redactGenOpts as any)
 
     try {
-      const prompt = await PromptManager.getPrompt('SP-SDR-03-writer.md', 'sdr/prompts/SP-SDR-03-writer.md', traceId)
       const userContent = `Contexto del Prospecto:\n${contextoActual}\n\nÚltimo mensaje del usuario: "${mensajeUsuario}"\n\n=== DIRECTIVA OBLIGATORIA ===\n${directiva}`
 
       const texto = await this.#adapter.generarTexto(userContent, { 
@@ -669,8 +703,9 @@ Reglas:
   }
 
   async clasificarExcel(entrada: EntradaClasificacionExcel, traceId: string): Promise<ClasificacionExcel> {
+    const excelPromptName = 'sp-06-clasificar-excel.md'
     const prompt = injectarVariables(
-      await PromptManager.getPrompt('sp-06-clasificar-excel.md', 'prompts/sp-06-clasificar-excel.md', traceId),
+      await PromptManager.getPrompt(excelPromptName, `prompts/${excelPromptName}`, traceId),
       {
         FINCA_NOMBRE:      entrada.finca_nombre ?? 'No especificada',
         CULTIVO_PRINCIPAL: entrada.cultivo_principal ?? 'No especificado',
@@ -706,6 +741,7 @@ Reglas:
       temperature:     0,
       langfuseClient:  this.#lf,
       generationInput: { nombre_archivo: entrada.nombre_archivo, total_filas: entrada.total_filas },
+      promptClient:    PromptManager.getPromptClient(excelPromptName),
     })
   }
 

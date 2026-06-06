@@ -7,7 +7,9 @@ import { PromptManager } from '../../../src/pipeline/promptManager.js'
 
 vi.mock('../../../src/pipeline/promptManager.js', () => ({
   PromptManager: {
-    getPrompt: vi.fn().mockResolvedValue('system-prompt-sdr')
+    getPrompt: vi.fn().mockResolvedValue('system-prompt-sdr'),
+    getPromptClient: vi.fn().mockReturnValue(null),
+    clearCache: vi.fn(),
   }
 }))
 
