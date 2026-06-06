@@ -11,6 +11,7 @@ import {
   getSDRProspectosPendingApproval,
   actualizarMensaje,
 } from '../pipeline/supabaseQueries.js'
+import { setIfNotExists } from '../integrations/redis.js'
 
 const MAX_SDR_TURNS = 4 // Reducido para cerrar más rápido
 
@@ -158,14 +159,49 @@ export async function handleSDRSession(
 
     await actualizarMensaje(mensajeId, { status: 'processed' })
   } catch (err) {
-    console.error('[SDR] Error en handleSDRSession:', err)
-    trace.event({ name: 'sdr_error', level: 'ERROR', input: { error: String(err) } })
-    // Diplomatic recovery message — does NOT imply the system is broken or
-    // mid-setup. Previous copy ("estamos terminando de configurar tu acceso")
-    // appeared in real conversations and made the bot look half-finished to a
-    // prospect that was about to convert. Keep it short, owning the hiccup,
-    // inviting one retry.
-    await sender.enviarTexto(msg.from, 'Disculpá, tuve un problemita procesando tu mensaje. ¿Me lo podés contar de nuevo? 🙏').catch(() => {})
+    // CRÍTICO: diagnóstico rico. Real-prospect bug 2026-06-06: el mensaje
+    // "tuve un problemita" salió DOS veces en la misma conversación y el
+    // prospecto se fue. La causa raíz (status DB invalida, columna missing,
+    // LLM timeout, etc.) cambia turno a turno. Necesitamos capturar el
+    // stack trace + última operación para identificarla en LangFuse.
+    const errorDetail = {
+      message: err instanceof Error ? err.message : String(err),
+      stack:   err instanceof Error ? err.stack?.slice(0, 2000) : undefined,
+      name:    err instanceof Error ? err.name : undefined,
+      phone:   msg.from,
+      wamid:   msg.wamid,
+      tipo:    msg.tipo,
+    }
+    console.error('[SDR] Error en handleSDRSession:', errorDetail)
+    trace.event({ name: 'sdr_error', level: 'ERROR', input: errorDetail })
+
+    // Dedup del recovery message: bug visto en prod — el mensaje "tuve un
+    // problemita" salía cada turno con error consecutivo, y el cliente se
+    // hartaba ("dos veces repetir un mensaje hace perder clientes"). Redis
+    // key TTL 5 min: solo enviamos UN recovery cada 5min por phone. Si la
+    // pipeline sigue rota, el prospecto queda en silencio (el next msg
+    // intentará procesarse normal) — peor el remedio que la enfermedad.
+    let shouldSendRecovery = true
+    try {
+      const recoveryDedupOk = await setIfNotExists(`sdr_recovery_sent:${msg.from}`, 300)
+      if (!recoveryDedupOk) {
+        shouldSendRecovery = false
+        trace.event({
+          name:  'sdr_recovery_dedup_skipped',
+          level: 'WARNING',
+          input: { phone: msg.from, reason: 'recovery_already_sent_in_5min_window' },
+        })
+      }
+    } catch (dedupErr) {
+      // Si Redis cae, degrade a enviar (mejor enviar repetido que dejar al
+      // user en silencio cuando es el primer error real). Logueamos.
+      console.warn('[SDR] recovery dedup failed, enviando igual:', dedupErr)
+    }
+
+    if (shouldSendRecovery) {
+      // Diplomatic recovery — owns the hiccup, invita a UN retry.
+      await sender.enviarTexto(msg.from, 'Disculpá, tuve un problemita procesando tu mensaje. ¿Me lo podés contar de nuevo? 🙏').catch(() => {})
+    }
     await actualizarMensaje(mensajeId, { status: 'error', error_detail: String(err) }).catch(() => {})
   }
 }
