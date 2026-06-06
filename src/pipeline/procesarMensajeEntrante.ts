@@ -18,6 +18,8 @@ import { handleEvento } from './handlers/EventHandler.js'
 import { loadSessionState } from '../agents/sdr/contextStore.js'
 import { shouldSuppressOnboardingForActiveSDR } from '../agents/sdr/onboardingGuard.js'
 import { recordInboundWaCost } from '../integrations/whatsapp/CostTrackedSender.js'
+import { planGuardWhatsApp } from '../auth/planGuard.js'
+import { handleBillingIntent } from './handlers/BillingIntentHandler.js'
 
 export const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -105,6 +107,26 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
         messageType: msg.tipo === 'texto' ? 'text' : msg.tipo === 'audio' ? 'audio' : 'image',
         waMessageId: msg.wamid,
       })
+
+      // ── Billing intents: allow even when plan is blocked (so user can pay) ──
+      const billingHandled = await handleBillingIntent(msg, usuario, mensajeId, traceId, _sender!)
+      if (billingHandled) {
+        await actualizarMensaje(mensajeId, { status: 'processed' }).catch(() => {})
+        return
+      }
+
+      // ── Plan guard: bloquear orgs con trial expirado o sin suscripción activa ──
+      const { allowed, state } = await planGuardWhatsApp(usuario.org_id)
+      if (!allowed) {
+        trace.event({ name: 'plan_guard_blocked', level: 'WARNING', output: { plan: state.plan } })
+        const planLabel = state.plan === 'trial' ? 'período de prueba' : 'plan'
+        await _sender!.enviarTexto(
+          msg.from,
+          `Tu ${planLabel} ha expirado. Para seguir usando Wasagro, activá tu suscripción en app.wasagro.ai/billing o contactá a tu administrador.`
+        )
+        await actualizarMensaje(mensajeId, { status: 'blocked_billing' }).catch(() => {})
+        return
+      }
 
     if (!usuario.onboarding_completo) {
       // Guard: a live SDR conversation must not be interrupted by the onboarding

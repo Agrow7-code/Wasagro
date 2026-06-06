@@ -19,7 +19,11 @@ import { cors } from 'hono/cors'
 import { bodyLimit } from 'hono/body-limit'
 import { authRouter } from './auth/router.js'
 import { authMiddleware } from './auth/middleware.js'
+import { planGuard } from './auth/planGuard.js'
 import { rateLimiter } from './auth/rateLimiter.js'
+import { createCheckoutSession, createCustomerPortalSession, cancelSubscription } from './integrations/stripe/checkoutService.js'
+import { verifyWebhookSignature, handleStripeWebhook } from './integrations/stripe/stripeWebhookHandler.js'
+import { handleDeUnaWebhook } from './integrations/deuna/deunaClient.js'
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
 
@@ -206,9 +210,131 @@ app.route('/api/webhook', webhookRouter)
 
 app.use('/api/metricas/*', authMiddleware)
 app.use('/api/finca/*', authMiddleware)
+app.use('/api/metricas/*', planGuard)
+app.use('/api/finca/*', planGuard)
 app.use('/api/*', rateLimiter({ windowMs: 60 * 1000, maxRequests: 60 }))
 app.route('/api/metricas', metricasRouter)
 app.route('/api/finca', fincaRouter)
+
+// ── Billing routes ──────────────────────────────────────────────────────────
+app.post('/api/billing/checkout', authMiddleware, async (c) => {
+  const user = c.get('authedUser')
+  if (!user) return c.json({ error: 'No autenticado' }, 401)
+
+  const body = await c.req.json().catch(() => ({}))
+  const plan = body.plan as 'starter' | 'enterprise' | undefined
+  if (!plan || !['starter', 'enterprise'].includes(plan)) {
+    return c.json({ error: 'plan debe ser starter o enterprise' }, 400)
+  }
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('org_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
+
+  try {
+    const result = await createCheckoutSession(usuario.org_id, plan)
+    return c.json({ url: result.url })
+  } catch (err: any) {
+    console.error('[billing] Error creando checkout:', err.message)
+    return c.json({ error: 'Error creando sesión de pago' }, 500)
+  }
+})
+
+app.post('/api/billing/portal', authMiddleware, async (c) => {
+  const user = c.get('authedUser')
+  if (!user) return c.json({ error: 'No autenticado' }, 401)
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('org_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
+
+  try {
+    const url = await createCustomerPortalSession(usuario.org_id)
+    return c.json({ url })
+  } catch (err: any) {
+    console.error('[billing] Error creando portal:', err.message)
+    return c.json({ error: 'Error abriendo portal de pagos' }, 500)
+  }
+})
+
+app.post('/api/billing/cancel', authMiddleware, async (c) => {
+  const user = c.get('authedUser')
+  if (!user) return c.json({ error: 'No autenticado' }, 401)
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('org_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
+
+  try {
+    await cancelSubscription(usuario.org_id)
+    return c.json({ status: 'canceled' })
+  } catch (err: any) {
+    console.error('[billing] Error cancelando:', err.message)
+    return c.json({ error: 'Error cancelando suscripción' }, 500)
+  }
+})
+
+app.get('/api/billing/status', authMiddleware, async (c) => {
+  const user = c.get('authedUser')
+  if (!user) return c.json({ error: 'No autenticado' }, 401)
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('org_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
+
+  const { data: org } = await supabase
+    .from('organizaciones')
+    .select('org_id, nombre, plan, trial_inicio, trial_fin, subscription_status, metodo_pago, plan_activo_desde, plan_cancelado_en')
+    .eq('org_id', usuario.org_id)
+    .single()
+
+  if (!org) return c.json({ error: 'Organización no encontrada' }, 404)
+  return c.json(org)
+})
+
+// Stripe webhook — no auth (Stripe signs with webhook secret)
+app.post('/api/billing/stripe-webhook', bodyLimit({ maxSize: 65_536 }), async (c) => {
+  const sig = c.req.header('stripe-signature')
+  if (!sig) return c.json({ error: 'Firma Stripe faltante' }, 400)
+
+  try {
+    const rawBody = await c.req.text()
+    const event = verifyWebhookSignature(rawBody, sig)
+    await handleStripeWebhook(event)
+    return c.json({ received: true })
+  } catch (err: any) {
+    console.error('[stripe-webhook] Error:', err.message)
+    return c.json({ error: 'Webhook signature verification failed' }, 400)
+  }
+})
+
+// DeUna webhook — no auth (verify via signature header if DeUna provides one)
+app.post('/api/billing/deuna-webhook', bodyLimit({ maxSize: 65_536 }), async (c) => {
+  try {
+    const payload = await c.req.json()
+    await handleDeUnaWebhook(payload)
+    return c.json({ received: true })
+  } catch (err: any) {
+    console.error('[deuna-webhook] Error:', err.message)
+    return c.json({ error: 'Webhook processing failed' }, 400)
+  }
+})
 
 // POST /reportes/semanal — trigger manual de reportes (protegido por secret)
 app.post('/reportes/semanal', async (c) => {

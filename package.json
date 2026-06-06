@@ -30,6 +30,7 @@
     "openai": "^4.98.0",
     "pg-boss": "^12.18.0",
     "resend": "^6.12.2",
+    "stripe": "^22.2.0",
     "zod": "^3.24.3"
   },
   "devDependencies": {

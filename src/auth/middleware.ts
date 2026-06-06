@@ -15,6 +15,7 @@ declare module 'hono' {
   interface ContextVariableMap {
     authedUser: AuthedUser
     userSupabase: SupabaseClient
+    orgId: string
   }
 }
 
