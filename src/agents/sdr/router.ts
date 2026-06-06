@@ -35,6 +35,31 @@ const TEMPLATE_TO_BOT_ACTION: Record<TemplateKey, BotAction> = {
   outOfScopeCultivo: 'sent_graceful_exit',
 }
 
+// Best-effort persistence. The contract: once the prospect has received the bot
+// reply, no DB/Redis hiccup should poison the conversation by triggering the
+// "Disculpá, tuve un problemita" recovery (real prod incident 2026-06-06: a
+// stale CHECK constraint and a missing migration column made two consecutive
+// UPDATEs throw, and the prospect saw the recovery twice and stopped replying).
+// Failures are logged to console + LangFuse so the root cause is still visible.
+async function safePersist<T>(
+  operation: () => Promise<T>,
+  opts: { trace: ReturnType<typeof langfuse.trace>; eventName: string; meta: Record<string, unknown> },
+): Promise<T | null> {
+  try {
+    return await operation()
+  } catch (err) {
+    const detail = {
+      message: err instanceof Error ? err.message : String(err),
+      stack:   err instanceof Error ? err.stack?.slice(0, 1500) : undefined,
+      code:    (err as { code?: string } | null)?.code,
+      ...opts.meta,
+    }
+    console.error(`[SDR persist] ${opts.eventName} failed (non-fatal):`, detail)
+    opts.trace.event({ name: opts.eventName, level: 'WARNING', input: detail })
+    return null
+  }
+}
+
 export interface SDRRouterContext {
   prospecto: Record<string, unknown>
   textoOriginal: string
@@ -146,13 +171,19 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
   }
 
   // ── 4. Triage: spam shortcut (no further pipeline) ────────────────────────
+  //    SEND first, PERSIST after (with tolerance) — same contract as the main
+  //    flow. A persist failure must not block the reply nor trigger recovery.
   if (ctx.fsmState === 'triage' && extraccionValidada?.es_spam) {
+    await sender.enviarTexto(ctx.phone, 'Soy el asistente de Wasagro, un sistema para operaciones agrícolas. Creo que te has equivocado de número. ¡Que tengas un buen día! 👋')
     const updateData: Record<string, unknown> = {
       turns_total: ctx.turnCount + 1,
       status: 'unqualified',
     }
-    await updateSDRProspecto(ctx.prospectId, updateData, client)
-    await sender.enviarTexto(ctx.phone, 'Soy el asistente de Wasagro, un sistema para operaciones agrícolas. Creo que te has equivocado de número. ¡Que tengas un buen día! 👋')
+    await safePersist(() => updateSDRProspecto(ctx.prospectId, updateData, client), {
+      trace,
+      eventName: 'sdr_update_failed',
+      meta: { prospecto_id: ctx.prospectId, path: 'spam_shortcut' },
+    })
     return
   }
 
@@ -199,11 +230,21 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
       })
       nextCtx = { ...nextCtx, fsmState: 'dormant' }
 
+      // SEND first, PERSIST after — root cause of the 2026-06-06 prospect
+      // incident: this branch fired for cultivo='arroz', UPDATE failed with
+      // CHECK constraint violation (sdr_node='global_fallback' not allowed
+      // until migration 49), and the prospect saw the recovery message
+      // instead of the honest out-of-scope copy.
+      await sender.enviarTexto(nextCtx.phone, respuesta)
+
       const updateData = computeLegacyUpdate(nextCtx, initial)
       updateData['status'] = 'dormant'
-      await updateSDRProspecto(nextCtx.prospectId, updateData, client)
-      await sender.enviarTexto(nextCtx.phone, respuesta)
-      await saveSDRInteraccion({
+      await safePersist(() => updateSDRProspecto(nextCtx.prospectId, updateData, client), {
+        trace,
+        eventName: 'sdr_update_failed',
+        meta: { prospecto_id: nextCtx.prospectId, fsmState: nextCtx.fsmState, path: 'out_of_scope_cultivo', updateKeys: Object.keys(updateData) },
+      })
+      await safePersist(() => saveSDRInteraccion({
         prospecto_id:      nextCtx.prospectId,
         phone:             nextCtx.phone,
         turno:             nextCtx.turnCount,
@@ -211,8 +252,16 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
         contenido:         textoOriginal,
         action_taken:      'graceful_exit',
         langfuse_trace_id: traceId,
-      }, client)
-      await persistSessionState(nextCtx)
+      }, client), {
+        trace,
+        eventName: 'sdr_interaccion_save_failed',
+        meta: { prospecto_id: nextCtx.prospectId, path: 'out_of_scope_cultivo' },
+      })
+      await safePersist(() => persistSessionState(nextCtx), {
+        trace,
+        eventName: 'sdr_session_persist_failed',
+        meta: { prospecto_id: nextCtx.prospectId, path: 'out_of_scope_cultivo' },
+      })
       return
     }
   }
@@ -366,7 +415,44 @@ ESTRICTO:
     ctx = { ...ctx, fsmState: 'pitch_sent' }
   }
 
-  // ── 8. Persist legacy row + send message ──────────────────────────────────
+  // ── 8. SEND first, PERSIST after (with tolerance) ─────────────────────────
+  // Order matters: the prospect must receive their reply even if DB persistence
+  // fails. A failed UPDATE/INSERT used to throw all the way up to handleSDRSession,
+  // which sent the "Disculpá, tuve un problemita" recovery — UX-killing.
+  // Now: brochure dedup → send → safePersist(update + interaccion + redis).
+
+  // Brochure dedup guard: at most one brochure send per phone per 30s. Stays
+  // BEFORE the send because it gates the send itself.
+  let shouldSend = true
+  if (composed?.templateKey === 'brochureSend') {
+    try {
+      const dedupOk = await setIfNotExists(`sdr_brochure_sent:${ctx.phone}`, 30)
+      if (!dedupOk) {
+        shouldSend = false
+        trace.event({
+          name:  'sdr_brochure_dedup_skipped',
+          level: 'WARNING',
+          input: { phone: ctx.phone, prospecto_id: ctx.prospectId },
+        })
+      }
+    } catch (err) {
+      console.warn('[SDR router] brochure dedup setIfNotExists failed, sending anyway:', err)
+    }
+  }
+
+  // Send the reply FIRST. If the send itself fails, the throw propagates to
+  // handleSDRSession's catch — which is correct (the prospect didn't get a
+  // reply, recovery message is appropriate).
+  if (shouldSend) {
+    await sender.enviarTexto(ctx.phone, respuesta)
+  }
+  if (requires_founder_approval) {
+    await sender.enviarTexto(ctx.phone, composeCalendarLink(ctx.prospectId))
+    trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: ctx.prospectId } })
+  }
+
+  // From here down: everything is best-effort. The prospect already has their
+  // reply; a stale CHECK constraint or missing column must NOT trigger recovery.
   const updateData = computeLegacyUpdate(ctx, initial)
   if (requires_founder_approval) {
     updateData.status = 'piloto_propuesto'
@@ -384,58 +470,34 @@ ESTRICTO:
     updateData.status = 'en_discovery'
   }
 
-  await updateSDRProspecto(ctx.prospectId, updateData, client)
+  await safePersist(() => updateSDRProspecto(ctx.prospectId, updateData, client), {
+    trace,
+    eventName: 'sdr_update_failed',
+    meta: { prospecto_id: ctx.prospectId, fsmState: ctx.fsmState, updateKeys: Object.keys(updateData) },
+  })
 
-  // TODO [FASE-A]: resolved — defensive brochure dedup via Redis SET NX EX (30s).
-  // The exact root cause of the duplicate post-brochure (worker dup vs Evolution
-  // API redelivery with different wamid vs handler race) was never pinned down.
-  // This guard is the structural fix: at most one brochure send per phone per 30s.
-  // If a future investigation finds the root cause and removes it, this guard
-  // becomes a no-op (setIfNotExists always returns true) — safe either way.
-  let shouldSend = true
-  if (composed?.templateKey === 'brochureSend') {
-    try {
-      const dedupOk = await setIfNotExists(`sdr_brochure_sent:${ctx.phone}`, 30)
-      if (!dedupOk) {
-        shouldSend = false
-        trace.event({
-          name:  'sdr_brochure_dedup_skipped',
-          level: 'WARNING',
-          input: { phone: ctx.phone, prospecto_id: ctx.prospectId },
-        })
-      }
-    } catch (err) {
-      // Redis down → degrade to "send anyway" (current behavior, no regression).
-      console.warn('[SDR router] brochure dedup setIfNotExists failed, sending anyway:', err)
-    }
-  }
-  if (shouldSend) {
-    await sender.enviarTexto(ctx.phone, respuesta)
-  }
-  if (requires_founder_approval) {
-    await sender.enviarTexto(ctx.phone, composeCalendarLink(ctx.prospectId))
-    trace.event({ name: 'sdr_pilot_proposed', input: { prospecto_id: ctx.prospectId } })
-  }
-
-  await saveSDRInteraccion({
+  await safePersist(() => saveSDRInteraccion({
     prospecto_id: ctx.prospectId,
     phone: ctx.phone,
     turno: ctx.turnCount,
     tipo: 'inbound',
     contenido: textoOriginal,
     // The sdr_interacciones.action_taken CHECK constraint (migration 32) only
-    // accepts the legacy SDRNode values (triage/discovery/pitch/close/...). The
-    // new SDRFsmStateEnum has 'pitch_sent', 'closing', 'brochure_sent', etc.
-    // which would FAIL the insert in prod. fsmStateToLegacySDRNode() collapses
-    // the new enum back to the legal legacy form.
+    // accepts legacy SDRNode values. fsmStateToLegacySDRNode collapses the new
+    // enum back to the legal legacy form.
     action_taken: fsmStateToLegacySDRNode(nextFsmState),
     langfuse_trace_id: traceId,
-  }, client)
+  }, client), {
+    trace,
+    eventName: 'sdr_interaccion_save_failed',
+    meta: { prospecto_id: ctx.prospectId, turno: ctx.turnCount },
+  })
 
-  // Persist session-scoped fields (intentHistory, lastBotMessage, fsmState, etc.)
-  // to Redis with TTL 24h. Next turn's loadHydratedContext() picks them up.
-  // Failure here is non-fatal — graceful degradation documented in ADR-009.
-  await persistSessionState(ctx)
+  await safePersist(() => persistSessionState(ctx), {
+    trace,
+    eventName: 'sdr_session_persist_failed',
+    meta: { prospecto_id: ctx.prospectId, fsmState: ctx.fsmState },
+  })
 
   // D24: Enqueue booking reminder (24h) when calendar link was sent
   if (requires_founder_approval) {
@@ -491,15 +553,19 @@ async function handleAudioInbound(
     },
   })
 
-  // Persist legacy row. action_taken uses the legacy SDR-node form because the
-  // sdr_interacciones CHECK constraint (migration 31/32) only knows the legacy
-  // values. fsmStateToLegacySDRNode handles every fsmState -> legal value.
-  const updateData = computeLegacyUpdate(ctx, initial)
-  await updateSDRProspecto(ctx.prospectId, updateData, client)
-
+  // SEND first, PERSIST after (with tolerance) — same contract as the text
+  // path. A failed UPDATE/INSERT must NOT stop the prospect from getting the
+  // audio acknowledgement.
   await sender.enviarTexto(ctx.phone, respuesta)
 
-  await saveSDRInteraccion({
+  const updateData = computeLegacyUpdate(ctx, initial)
+  await safePersist(() => updateSDRProspecto(ctx.prospectId, updateData, client), {
+    trace,
+    eventName: 'sdr_update_failed',
+    meta: { prospecto_id: ctx.prospectId, fsmState: ctx.fsmState, path: 'audio', updateKeys: Object.keys(updateData) },
+  })
+
+  await safePersist(() => saveSDRInteraccion({
     prospecto_id: ctx.prospectId,
     phone: ctx.phone,
     turno: ctx.turnCount,
@@ -507,7 +573,15 @@ async function handleAudioInbound(
     contenido: '[audio]',
     action_taken: fsmStateToLegacySDRNode(ctx.fsmState),
     langfuse_trace_id: traceId,
-  }, client)
+  }, client), {
+    trace,
+    eventName: 'sdr_interaccion_save_failed',
+    meta: { prospecto_id: ctx.prospectId, turno: ctx.turnCount, path: 'audio' },
+  })
 
-  await persistSessionState(ctx)
+  await safePersist(() => persistSessionState(ctx), {
+    trace,
+    eventName: 'sdr_session_persist_failed',
+    meta: { prospecto_id: ctx.prospectId, fsmState: ctx.fsmState, path: 'audio' },
+  })
 }
