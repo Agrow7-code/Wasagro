@@ -57,7 +57,12 @@ function shouldInclude(name: string, only?: string): boolean {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
   if (!process.env['LANGFUSE_SECRET_KEY'] || !process.env['LANGFUSE_PUBLIC_KEY']) {
-    console.error('FATAL: LANGFUSE_SECRET_KEY + LANGFUSE_PUBLIC_KEY requeridos.')
+    console.error('✗ LANGFUSE_SECRET_KEY + LANGFUSE_PUBLIC_KEY faltan.\n')
+    console.error('Tres formas de proveerlas:')
+    console.error('  1. railway run npm run prompts:sync  (vars desde tu proyecto Railway)')
+    console.error('  2. .env local en el root con las 3 vars (auto-cargado por el script)')
+    console.error('  3. inline: LANGFUSE_PUBLIC_KEY=xxx LANGFUSE_SECRET_KEY=yyy npm run prompts:sync')
+    console.error('\nVer docs/LANGFUSE-UI-CHECKLIST.md §Pre-requisito.')
     process.exit(1)
   }
 

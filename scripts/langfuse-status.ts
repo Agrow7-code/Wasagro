@@ -36,7 +36,12 @@ function reportEnv(): boolean {
     console.error('✗ Env vars FALTAN:')
     if (!pk) console.error('  - LANGFUSE_PUBLIC_KEY')
     if (!sk) console.error('  - LANGFUSE_SECRET_KEY')
-    console.error('\nExportá las variables y re-ejecutá. Setup queda bloqueado hasta entonces.')
+    console.error('\nTres formas de proveerlas:')
+    console.error('  1. railway run npm run langfuse:status  (vars desde tu proyecto Railway)')
+    console.error('  2. .env local en el root con las 3 vars (auto-cargado por el script)')
+    console.error('  3. inline: LANGFUSE_PUBLIC_KEY=xxx LANGFUSE_SECRET_KEY=yyy npm run langfuse:status')
+    console.error('\nNota: si usaste `railway run` para un comando, hay que usarlo para cada uno —')
+    console.error('  no persiste las vars entre invocaciones.')
     return false
   }
   console.log(`✓ Env vars OK (host: ${host})`)
