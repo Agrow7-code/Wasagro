@@ -1,20 +1,58 @@
 # LangFuse UI — Checklist de configuración inicial
 
 > Paso a paso clickeable. Tiempo estimado: **30 min**.
->
-> Pre-requisito: `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` disponibles.
-> El método más simple: crear un `.env` local (gitignored) con las 3 vars:
->
-> ```bash
-> cat > .env <<'EOF'
-> LANGFUSE_PUBLIC_KEY=pk-lf-xxxx
-> LANGFUSE_SECRET_KEY=sk-lf-xxxx
-> LANGFUSE_HOST=https://cloud.langfuse.com
-> EOF
-> ```
->
-> Los scripts (`langfuse:status`, `prompts:sync`) auto-cargan `.env` si existe.
-> Verificá con `npm run langfuse:status`.
+
+## Pre-requisito: env vars disponibles
+
+Tres opciones (de mejor a peor):
+
+### Opción 1 — Railway CLI (RECOMENDADA si las keys ya viven en Railway)
+
+```bash
+# Una sola vez en tu máquina:
+npm i -g @railway/cli
+railway login
+railway link            # vincular este dir al proyecto Wasagro
+```
+
+Después, prefijá cada comando con `railway run`:
+
+```bash
+railway run npm run langfuse:status
+railway run npm run prompts:sync
+```
+
+Las vars se inyectan automáticamente desde el environment activo (por
+default `production`). Para targetear otro env:
+`railway run --environment=staging npm run prompts:sync -- --label staging`.
+
+**No necesitás `.env` local con esta opción.**
+
+### Opción 2 — `.env` local (para dev separado o si no querés instalar Railway CLI)
+
+```bash
+cat > .env <<'EOF'
+LANGFUSE_PUBLIC_KEY=pk-lf-xxxx
+LANGFUSE_SECRET_KEY=sk-lf-xxxx
+LANGFUSE_HOST=https://cloud.langfuse.com
+EOF
+```
+
+Los scripts auto-cargan `.env` si existe (ya está gitignored).
+
+### Opción 3 — export inline
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-xxxx LANGFUSE_SECRET_KEY=sk-lf-xxxx \
+  npm run langfuse:status
+```
+
+Útil para one-shots; tedioso para uso recurrente.
+
+---
+
+> Sea cuál sea la opción, verificá con `npm run langfuse:status` (o
+> `railway run npm run langfuse:status`).
 
 ---
 
