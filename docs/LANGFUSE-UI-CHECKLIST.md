@@ -2,8 +2,19 @@
 
 > Paso a paso clickeable. Tiempo estimado: **30 min**.
 >
-> Pre-requisito: `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` en el entorno
-> local (`.env` o exportadas). Verificá con `npm run langfuse:status`.
+> Pre-requisito: `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` disponibles.
+> El método más simple: crear un `.env` local (gitignored) con las 3 vars:
+>
+> ```bash
+> cat > .env <<'EOF'
+> LANGFUSE_PUBLIC_KEY=pk-lf-xxxx
+> LANGFUSE_SECRET_KEY=sk-lf-xxxx
+> LANGFUSE_HOST=https://cloud.langfuse.com
+> EOF
+> ```
+>
+> Los scripts (`langfuse:status`, `prompts:sync`) auto-cargan `.env` si existe.
+> Verificá con `npm run langfuse:status`.
 
 ---
 

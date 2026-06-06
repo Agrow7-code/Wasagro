@@ -12,6 +12,11 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { loadDotEnv } from './lib/loadDotEnv.js'
+
+// Cargar .env ANTES de importar langfuse — el SDK lee process.env en module-init.
+loadDotEnv()
+
 import { langfuse } from '../src/integrations/langfuse.js'
 
 interface SyncSource {

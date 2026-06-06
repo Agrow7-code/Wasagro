@@ -19,6 +19,11 @@
 
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { loadDotEnv } from './lib/loadDotEnv.js'
+
+// Cargar .env ANTES de importar langfuse — el SDK lee process.env en module-init.
+const dotenvResult = loadDotEnv()
+
 import { langfuse } from '../src/integrations/langfuse.js'
 
 const PROMPTS_DIRS = ['prompts', 'sdr/prompts', 'prompts/orchestrator']
@@ -99,6 +104,12 @@ async function checkPromptsInLangfuse(diskPrompts: string[]): Promise<void> {
 
 async function main(): Promise<void> {
   console.log('═══ LangFuse Status Check ═══\n')
+
+  if (dotenvResult.loaded) {
+    console.log(`✓ .env cargado (${dotenvResult.count} vars nuevas; las del sistema tienen prioridad)\n`)
+  } else {
+    console.log(`ℹ .env no encontrado — usando solo env vars del sistema\n`)
+  }
 
   if (!reportEnv()) process.exit(1)
 
