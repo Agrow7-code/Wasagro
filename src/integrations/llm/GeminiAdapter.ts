@@ -4,6 +4,7 @@ import { LLMError } from './LLMError.js'
 import { langfuse } from '../langfuse.js'
 import { validateUrlAgainstSSRF, SSRFError } from '../ssrfProtection.js'
 import { timedFetch } from '../timedFetch.js'
+import { recordLLMCallCost } from './LLMCallCostService.js'
 
 export interface GeminiAdapterConfig {
   apiKey: string
@@ -96,13 +97,44 @@ export class GeminiAdapter implements ILLMAdapter {
       const call = result.response.functionCalls()?.[0]
       if (call) {
         const toolCallJson = JSON.stringify({ __tool_call: { name: call.name, args: call.args } })
-        generation.end({ output: toolCallJson, usage: { totalTokens: 0 }, metadata: { latencia_ms: Date.now() - inicio } })
+        const usage = result.response.usageMetadata
+        const promptTokens = usage?.promptTokenCount ?? 0
+        const completionTokens = usage?.candidatesTokenCount ?? 0
+        const totalTokens = usage?.totalTokenCount ?? (promptTokens + completionTokens)
+        generation.end({ output: toolCallJson, usage: { totalTokens, promptTokens, completionTokens }, metadata: { latencia_ms: Date.now() - inicio } })
+        recordLLMCallCost({
+          orgId: opciones.orgId ?? null,
+          fincaId: opciones.fincaId ?? null,
+          provider: 'gemini',
+          model: activeModel,
+          modelClass: opciones.modelClass ?? 'reasoning',
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          traceId: opciones.traceId,
+          latencyMs: Date.now() - inicio,
+        })
         return toolCallJson
       }
 
       const texto = result.response.text()
-      
-      generation.end({ output: texto, usage: { totalTokens: 0 }, metadata: { latencia_ms: Date.now() - inicio } })
+      const usage2 = result.response.usageMetadata
+      const promptTokens2 = usage2?.promptTokenCount ?? 0
+      const completionTokens2 = usage2?.candidatesTokenCount ?? 0
+      const totalTokens2 = usage2?.totalTokenCount ?? (promptTokens2 + completionTokens2)
+      generation.end({ output: texto, usage: { totalTokens: totalTokens2, promptTokens: promptTokens2, completionTokens: completionTokens2 }, metadata: { latencia_ms: Date.now() - inicio } })
+      recordLLMCallCost({
+        orgId: opciones.orgId ?? null,
+        fincaId: opciones.fincaId ?? null,
+        provider: 'gemini',
+        model: activeModel,
+        modelClass: opciones.modelClass ?? 'reasoning',
+        promptTokens: promptTokens2,
+        completionTokens: completionTokens2,
+        totalTokens: totalTokens2,
+        traceId: opciones.traceId,
+        latencyMs: Date.now() - inicio,
+      })
       return texto
   } catch (err) {
     if (err instanceof SSRFError) {

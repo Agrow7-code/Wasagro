@@ -18,7 +18,19 @@ SET rol = 'propietario', finca_id = 'F002'
 WHERE phone = '5492914474555';
 
 -- Desactivar cuenta "Admin Banano" y liberar el número (soft-delete)
-UPDATE usuarios SET phone = '593987310830_INACTIVO', status = 'inactivo' WHERE phone = '593987310830';
+-- Idempotent: skip if the _INACTIVO row already exists (already applied)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM usuarios WHERE phone = '593987310830_INACTIVO') THEN
+    UPDATE usuarios SET phone = '593987310830_INACTIVO', status = 'inactivo' WHERE phone = '593987310830';
+  END IF;
+END $$;
 
 -- Henry Morales: sacar el sufijo _OLD (requiere que el número ya esté libre)
-UPDATE usuarios SET phone = '593987310830' WHERE phone = '593987310830_OLD';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM usuarios WHERE phone = '593987310830_OLD')
+     AND NOT EXISTS (SELECT 1 FROM usuarios WHERE phone = '593987310830') THEN
+    UPDATE usuarios SET phone = '593987310830' WHERE phone = '593987310830_OLD';
+  END IF;
+END $$;

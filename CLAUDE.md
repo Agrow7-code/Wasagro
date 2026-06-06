@@ -375,6 +375,50 @@ El agente informa, no ordena. En H0-H1 opera en niveles de autonomía 2-3 (colab
 - **H0:** Evolution API self-hosted en Railway — reemplaza Meta Cloud API porque el acceso a Meta Developer no estaba disponible para el equipo en H0. El servicio Hono recibe el webhook de Evolution en `POST /webhook/whatsapp` vía `EvolutionAdapter`. Instancia: `wasagro-prod` en `evolution-api-production-8ba4.up.railway.app`.
 - **Revisar cuando:** Meta Developer esté accesible para migrar a API oficial en H1 (phone_number_id y WABA_ID portables). BSP alternativo: 360Dialog o Wati.
 
+### D26. Billing: Suscripción mensual fija con trial 30 días + Stripe (internacional) / DeUna+transferencia (Ecuador)
+
+- **Fecha:** Junio 2026
+- **Problema que motivó la decisión:** Wasagro no tiene forma de cobrar. `organizaciones.plan` es TEXT libre sin enforcement — cualquier string es aceptado, no hay trial, no hay vencimiento, no hay pasarela de pago. Los clientes usan Wasagro gratis indefinidamente. Sin billing, no hay negocio.
+- **Decisión:** Modelo de suscripción mensual fija con tres planes y trial:
+  1. **Enum `plan_org`** reemplaza `plan TEXT` — valores: `trial`, `free`, `starter`, `enterprise`. `trial` es el estado inicial de toda org nueva.
+  2. **Trial 30 días → bloqueo:** Toda org nueva empieza en `trial` con `trial_inicio` timestamp. A los 30 días, si no se activó un plan de pago, el sistema bloquea el acceso (mensajes WA responden con aviso de upgrade, dashboard redirige a payment). No hay degradación a free limitado — se bloquea.
+  3. **Stripe para internacional:** Checkout Session para suscripción mensual. Stripe Customer + Subscription enlazados a `organizaciones`. Webhooks `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted` sincronizan estado de pago en DB. Stripe maneja retry de pagos fallidos, dunning, y facturación.
+  4. **DeUna + transferencia para Ecuador:** DeUna genera link de pago que se envía por WhatsApp. Para transferencia bancaria directa, el cliente envía comprobante (imagen/PDF) por WhatsApp → el agente AI detecta el intent `pago_subscription`, extrae datos del comprobante, y lo marca como `requiere_validacion` para aprobación manual del founder (AGENTS.md Rule 3 — no acción irreversible sin aprobación humana). Una vez aprobado, el founder actualiza el plan manualmente o via admin endpoint.
+  5. **Cancelación:** El cliente puede cancelar desde el dashboard o por WhatsApp (intent `cancelar_subscription`). La cancelación es efecto al fin del período pagado (no prorrateo). Stripe maneja `cancel_at_period_end`. La org pasa a `free` cuando expira — no se elimina data, solo se bloquea acceso a features de pago.
+  6. **Plan `free` permanente:** Solo para orgs que completaron trial y no pagaron, o que cancelaron. Features limitadas: solo ver eventos existentes, no crear nuevos. Sin métricas, sin alertas, sin resumen semanal.
+- **Campos nuevos en `organizaciones`:** `plan plan_org NOT NULL DEFAULT 'trial'`, `trial_inicio TIMESTAMPTZ`, `trial_fin TIMESTAMPTZ` (generated: trial_inicio + 30 días), `stripe_customer_id TEXT`, `stripe_subscription_id TEXT`, `subscription_status TEXT` (`active`, `past_due`, `canceled`, `none`), `plan_activo_desde TIMESTAMPTZ`, `plan_cancelado_en TIMESTAMPTZ`, `metodo_pago TEXT` (`stripe`, `deuna`, `transferencia`).
+- **Implementación:** `src/integrations/stripe/stripeWebhook.ts`, `src/integrations/stripe/checkoutService.ts`, `src/intreements/deuna/deunaClient.ts`, `src/agents/subscription/billingRouter.ts`, `src/agents/subscription/intents.ts` (intent `pago_subscription`, `cancelar_subscription`), `src/auth/planGuard.ts` (middleware que verifica plan antes de permitir acceso), `landing/src/dashboard/modules/Billing.tsx` (UI de planes y pago), `supabase/migrations/202601010000XX_add-billing-fields.sql`.
+- **Cumple:** AGENTS.md Rule 3 (cancelación y activación de pago requieren confirmación), Rule 5 (documentado en D26 antes de implementar).
+- **Revisar cuando:** Se tenga data real de uso por cliente → evaluar modelo híbrido (flat + overage). Si DeUna no ofrece webhook confiable, migrar a solo Stripe + transferencia manual. Si WhatsApp habilita payment buttons en Ecuador, integrar como tercer método. Si >100 orgs en billing, automatizar dunning con pg-boss (recordatorio a 7, 3, 1 días antes de vencer).
+
+### D27. Instrumentación de costos de servir por organización
+
+- **Fecha:** Junio 2026
+- **Problema que motivó la decisión:** No se sabe cuánto cuesta servir cada cliente. `wa_message_costs` existe pero CERO código escribe en ella. Los adapters LLM reportan `totalTokens: 0` (hardcodeado). Sin costos reales, no se puede calcular margen por cliente ni optimizar pricing (D26 depende de esto para ser inteligente).
+- **Decisión:** Tres fuentes de costo instrumentadas y atribuidas por org:
+  1. **WhatsApp message costs** — Wirer `wa_message_costs`: cada `EvolutionSender.enviarTexto()` y `enviarTemplate()` debe INSERT con `org_id`, `finca_id`, `direction` (inbound/outbound), `message_type` (text/template/media), `cost_usd`. Costo: dentro de ventana 24h = $0 (pago flat a Meta por conversación), templates = precio Meta por tipo. Se necesita agregar `org_id` a la tabla (hoy solo tiene `finca_id`).
+  2. **LLM call costs** — Tabla nueva `llm_call_costs` con `org_id`, `finca_id`, `model`, `provider`, `prompt_tokens`, `completion_tokens`, `cost_usd`, `trace_id`, `created_at`. Cada adapter (Gemini, Groq, NVIDIA) debe reportar tokens REALES (no `totalTokens: 0`). Gemini SDK expone `response.usageMetadata`, Groq y NVIDIA también devuelven usage en su response. Costo se calcula con pricing table por modelo.
+  3. **Agregación mensual** — Tabla `costo_servicio_mensual` con `org_id`, `mes` (YYYY-MM), `wa_cost_usd`, `llm_cost_usd`, `infra_cost_usd` (allocation fijo o 0 en H0), `total_cost_usd`, `created_at`. Job pg-boss a fin de mes materializa los totales desde `wa_message_costs` + `llm_call_costs`.
+- **Implementación:** `src/integrations/whatsapp/EvolutionSender.ts` (INSERT en wa_message_costs post-send), `src/integrations/llm/GeminiAdapter.ts` + `GroqAdapter.ts` + `NvidiaAdapter.ts` (leer usage real del response + INSERT en llm_call_costs), `src/workers/costAggregatorWorker.ts` (pg-boss job mensual), `supabase/migrations/202601010000XX_add-llm-call-costs.sql`, `supabase/migrations/202601010000XX_add-costo-servicio-mensual.sql`, `supabase/migrations/202601010000XX_add-org-id-to-wa-message-costs.sql`.
+- **Cumple:** AGENTS.md Rule 4 (todo error de extracción se loggea — ahora todo costo también), Rule 5 (documentado en D27).
+- **Revisar cuando:** Volumen de inserts en `llm_call_costs` supere 10K/día → evaluar buffer en memoria + batch insert. Si LangFuse ya calcula costos por trace, considerar usarlo como source en vez de tabla propia (pero LangFuse self-hosted puede no tener pricing actualizado). Si se migra a Meta Cloud API, el modelo de costo WA cambia (conversation-based pricing).
+
+### D28. Back-office interno para gestión de Wasagro
+
+- **Fecha:** Junio 2026
+- **Problema que motivó la decisión:** Los founders de Wasagro no tienen visibilidad de: qué clientes están activos vs. churn, cuánto cuesta servir cada org vs. lo que pagan, estado del pipeline SDR, alertas de gestión. El dashboard existente es para clientes (gerente, exportadora) con mock data. Necesitan un panel INTERNO exclusivo para los dueños.
+- **Decisión:** Ruta `/admin` en el dashboard existente (misma app React, sección separada) con auth restringido a `rol = 'director'` o rol de founder. Pantallas:
+  1. **Clientes** — Tabla de todas las orgs: plan, estado (trial/active/past_due/canceled), eventos/mes, usuarios activos, costo de servir/mes (D27), revenue/mes (D26), margen, fecha onboarding, última actividad. Filtros por plan, estado, sector.
+  2. **Cliente detalle** — Clic en org → detalle: fincas, usuarios, eventos por tipo, costos WA+LLM desglosados, P&L Wasagro, health score compuesto (actividad + pago + uso), historial de billing.
+  3. **SDR funnel** — Vista de embudo con data real de `sdr_prospectos`: conversión por status, por narrativa A/B, costo por lead, tiempo promedio por fase.
+  4. **Alertas de gestión** — "ORG003 lleva 14 días sin eventos", "ORG001 costo > revenue", "prospecto score 85 sin follow-up", "trial vence en 3 días". Generadas por job pg-boss diario.
+  5. **Billing** — Ver todas las suscripciones, trials por vencer, pagos fallidos, revenue mensual, MRR trend. Aprobar transferencias manuales.
+- **Acceso:** Solo `director` rol. Middleware `requireRole('director')` en backend. Frontend verifica rol y redirige si no tiene acceso.
+- **Implementación:** `landing/src/admin/` (nueva sección), `landing/src/admin/views/ClientesView.tsx`, `landing/src/admin/views/ClienteDetalleView.tsx`, `landing/src/admin/views/SDRFunnelView.tsx`, `landing/src/admin/views/AlertasView.tsx`, `landing/src/admin/views/BillingView.tsx`, `src/auth/roleGuard.ts` (middleware), `src/agents/admin/adminRouter.ts` (endpoints de data agregada), `src/workers/managementAlertsWorker.ts` (job diario de alertas), `landing/src/App.tsx` (rutas `/admin/*`).
+- **Depende de:** D26 (billing data), D27 (cost data). Sin esos, el back-office muestra actividad sin P&L.
+- **Cumple:** AGENTS.md Rule 3 (acciones irreversibles desde admin requieren confirmación explícita), Rule 5 (documentado en D28).
+- **Revisar cuando:** >50 orgs activas → paginación server-side. Si se necesita multi-tenant admin (cada org con su propio admin), separar completamente de `/dashboard`. Si se quiere mobile, evaluar React Native o notificaciones WhatsApp para alertas críticas.
+
 ---
 
 ## Estructura del repo

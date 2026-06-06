@@ -2,6 +2,7 @@ import type { ILLMAdapter, LLMGeneracionOpciones } from './ILLMAdapter.js'
 import { LLMError } from './LLMError.js'
 import { langfuse } from '../langfuse.js'
 import { timedFetch } from '../timedFetch.js'
+import { recordLLMCallCost } from './LLMCallCostService.js'
 
 export interface OllamaAdapterConfig {
   baseUrl?: string
@@ -11,6 +12,8 @@ export interface OllamaAdapterConfig {
 
 interface OllamaChatResponse {
   message: { content: string }
+  prompt_eval_count?: number
+  eval_count?: number
 }
 
 export class OllamaAdapter implements ILLMAdapter {
@@ -55,8 +58,23 @@ export class OllamaAdapter implements ILLMAdapter {
 
       const data = await res.json() as OllamaChatResponse
       const texto = data.message.content
-      
-      generation.end({ output: texto, metadata: { latencia_ms: Date.now() - inicio } })
+      const promptTokens = data.prompt_eval_count ?? 0
+      const completionTokens = data.eval_count ?? 0
+      const totalTokens = promptTokens + completionTokens
+
+      generation.end({ output: texto, usage: { totalTokens, promptTokens, completionTokens }, metadata: { latencia_ms: Date.now() - inicio } })
+      recordLLMCallCost({
+        orgId: opciones.orgId ?? null,
+        fincaId: opciones.fincaId ?? null,
+        provider: 'ollama',
+        model: this.#model,
+        modelClass: opciones.modelClass ?? 'fast',
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        traceId: opciones.traceId,
+        latencyMs: Date.now() - inicio,
+      })
       return texto
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })

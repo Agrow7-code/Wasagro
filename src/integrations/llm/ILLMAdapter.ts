@@ -19,7 +19,9 @@ export interface LLMGeneracionOpciones {
   generationName: string
   generationInput?: unknown
   modelClass?: ModelClass
-  tools?: ToolDef[] // Herramientas disponibles para el modelo (MCP)
+  tools?: ToolDef[]
+  orgId?: string
+  fincaId?: string
 }
 
 export interface ILLMAdapter {

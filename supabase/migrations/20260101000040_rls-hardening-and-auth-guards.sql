@@ -14,14 +14,25 @@ USING (auth.role() = 'service_role');
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1b. Enable RLS on plan_de_cuentas (was missing — financial data exposed)
+--     Guard: skip if table doesn't exist yet (created in a future migration)
 -- ─────────────────────────────────────────────────────────────────────────────
-ALTER TABLE plan_de_cuentas ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'plan_de_cuentas') THEN
+    ALTER TABLE plan_de_cuentas ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $$;
 
-CREATE POLICY plan_de_cuentas_service_or_org
-ON plan_de_cuentas
-FOR ALL
-USING (auth.role() = 'service_role' OR org_id = get_user_org_id())
-WITH CHECK (auth.role() = 'service_role' OR org_id = get_user_org_id());
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'plan_de_cuentas') THEN
+    CREATE POLICY plan_de_cuentas_service_or_org
+    ON plan_de_cuentas
+    FOR ALL
+    USING (auth.role() = 'service_role' OR org_id = get_user_org_id())
+    WITH CHECK (auth.role() = 'service_role' OR org_id = get_user_org_id());
+  END IF;
+END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Fix SDR tables: USING (true) → service_role only
@@ -59,6 +70,8 @@ AS $$
 $$;
 
 -- insertar_lote — add guard: must be service_role or authenticated user in same org
+-- Drop first if signature changed (cannot change return type of existing function)
+DROP FUNCTION IF EXISTS insertar_lote(TEXT, TEXT, TEXT, NUMERIC, DOUBLE PRECISION, DOUBLE PRECISION, TEXT);
 CREATE OR REPLACE FUNCTION insertar_lote(
   p_lote_id TEXT,
   p_finca_id TEXT,
@@ -99,6 +112,7 @@ END;
 $$;
 
 -- get_finca_centroide — add guard: must be service_role or user in same org
+DROP FUNCTION IF EXISTS get_finca_centroide(TEXT);
 CREATE OR REPLACE FUNCTION get_finca_centroide(p_finca_id TEXT)
 RETURNS TABLE(finca_id TEXT, nombre TEXT, lat_c DOUBLE PRECISION, lng_c DOUBLE PRECISION)
 LANGUAGE plpgsql
@@ -127,6 +141,7 @@ END;
 $$;
 
 -- update_finca_coordenadas — add guard
+DROP FUNCTION IF EXISTS update_finca_coordenadas(TEXT, DOUBLE PRECISION, DOUBLE PRECISION);
 CREATE OR REPLACE FUNCTION update_finca_coordenadas(
   p_finca_id TEXT,
   p_lat DOUBLE PRECISION,
@@ -155,6 +170,7 @@ END;
 $$;
 
 -- eliminar_lote — add guard: must be service_role or user with access to lote's finca
+DROP FUNCTION IF EXISTS eliminar_lote(TEXT);
 CREATE OR REPLACE FUNCTION eliminar_lote(p_lote_id TEXT)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -187,6 +203,7 @@ END;
 $$;
 
 -- get_fincas_con_coordenadas — add guard
+DROP FUNCTION IF EXISTS get_fincas_con_coordenadas();
 CREATE OR REPLACE FUNCTION get_fincas_con_coordenadas()
 RETURNS TABLE(finca_id TEXT, nombre TEXT, lat_c DOUBLE PRECISION, lng_c DOUBLE PRECISION)
 LANGUAGE plpgsql

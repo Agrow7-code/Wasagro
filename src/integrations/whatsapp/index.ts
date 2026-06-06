@@ -4,6 +4,7 @@ import { MetaAdapter } from './MetaAdapter.js'
 import { EvolutionAdapter } from './EvolutionAdapter.js'
 import { MetaSender } from './MetaSender.js'
 import { EvolutionSender } from './EvolutionSender.js'
+import { CostTrackedSender } from './CostTrackedSender.js'
 
 export type WhatsAppProvider = 'meta' | 'evolution'
 
@@ -33,6 +34,11 @@ export function crearAdapterWhatsApp(): IWhatsAppAdapter {
 }
 
 export function crearSenderWhatsApp(): IWhatsAppSender {
+  const inner = crearInnerSender()
+  return new CostTrackedSender({ inner })
+}
+
+function crearInnerSender(): IWhatsAppSender {
   const provider = process.env['WHATSAPP_PROVIDER'] as WhatsAppProvider | undefined
 
   if (provider === 'meta') {

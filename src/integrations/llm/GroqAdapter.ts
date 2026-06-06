@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import type { ILLMAdapter, LLMGeneracionOpciones } from './ILLMAdapter.js'
 import { LLMError } from './LLMError.js'
 import { langfuse } from '../langfuse.js'
+import { recordLLMCallCost } from './LLMCallCostService.js'
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
@@ -50,8 +51,24 @@ export class GroqAdapter implements ILLMAdapter {
 
       const res = await this.#client.chat.completions.create(callOptions)
       const texto = res.choices[0]?.message.content ?? ''
-      
-      generation.end({ output: texto, metadata: { latencia_ms: Date.now() - inicio } })
+      const usage = res.usage
+      const promptTokens = usage?.prompt_tokens ?? 0
+      const completionTokens = usage?.completion_tokens ?? 0
+      const totalTokens = usage?.total_tokens ?? (promptTokens + completionTokens)
+
+      generation.end({ output: texto, usage: { totalTokens, promptTokens, completionTokens }, metadata: { latencia_ms: Date.now() - inicio } })
+      recordLLMCallCost({
+        orgId: opciones.orgId ?? null,
+        fincaId: opciones.fincaId ?? null,
+        provider: 'groq',
+        model: this.#model,
+        modelClass: opciones.modelClass ?? 'fast',
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        traceId: opciones.traceId,
+        latencyMs: Date.now() - inicio,
+      })
       return texto
     } catch (err) {
       generation.end({ output: String(err), level: 'ERROR' })

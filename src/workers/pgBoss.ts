@@ -371,6 +371,9 @@ export async function initPgBoss(): Promise<PgBoss> {
     }
   })
 
+  const { registerCostAggregationWorker } = await import('./costAggregatorWorker.js')
+  await registerCostAggregationWorker(boss)
+
   return boss
 }
 

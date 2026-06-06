@@ -17,6 +17,7 @@ import { handleOnboardingAdmin, handleOnboardingAgricultor } from './handlers/On
 import { handleEvento } from './handlers/EventHandler.js'
 import { loadSessionState } from '../agents/sdr/contextStore.js'
 import { shouldSuppressOnboardingForActiveSDR } from '../agents/sdr/onboardingGuard.js'
+import { recordInboundWaCost } from '../integrations/whatsapp/CostTrackedSender.js'
 
 export const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -88,14 +89,22 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
       if (handled) return
     }
 
-    const usuario = await getUserByPhone(msg.from)
+      const usuario = await getUserByPhone(msg.from)
 
-    if (!usuario) {
-      const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
-      if (meetingHandled) return
-      await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
-      return
-    }
+      if (!usuario) {
+        const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
+        if (meetingHandled) return
+        await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
+        return
+      }
+
+      recordInboundWaCost({
+        orgId: usuario.org_id,
+        fincaId: usuario.finca_id,
+        phone: msg.from,
+        messageType: msg.tipo === 'texto' ? 'text' : msg.tipo === 'audio' ? 'audio' : 'image',
+        waMessageId: msg.wamid,
+      })
 
     if (!usuario.onboarding_completo) {
       // Guard: a live SDR conversation must not be interrupted by the onboarding
