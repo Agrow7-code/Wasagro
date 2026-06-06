@@ -53,6 +53,14 @@ export async function handleEvento(
   mensajeId: string,
   traceId: string,
 ): Promise<void> {
+  // Trace de event pipeline — tags por pipeline + tipo media + rol del usuario.
+  langfuse.trace({
+    id:       traceId,
+    name:     'event_pipeline',
+    tags:     ['event', msg.tipo, usuario.rol],
+    metadata: { usuario_id: usuario.id, phone: msg.from, finca_id: usuario.finca_id ?? null, org_id: usuario.org_id },
+  })
+
   // Approval command: "aprobar [nombre]" from jefe/propietario (text only, before audio processing)
   if (msg.tipo === 'texto' && ROLES_ADMIN.has(usuario.rol) && usuario.finca_id) {
     const approvalMatch = (msg.texto ?? '').toLowerCase().match(/^aprobar\s+(.+)/)

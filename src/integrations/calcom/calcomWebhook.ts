@@ -69,7 +69,7 @@ export async function handleCalcomWebhook(
   signature: string | undefined | null,
   secret: string,
 ): Promise<{ status: string; detail?: string }> {
-  const trace = langfuse.trace({ name: 'calcom_webhook' })
+  const trace = langfuse.trace({ name: 'calcom_webhook', tags: ['webhook', 'calcom'] })
 
   if (!verifyCalcomSignature(rawBody, signature, secret)) {
     trace.event({ name: 'signature_invalid', level: 'WARNING' })

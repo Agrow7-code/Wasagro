@@ -43,6 +43,12 @@ export interface RunTypedOptions<T> {
   langfuseClient?: Langfuse
   // Optional metadata to attach to the generation event for richer dashboards.
   generationInput?: unknown
+  // LangFuse PromptClient devuelto por PromptManager.getPromptClient(name).
+  // Cuando se provee, el SDK linkea esta generación a la versión exacta del
+  // prompt en Langfuse Prompts, lo cual habilita comparaciones de output por
+  // versión en el dashboard. Si el prompt vino del disco (sync no fue corrido),
+  // promptClient debe ser null y el linking se skipea silenciosamente.
+  promptClient?: unknown | null
 }
 
 export interface RunTypedTelemetry {
@@ -68,15 +74,23 @@ export async function runTypedClassifierWithTelemetry<T>(opts: RunTypedOptions<T
     classifierName, fallback, modelClass = 'fast', temperature = 0,
     imageBase64, imageMimeType, langfuseClient,
     generationInput,
+    promptClient,
   } = opts
 
   const lf = langfuseClient ?? defaultLangfuse
   const trace = lf.trace({ id: traceId })
-  const generation = trace.generation({
+  // Convención de model field para wrappers semánticos: 'wasagro/orchestrator'.
+  // La llamada real al LLM ocurre dentro del adapter (Groq/Gemini/Nvidia/Ollama)
+  // que emite SU PROPIA generación con el model id real (gemini-2.5-flash, etc.).
+  // Eso permite filtrar el dashboard por "real LLM calls" sin ruido del wrapper.
+  const generationOpts: Record<string, unknown> = {
     name:  classifierName,
-    model: `wasagro-${classifierName}`,
+    model: 'wasagro/orchestrator',
     input: generationInput ?? { userContentPreview: userContent.slice(0, 200) },
-  })
+    metadata: { classifierName, modelClass },
+  }
+  if (promptClient) generationOpts['prompt'] = promptClient
+  const generation = trace.generation(generationOpts as any)
 
   const startedAt = Date.now()
 

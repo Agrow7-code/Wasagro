@@ -59,8 +59,18 @@ export async function handleOnboardingAdmin(
   mensajeId: string,
   traceId: string,
 ): Promise<void> {
+  // Trace de onboarding: extiende la trace root (inbound_message) con tags
+  // específicos del flow. langfuse.trace({id, tags, metadata}) hace upsert,
+  // así que merge con lo seteado en procesarMensajeEntrante.
+  langfuse.trace({
+    id:       traceId,
+    name:     'onboarding_pipeline',
+    tags:     ['onboarding', 'admin'],
+    metadata: { usuario_id: usuario.id, phone: msg.from, finca_id: usuario.finca_id ?? null, rol: usuario.rol },
+  })
+
   const session = await getOrCreateSession(msg.from, 'onboarding')
-  
+
   let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
   if (msg.tipo === 'audio') {
     let audioInput: string | Buffer = msg.audioUrl ?? ''
@@ -179,6 +189,13 @@ export async function handleOnboardingAgricultor(
   mensajeId: string,
   traceId: string,
 ): Promise<void> {
+  langfuse.trace({
+    id:       traceId,
+    name:     'onboarding_pipeline',
+    tags:     ['onboarding', 'agricultor'],
+    metadata: { usuario_id: usuario.id, phone: msg.from, finca_id: usuario.finca_id ?? null, rol: usuario.rol },
+  })
+
   const session = await getOrCreateSession(msg.from, 'onboarding')
 
   let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''

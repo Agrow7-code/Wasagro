@@ -74,7 +74,7 @@ async function procesarReporteFinca(
   llm: IWasagroLLM,
   sender: IWhatsAppSender,
 ): Promise<boolean> {
-  const trace = langfuse.trace({ name: 'reporte_semanal', metadata: { finca_id: fincaId } })
+  const trace = langfuse.trace({ name: 'reporte_semanal', tags: ['cron', 'reporte', 'semanal'], metadata: { finca_id: fincaId } })
 
   const eventos = await getEventosByFincaRango(fincaId, desde, hasta)
   if (eventos.length === 0) {

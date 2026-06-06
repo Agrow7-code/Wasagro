@@ -45,7 +45,15 @@ export function inicializarPipeline(sender: IWhatsAppSender, llm: IWasagroLLM, o
 export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: string): Promise<void> {
   if (!_sender || !_llm) throw new Error('Pipeline no inicializado — llamar inicializarPipeline primero')
 
-  const trace = langfuse.trace({ id: traceId })
+  // Trace root: cada inbound webhook abre UNA trace que abarca todo el pipeline
+  // downstream (SDR, onboarding, event extraction, etc.). Name + tags + metadata
+  // permiten filtrar el dashboard por canal/tipo/teléfono sin escribir queries SQL.
+  const trace = langfuse.trace({
+    id:       traceId,
+    name:     'inbound_message',
+    tags:     ['inbound', msg.tipo],
+    metadata: { phone: msg.from, tipo_mensaje: msg.tipo, wamid: msg.wamid },
+  })
 
   const existing = await getMensajeByWamid(msg.wamid)
   if (existing) {

@@ -192,10 +192,10 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async corregirTranscripcion(raw: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'corregir_transcripcion', model: 'wasagro-ai-agent', input: { raw } })
+    const generation = trace.generation({ name: 'corregir_transcripcion', model: 'wasagro/orchestrator', input: { raw } })
     try {
       const prompt = (await PromptManager.getPrompt('sp-02-post-correccion-stt.md', 'prompts/sp-02-post-correccion-stt.md', typeof traceId !== 'undefined' ? traceId : undefined))
-      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'llamarLibre' })
+      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'stt_post_correction' })
       generation.end({ output: corrected })
       return corrected.trim()
     } catch (err) {
@@ -206,7 +206,7 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async describirImagenVisual(imageUrl: string, traceId: string): Promise<string> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'describir_imagen', model: 'wasagro-ai-agent' })
+    const generation = trace.generation({ name: 'describir_imagen', model: 'wasagro/orchestrator' })
     try {
       const prompt = (await PromptManager.getPrompt('sp-03a-vision-describe.md', 'prompts/sp-03a-vision-describe.md', typeof traceId !== 'undefined' ? traceId : undefined))
       
@@ -228,7 +228,7 @@ export class WasagroAIAgent implements IWasagroLLM {
           responseFormat: 'json_object',
           ...imageOpciones,
           traceId,
-          generationName: 'llamarLibre',
+          generationName: `vision_describe_attempt_${intentos + 1}`,
           modelClass: 'ultra',
         })
 
@@ -265,7 +265,7 @@ export class WasagroAIAgent implements IWasagroLLM {
 
   async diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string): Promise<DiagnosticoV2VK> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'diagnosticar_v2vk', model: 'wasagro-ai-agent', input: { descripcionVisual } })
+    const generation = trace.generation({ name: 'diagnosticar_v2vk', model: 'wasagro/orchestrator', input: { descripcionVisual } })
     try {
       if (!contextoRAG || contextoRAG === 'Sin contexto agronómico disponible.') {
         trace.event({ name: 'v2vk_empty_rag', level: 'WARNING', input: { descripcionVisual } })
@@ -279,11 +279,11 @@ export class WasagroAIAgent implements IWasagroLLM {
         CONTEXTO_RAG: contextoRAG || 'Sin contexto agronómico disponible.',
       })
       
-      const textoRaw = await this.#adapter.generarTexto(descripcionVisual, { 
-        systemPrompt: prompt, 
-        responseFormat: 'json_object', 
-        traceId, 
-        generationName: 'llamarLibre', 
+      const textoRaw = await this.#adapter.generarTexto(descripcionVisual, {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        traceId,
+        generationName: 'v2vk_diagnose',
         modelClass: 'reasoning' // Modelo analítico cruzando síntomas con RAG
       })
       
@@ -420,8 +420,9 @@ export class WasagroAIAgent implements IWasagroLLM {
   }
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string): Promise<RespuestaOnboarding> {
+    const promptName = 'sp-04a-onboarding-admin.md'
     const prompt = injectarVariables(
-      await PromptManager.getPrompt('sp-04a-onboarding-admin.md', 'prompts/sp-04a-onboarding-admin.md', traceId),
+      await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId),
       {
         PASO_ACTUAL: String(contexto.preguntas_realizadas + 1),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
@@ -443,12 +444,14 @@ export class WasagroAIAgent implements IWasagroLLM {
       temperature:     0,
       langfuseClient:  this.#lf,
       generationInput: { mensaje },
+      promptClient:    PromptManager.getPromptClient(promptName),
     })
   }
 
   async onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string): Promise<RespuestaOnboarding> {
+    const promptName = 'sp-04b-onboarding-agricultor.md'
     const prompt = injectarVariables(
-      await PromptManager.getPrompt('sp-04b-onboarding-agricultor.md', 'prompts/sp-04b-onboarding-agricultor.md', traceId),
+      await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId),
       {
         PASO_ACTUAL: String(contexto.paso_actual),
         DATOS_RECOPILADOS: JSON.stringify(contexto.datos_recolectados),
@@ -471,12 +474,13 @@ export class WasagroAIAgent implements IWasagroLLM {
       temperature:     0,
       langfuseClient:  this.#lf,
       generationInput: { mensaje },
+      promptClient:    PromptManager.getPromptClient(promptName),
     })
   }
 
   async resumirSemana(entrada: EntradaResumenSemanal, traceId: string): Promise<ResumenSemanal> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'resumir_semana', model: 'wasagro-ai-agent', input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
+    const generation = trace.generation({ name: 'resumir_semana', model: 'wasagro/orchestrator', input: { finca_id: entrada.finca_id, total_eventos: entrada.eventos.length } })
     try {
       const forecastTexto = entrada.forecast
         ? [
@@ -514,7 +518,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         FORECAST_SEMANAL:   forecastTexto,
         PLAGAS_POR_NIVEL:   plagasTexto,
       })
-      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'llamar' })
+      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'resumen_semanal' })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -538,7 +542,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'extraer_datos_sdr',
-      model: 'wasagro-ai-agent',
+      model: 'wasagro/orchestrator',
       input: { mensaje: textoMensaje },
     })
 
@@ -586,7 +590,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'redactar_mensaje_sdr',
-      model: 'wasagro-ai-agent',
+      model: 'wasagro/orchestrator',
       input: { directiva },
     })
 
@@ -620,7 +624,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'clasificar_intencion_sdr',
-      model: 'wasagro-ai-agent',
+      model: 'wasagro/orchestrator',
       input: { texto, opciones },
     })
 
@@ -718,17 +722,17 @@ Reglas:
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: 'clasificar_mensaje',
-      model: 'wasagro-ai-agent',
+      model: 'wasagro/orchestrator',
       input: { transcripcion: input.transcripcion },
     })
 
     const inicio = Date.now()
     try {
-      const textoRaw = await this.#adapter.generarTexto(input.transcripcion, { 
-        systemPrompt: prompt, 
-        responseFormat: 'json_object', 
-        traceId, 
-        generationName: 'llamar',
+      const textoRaw = await this.#adapter.generarTexto(input.transcripcion, {
+        systemPrompt: prompt,
+        responseFormat: 'json_object',
+        traceId,
+        generationName: 'event_classify',
         modelClass: 'fast', // Enrutamiento ultra-rápido (Flash)
         temperature: 0 // CRÍTICO: 0 para clasificación determinista
       })
@@ -783,7 +787,7 @@ Reglas:
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({
       name: `extraer_${tipo_evento}`,
-      model: 'wasagro-ai-agent',
+      model: 'wasagro/orchestrator',
       input: { transcripcion: input.transcripcion, tipo: tipo_evento },
     })
 

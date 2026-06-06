@@ -78,7 +78,14 @@ export async function handleSDRSession(
   client?: SupabaseClient,
   adapter?: ILLMAdapter,
 ): Promise<void> {
-  const trace = langfuse.trace({ id: traceId })
+  // Trace SDR enriquecido: tags por pipeline + tipo media. metadata del prospecto
+  // se rellena después de hidratar (puede no existir aún en el primer turno).
+  const trace = langfuse.trace({
+    id:       traceId,
+    name:     'sdr_pipeline',
+    tags:     ['sdr', msg.tipo],
+    metadata: { phone: msg.from, wamid: msg.wamid },
+  })
   const texto = msg.tipo === 'texto' ? (msg.texto ?? '') : '[mensaje de voz o imagen]'
 
   try {

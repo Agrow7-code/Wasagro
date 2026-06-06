@@ -33,7 +33,7 @@ export async function enviarAlertasClima(
   deps: { getForecastFn?: GetForecastFn } = {},
 ): Promise<{ enviadas: number; errores: number }> {
   const getForecastFn = deps.getForecastFn ?? getForecast
-  const trace = langfuse.trace({ name: 'alertas_clima' })
+  const trace = langfuse.trace({ name: 'alertas_clima', tags: ['cron', 'alertas', 'clima'] })
 
   const fincas = await getFincasConCoordenadas()
   let enviadas = 0

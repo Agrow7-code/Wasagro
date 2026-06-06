@@ -27,7 +27,7 @@ export async function enviarAlertasPrecio(
   deps: { getPreciosFn?: GetPreciosFn } = {},
 ): Promise<{ enviadas: number; errores: number }> {
   const getPreciosFn = deps.getPreciosFn ?? getUltimosPreciosBanano
-  const trace = langfuse.trace({ name: 'alertas_precio' })
+  const trace = langfuse.trace({ name: 'alertas_precio', tags: ['cron', 'alertas', 'precio'] })
 
   let precios
   try {

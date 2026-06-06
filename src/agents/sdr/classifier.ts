@@ -160,7 +160,7 @@ export class IntentClassifier implements IIntentClassifier {
     const trace = langfuse.trace({ id: traceId })
     const generation = trace.generation({
       name: 'sdr_intent_classifier',
-      model: 'wasagro-intent-classifier',
+      model: 'wasagro/orchestrator',
       input: { message, contextSnapshot: this.#snapshotCtx(ctx) },
     })
 
