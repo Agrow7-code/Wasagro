@@ -5,8 +5,6 @@ import { updateSDRProspecto, saveSDRInteraccion } from '../../pipeline/supabaseQ
 import { crearSenderWhatsApp } from '../whatsapp/index.js'
 import { langfuse } from '../langfuse.js'
 
-console.log('[module-marker] calcomWebhook.ts loaded — has-notify-logs=YES build=ce0fab9c')
-
 // ── Cal.com webhook signature verification ──────────────────────────────────
 // Cal.com signs webhook payloads with HMAC-SHA256 using the secret configured
 // when the webhook subscription was created. The signature is sent in the
@@ -158,10 +156,8 @@ async function handleBookingCreated(
   traceId: string,
 ): Promise<{ status: string; detail?: string }> {
   const trace = langfuse.trace({ id: traceId, name: 'calcom_booking_created' })
-  console.log('[bcr-trace] enter handleBookingCreated', { bookingId, attendeeCount: attendees.length })
 
   if (!bookingId) {
-    console.log('[bcr-trace] early-return: !bookingId')
     trace.event({ name: 'no_booking_id', level: 'ERROR' })
     return { status: 'error', detail: 'Missing bookingId' }
   }
@@ -171,21 +167,17 @@ async function handleBookingCreated(
   // the Cal.com booking URL (?prospecto_id=xxx) and Cal.com preserves it in
   // payload.metadata — this is the 100% reliable matching path.
   const prospecto = await findProspectoByAttendee(attendees, metadata)
-  console.log('[bcr-trace] after findProspectoByAttendee', { found: !!prospecto, prospectoId: prospecto?.['id'] })
   if (!prospecto) {
-    console.log('[bcr-trace] early-return: !prospecto')
     trace.event({ name: 'prospecto_not_found', level: 'WARNING', input: { attendees } })
     return { status: 'no_prospecto', detail: 'No matching prospect found' }
   }
 
   // Idempotency: skip if already processed
   if (prospecto['calcom_booking_id'] === bookingId) {
-    console.log('[bcr-trace] early-return: duplicate')
     trace.event({ name: 'duplicate_booking', level: 'DEFAULT' })
     return { status: 'duplicate', detail: `Booking ${bookingId} already processed` }
   }
 
-  console.log('[bcr-trace] before UPDATE')
   // Update prospect
   const reunionAgendadaAt = startTime || new Date().toISOString()
   await updateSDRProspecto(prospecto['id'] as string, {
@@ -193,14 +185,12 @@ async function handleBookingCreated(
     reunion_agendada_at: reunionAgendadaAt,
     calcom_booking_id: bookingId,
   })
-  console.log('[bcr-trace] after UPDATE')
 
   trace.event({
     name: 'prospecto_updated',
     input: { prospecto_id: prospecto['id'], bookingId, reunionAgendadaAt },
   })
 
-  console.log('[bcr-trace] before saveSDRInteraccion')
   // Log interaction
   await saveSDRInteraccion({
     prospecto_id: prospecto['id'],
@@ -208,15 +198,16 @@ async function handleBookingCreated(
     turno: (prospecto['turns_total'] as number) ?? 0,
     tipo: 'outbound',
     contenido: `[Cal.com booking confirmed: ${bookingId}]`,
-    action_taken: 'booking_confirmed_webhook',
+    // Must match sdr_interacciones_action_taken_check. 'meeting_confirmed'
+    // is the canonical legal value semantically equivalent to a Cal.com
+    // booking confirmation. Using 'booking_confirmed_webhook' (not in the
+    // CHECK list) silently crashed the handler before notifyFounderBooking.
+    action_taken: 'meeting_confirmed',
     langfuse_trace_id: traceId,
   })
-  console.log('[bcr-trace] after saveSDRInteraccion')
 
   // SDR funnel score: booking confirmed via Cal.com → meeting_confirmed (+1).
-  console.log('[bcr-trace] before dynamic import scoreTerminalTransition')
   const { scoreTerminalTransition } = await import('../../agents/sdr/outcomeScoring.js')
-  console.log('[bcr-trace] after dynamic import, before score call')
   scoreTerminalTransition(trace, 'meeting_proposed', 'meeting_confirmed', {
     prospectoId: prospecto['id'] as string,
     phone:       prospecto['phone'] as string,
@@ -226,11 +217,9 @@ async function handleBookingCreated(
     turnCount:   (prospecto['turns_total'] as number) ?? 0,
     source:      'calcom_webhook',
   })
-  console.log('[bcr-trace] after score call, before notifyFounderBooking')
 
   // Notify founder
   await notifyFounderBooking(prospecto, reunionAgendadaAt, title, bookingId)
-  console.log('[bcr-trace] after notifyFounderBooking — handler ending')
 
   return { status: 'ok', detail: `Booking ${bookingId} confirmed for prospecto ${prospecto['id']}` }
 }
@@ -275,7 +264,10 @@ async function handleBookingCancelled(
  turno: (prospecto['turns_total'] as number) ?? 0,
  tipo: 'outbound',
  contenido: `[Cal.com booking cancelled: ${bookingId}]`,
- action_taken: 'booking_cancellation_logged',
+ // Must match sdr_interacciones_action_taken_check. Cancellation maps
+ // closest to 'graceful_exit' from the legal list (cancellation is a soft
+ // disengagement from the SDR funnel without immediate re-engagement).
+ action_taken: 'graceful_exit',
  langfuse_trace_id: traceId,
  })
 

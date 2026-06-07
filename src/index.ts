@@ -78,7 +78,6 @@ function validarEnvVars(): void {
 }
 
 validarEnvVars()
-console.log('[deploy-marker] build=ce0fab9c-startup-check-notify-instrumentation-present')
 
 const adapter = crearAdapterWhatsApp()
 const sender = crearSenderWhatsApp()
