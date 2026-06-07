@@ -158,8 +158,10 @@ async function handleBookingCreated(
   traceId: string,
 ): Promise<{ status: string; detail?: string }> {
   const trace = langfuse.trace({ id: traceId, name: 'calcom_booking_created' })
+  console.log('[bcr-trace] enter handleBookingCreated', { bookingId, attendeeCount: attendees.length })
 
   if (!bookingId) {
+    console.log('[bcr-trace] early-return: !bookingId')
     trace.event({ name: 'no_booking_id', level: 'ERROR' })
     return { status: 'error', detail: 'Missing bookingId' }
   }
@@ -169,17 +171,21 @@ async function handleBookingCreated(
   // the Cal.com booking URL (?prospecto_id=xxx) and Cal.com preserves it in
   // payload.metadata — this is the 100% reliable matching path.
   const prospecto = await findProspectoByAttendee(attendees, metadata)
+  console.log('[bcr-trace] after findProspectoByAttendee', { found: !!prospecto, prospectoId: prospecto?.['id'] })
   if (!prospecto) {
+    console.log('[bcr-trace] early-return: !prospecto')
     trace.event({ name: 'prospecto_not_found', level: 'WARNING', input: { attendees } })
     return { status: 'no_prospecto', detail: 'No matching prospect found' }
   }
 
   // Idempotency: skip if already processed
   if (prospecto['calcom_booking_id'] === bookingId) {
+    console.log('[bcr-trace] early-return: duplicate')
     trace.event({ name: 'duplicate_booking', level: 'DEFAULT' })
     return { status: 'duplicate', detail: `Booking ${bookingId} already processed` }
   }
 
+  console.log('[bcr-trace] before UPDATE')
   // Update prospect
   const reunionAgendadaAt = startTime || new Date().toISOString()
   await updateSDRProspecto(prospecto['id'] as string, {
@@ -187,12 +193,14 @@ async function handleBookingCreated(
     reunion_agendada_at: reunionAgendadaAt,
     calcom_booking_id: bookingId,
   })
+  console.log('[bcr-trace] after UPDATE')
 
   trace.event({
     name: 'prospecto_updated',
     input: { prospecto_id: prospecto['id'], bookingId, reunionAgendadaAt },
   })
 
+  console.log('[bcr-trace] before saveSDRInteraccion')
   // Log interaction
   await saveSDRInteraccion({
     prospecto_id: prospecto['id'],
@@ -203,12 +211,12 @@ async function handleBookingCreated(
     action_taken: 'booking_confirmed_webhook',
     langfuse_trace_id: traceId,
   })
+  console.log('[bcr-trace] after saveSDRInteraccion')
 
   // SDR funnel score: booking confirmed via Cal.com → meeting_confirmed (+1).
-  // The duplicate-booking guard above already covers idempotency: if this
-  // webhook fires twice for the same bookingId, the score is only emitted on
-  // the first run.
+  console.log('[bcr-trace] before dynamic import scoreTerminalTransition')
   const { scoreTerminalTransition } = await import('../../agents/sdr/outcomeScoring.js')
+  console.log('[bcr-trace] after dynamic import, before score call')
   scoreTerminalTransition(trace, 'meeting_proposed', 'meeting_confirmed', {
     prospectoId: prospecto['id'] as string,
     phone:       prospecto['phone'] as string,
@@ -218,9 +226,11 @@ async function handleBookingCreated(
     turnCount:   (prospecto['turns_total'] as number) ?? 0,
     source:      'calcom_webhook',
   })
+  console.log('[bcr-trace] after score call, before notifyFounderBooking')
 
   // Notify founder
   await notifyFounderBooking(prospecto, reunionAgendadaAt, title, bookingId)
+  console.log('[bcr-trace] after notifyFounderBooking — handler ending')
 
   return { status: 'ok', detail: `Booking ${bookingId} confirmed for prospecto ${prospecto['id']}` }
 }
