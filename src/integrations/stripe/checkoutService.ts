@@ -1,12 +1,39 @@
 import Stripe from 'stripe'
 import { supabase } from '../../integrations/supabase.js'
 
-const stripe = new Stripe(process.env['STRIPE_SECRET_KEY'] ?? '', {
-  apiVersion: '2026-05-27.dahlia',
-})
+// Lazy-init: el SDK de Stripe tira `Neither apiKey nor config.authenticator
+// provided` al instanciarse con string vacío, lo cual mataría el proceso al
+// module-load si STRIPE_SECRET_KEY no está configurada en el environment
+// (causa raíz: prod incident 2026-06-07 — el container crash-looped y
+// Railway no podía rotar a un deploy con vars nuevas porque cada arranque
+// moría antes de leer el environment del servicio).
+//
+// Patrón: getStripe() inicializa on-demand y cachea. Si la key no existe al
+// momento de uso real (billing endpoint), tira error claro con guidance.
+let _stripe: Stripe | null = null
+
+function getStripe(): Stripe {
+  if (_stripe) return _stripe
+  const key = process.env['STRIPE_SECRET_KEY']
+  if (!key) {
+    throw new Error('STRIPE_SECRET_KEY no configurada — features de billing deshabilitadas')
+  }
+  _stripe = new Stripe(key, { apiVersion: '2026-05-27.dahlia' })
+  return _stripe
+}
 
 const STARTER_PRICE_ID = process.env['STRIPE_STARTER_PRICE_ID'] ?? ''
 const ENTERPRISE_PRICE_ID = process.env['STRIPE_ENTERPRISE_PRICE_ID'] ?? ''
+
+// Proxy compatible con el patrón `import { stripe }` que usan otros módulos
+// (e.g. stripeWebhookHandler). Cada acceso a un método/propiedad pasa por
+// getStripe(), que crashea cuando realmente se intenta usar sin key — no en
+// module-load.
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop) {
+    return (getStripe() as unknown as Record<string | symbol, unknown>)[prop]
+  },
+})
 
 export interface CheckoutResult {
   url: string
@@ -25,7 +52,7 @@ export async function createCheckoutSession(orgId: string, plan: 'starter' | 'en
   let customerId = org.stripe_customer_id
 
   if (!customerId) {
-    const customer = await stripe.customers.create({
+    const customer = await getStripe().customers.create({
       metadata: { org_id: orgId },
       name: org.nombre,
     })
@@ -39,7 +66,7 @@ export async function createCheckoutSession(orgId: string, plan: 'starter' | 'en
 
   const priceId = plan === 'enterprise' ? ENTERPRISE_PRICE_ID : STARTER_PRICE_ID
 
-  const session = await stripe.checkout.sessions.create({
+  const session = await getStripe().checkout.sessions.create({
     customer: customerId,
     mode: 'subscription',
     payment_method_types: ['card'],
@@ -63,7 +90,7 @@ export async function createCustomerPortalSession(orgId: string): Promise<string
 
   if (!org?.stripe_customer_id) throw new Error('Org no tiene Stripe customer')
 
-  const session = await stripe.billingPortal.sessions.create({
+  const session = await getStripe().billingPortal.sessions.create({
     customer: org.stripe_customer_id,
     return_url: `${process.env['DASHBOARD_URL'] ?? 'https://app.wasagro.ai'}/billing`,
   })
@@ -80,7 +107,7 @@ export async function cancelSubscription(orgId: string): Promise<void> {
 
   if (!org?.stripe_subscription_id) throw new Error('Org no tiene Stripe subscription')
 
-  await stripe.subscriptions.update(org.stripe_subscription_id, {
+  await getStripe().subscriptions.update(org.stripe_subscription_id, {
     cancel_at_period_end: true,
   })
 
@@ -92,5 +119,3 @@ export async function cancelSubscription(orgId: string): Promise<void> {
     })
     .eq('org_id', orgId)
 }
-
-export { stripe }
