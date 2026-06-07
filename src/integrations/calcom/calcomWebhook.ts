@@ -15,12 +15,38 @@ export function verifyCalcomSignature(
   signature: string | undefined | null,
   secret: string,
 ): boolean {
-  if (!signature) return false
+  if (!signature) {
+    console.warn('[calcom-sig] no signature header received')
+    return false
+  }
   const expected = createHmac('sha256', secret).update(body).digest('hex')
-  const sigBuf = Buffer.from(signature)
+  // Cal.com may prefix the signature with `sha256=` (GitHub-style) or send the
+  // raw hex digest depending on version. Strip the prefix if present.
+  const cleanSig = signature.startsWith('sha256=') ? signature.slice(7) : signature
+  const sigBuf = Buffer.from(cleanSig)
   const expBuf = Buffer.from(expected)
-  if (sigBuf.length !== expBuf.length) return false
-  return timingSafeEqual(sigBuf, expBuf)
+  if (sigBuf.length !== expBuf.length) {
+    console.warn('[calcom-sig] length mismatch', {
+      sigLen: sigBuf.length,
+      expLen: expBuf.length,
+      sigPrefix: cleanSig.slice(0, 16),
+      expPrefix: expected.slice(0, 16),
+      bodyLen: body.length,
+      secretPrefix: secret.slice(0, 12),
+    })
+    return false
+  }
+  const matches = timingSafeEqual(sigBuf, expBuf)
+  if (!matches) {
+    console.warn('[calcom-sig] HMAC mismatch (same length)', {
+      sigPrefix: cleanSig.slice(0, 16),
+      expPrefix: expected.slice(0, 16),
+      bodyLen: body.length,
+      bodyStart: body.slice(0, 100),
+      secretPrefix: secret.slice(0, 12),
+    })
+  }
+  return matches
 }
 
 // ── Payload schemas ─────────────────────────────────────────────────────────
