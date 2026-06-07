@@ -341,8 +341,9 @@ async function notifyFounderBooking(
   bookingId: string,
 ): Promise<void> {
   const founderPhone = process.env['FOUNDER_PHONE']
+  console.log('[calcom-notify] start', { hasPhone: !!founderPhone, phonePrefix: founderPhone?.slice(0, 6), bookingId })
   if (!founderPhone) {
-    console.warn('[calcom] FOUNDER_PHONE not set — skipping WhatsApp notification')
+    console.warn('[calcom-notify] FOUNDER_PHONE not set — skipping WhatsApp notification')
     return
   }
 
@@ -363,9 +364,12 @@ async function notifyFounderBooking(
 
   try {
     const sender = crearSenderWhatsApp()
+    console.log('[calcom-notify] sending WhatsApp', { to: founderPhone, msgLen: msg.length })
     await sender.enviarTexto(founderPhone, msg)
+    console.log('[calcom-notify] WhatsApp sent OK')
   } catch (err) {
-    console.error('[calcom] Error notifying founder via WhatsApp:', err)
+    console.error('[calcom-notify] WhatsApp send FAILED:', err instanceof Error ? err.message : String(err))
+    console.error('[calcom-notify] stack:', err instanceof Error ? err.stack?.slice(0, 1500) : 'no-stack')
   }
 
   // Email notification via Resend (if configured)
