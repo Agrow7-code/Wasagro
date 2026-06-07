@@ -24,6 +24,8 @@ async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null
 // internas de pruebas (ej. ORG001) deben permanecer activas independiente del
 // plan/trial/subscription_status para no bloquear QA y demos. Migration 52
 // añadió el flag; ORG001 quedó marcada como is_test_org=true ahí mismo.
+// Cualquier job de billing reconciliation futuro debe excluir is_test_org=true
+// en sus UPDATE bulk para no pisar este setup.
 export function isOrgBillingActive(state: OrgBillingState): boolean {
   if (state.is_test_org) return true
   if (state.plan === 'trial') {
