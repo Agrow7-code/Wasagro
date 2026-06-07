@@ -5,6 +5,8 @@ import { updateSDRProspecto, saveSDRInteraccion } from '../../pipeline/supabaseQ
 import { crearSenderWhatsApp } from '../whatsapp/index.js'
 import { langfuse } from '../langfuse.js'
 
+console.log('[module-marker] calcomWebhook.ts loaded — has-notify-logs=YES build=ce0fab9c')
+
 // ── Cal.com webhook signature verification ──────────────────────────────────
 // Cal.com signs webhook payloads with HMAC-SHA256 using the secret configured
 // when the webhook subscription was created. The signature is sent in the
