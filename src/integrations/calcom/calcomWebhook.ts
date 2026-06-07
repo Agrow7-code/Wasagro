@@ -105,8 +105,16 @@ export async function handleCalcomWebhook(
   let parsed: CalcomWebhookPayload
   try {
     parsed = CalcomWebhookPayloadSchema.parse(JSON.parse(rawBody))
-  } catch {
-    trace.event({ name: 'parse_error', level: 'ERROR' })
+  } catch (err) {
+    const issues = err instanceof z.ZodError ? err.issues : null
+    const bodyPreview = rawBody.slice(0, 500)
+    console.warn('[calcom-parse] payload Zod parse failed', {
+      issues,
+      errMsg: err instanceof Error ? err.message : String(err),
+      bodyPreview,
+      bodyLen: rawBody.length,
+    })
+    trace.event({ name: 'parse_error', level: 'ERROR', input: { issues, bodyPreview } })
     return { status: 'rejected', detail: 'Invalid payload' }
   }
 
