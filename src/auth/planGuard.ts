@@ -6,12 +6,13 @@ interface OrgBillingState {
   plan: string
   trial_fin: string | null
   subscription_status: string
+  is_test_org: boolean
 }
 
 async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null> {
   const { data, error } = await supabase
     .from('organizaciones')
-    .select('plan, trial_fin, subscription_status')
+    .select('plan, trial_fin, subscription_status, is_test_org')
     .eq('org_id', orgId)
     .single()
 
@@ -19,7 +20,12 @@ async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null
   return data as OrgBillingState
 }
 
+// `is_test_org` short-circuits TODA la verificación de billing — las orgs
+// internas de pruebas (ej. ORG001) deben permanecer activas independiente del
+// plan/trial/subscription_status para no bloquear QA y demos. Migration 52
+// añadió el flag; ORG001 quedó marcada como is_test_org=true ahí mismo.
 export function isOrgBillingActive(state: OrgBillingState): boolean {
+  if (state.is_test_org) return true
   if (state.plan === 'trial') {
     return state.trial_fin !== null && new Date(state.trial_fin) > new Date()
   }
@@ -69,6 +75,6 @@ export async function planGuard(c: Context, next: Next): Promise<Response | void
 
 export async function planGuardWhatsApp(orgId: string): Promise<{ allowed: boolean; state: OrgBillingState }> {
   const state = await getOrgBillingState(orgId)
-  if (!state) return { allowed: false, state: { plan: 'free', trial_fin: null, subscription_status: 'none' } }
+  if (!state) return { allowed: false, state: { plan: 'free', trial_fin: null, subscription_status: 'none', is_test_org: false } }
   return { allowed: isOrgBillingActive(state), state }
 }
