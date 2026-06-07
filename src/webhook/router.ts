@@ -110,24 +110,7 @@ webhookRouter.post('/calcom', async (c) => {
   }
 
   const rawBody = await c.req.text()
-  // Cal.com docs say the header is `X-Cal-Signature-256`. Some versions of
-  // the source use a different name. Try several common variants so we
-  // accept whatever Cal.com actually sends without re-deploying every time.
-  const signature =
-    c.req.header('x-cal-signature-256') ??
-    c.req.header('X-Cal-Signature-256') ??
-    c.req.header('x-cal-signature') ??
-    c.req.header('X-Cal-Signature')
-
-  // Diagnostic: dump all headers + signature attempt to logs. We'll remove
-  // this once the matching header name is identified.
-  const allHeaders: Record<string, string> = {}
-  c.req.raw.headers.forEach((v, k) => { allHeaders[k] = v })
-  console.log('[calcom-router] incoming webhook', {
-    headerNames: Object.keys(allHeaders),
-    sigHeader: signature ?? null,
-    bodyLen: rawBody.length,
-  })
+  const signature = c.req.header('x-cal-signature-256')
 
   const result = await handleCalcomWebhook(rawBody, signature, secret)
 

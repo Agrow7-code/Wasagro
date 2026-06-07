@@ -55,10 +55,13 @@ export function verifyCalcomSignature(
 // When a payloadTemplate is configured, the shape is custom; we support both
 // the default shape and a minimal template shape.
 
+// Cal.com sends `null` (not undefined / missing) for fields the attendee left
+// empty. `optional()` alone doesn't accept null — must be `nullable()` too.
+// Coerced to empty strings downstream by the schema's default.
 const AttendeeSchema = z.object({
-  name: z.string().optional().default(''),
-  email: z.string().email().optional().or(z.literal('')),
-  phoneNumber: z.string().optional().default(''),
+  name: z.string().nullable().optional().transform(v => v ?? ''),
+  email: z.union([z.string().email(), z.literal(''), z.null()]).optional().transform(v => v ?? ''),
+  phoneNumber: z.string().nullable().optional().transform(v => v ?? ''),
 })
 
 const CalcomWebhookPayloadSchema = z.object({
