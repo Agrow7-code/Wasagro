@@ -30,3 +30,5 @@ Thumbs.db
 
 .vercel
 .env*.local
+# Local Pi runtime state
+.atl/

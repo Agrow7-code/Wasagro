@@ -51,8 +51,8 @@ export async function handleBillingIntent(
       return true
     }
 
-    // Ecuador: offer DeUna + transferencia
-    // International: offer Stripe checkout link
+// Ecuador: offer DeUna + transferencia
+// International: direct to billing page (dLocal SmartFields)
     if (org.pais === 'EC') {
       const amount = 29
       try {
