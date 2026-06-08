@@ -67,9 +67,10 @@ export default function LoginPage() {
         throw new Error(data.error || 'Código incorrecto o expirado')
       }
 
-      const user = data.user as User
-      login(user)
-      console.log('[Login] Verificación exitosa, redirigiendo...', user.rol)
+        const user = data.user as User
+        login(user)
+        if (data.token) localStorage.setItem('wasagro_token', data.token)
+        console.log('[Login] Verificación exitosa, redirigiendo...', user.rol)
 
       // Redirección por rol
       switch (user.rol) {

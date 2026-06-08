@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '../../auth/useAuth'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'https://wasagro-production.up.railway.app'
+const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 interface BillingStatus {
   org_id: string

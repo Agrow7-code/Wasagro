@@ -22,6 +22,7 @@ export function useAuth() {
   const logout = useCallback(() => {
     setUser(null)
     localStorage.removeItem('wasagro_user')
+    localStorage.removeItem('wasagro_token')
   }, [])
 
   return {
