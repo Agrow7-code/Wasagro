@@ -10,11 +10,11 @@ import { langfuse } from '../langfuse.js'
 
 export type LLMProvider = 'auto' | 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'deepseek-ocr' | 'internvl' | 'glm' | 'minimax' | 'qwen' | 'gemma' | 'nemotron-ocr' | 'kimi-k2'
 
-function buildAdapter(provider: string): ILLMAdapter {
+function buildAdapter(provider: string, modelOverride?: string): ILLMAdapter {
   if (provider === 'gemini') {
     const apiKey = process.env['GEMINI_API_KEY']
     if (!apiKey) throw new Error('gemini requiere GEMINI_API_KEY')
-    return new GeminiAdapter({ apiKey })
+    return new GeminiAdapter({ apiKey, ...(modelOverride ? { model: modelOverride } : {}) })
   }
   if (provider === 'groq') {
     const apiKey = process.env['GROQ_API_KEY']
@@ -75,26 +75,34 @@ export function crearAdapterLLM(): ILLMAdapter {
 
   if (provider === 'auto') {
   // TIERED ROUTING POOL (Control activo de cuota y capacidades)
-    const poolConfig: Array<{ name: string; key: string; provider: string; tier: ModelClass }> = [
-    // TIER 1 (Fast): Extracción simple, clasificación rápida, sin penalización por fallos masivos
-    // Restauramos Gemini como principal porque los endpoints de Nvidia están dando Timeout (20s) y Error 500
-    { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast' },
-    { name: 'Groq', key: 'GROQ_API_KEY', provider: 'groq', tier: 'fast' },
-    { name: 'GLM-5.1', key: 'NVIDIA_GLM_KEY', provider: 'glm', tier: 'fast' },
-    { name: 'Deepseek', key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'fast' },
+  // Multi-Gemini con modelos explícitos para sobrevivir cuotas por-modelo.
+  // Orden por tier = prioridad de fallback. Modelos pickeados por cuota RPD
+  // según Google AI Studio. Si un ID es incorrecto, sobreescribir vía env var
+  // (GEMINI_FAST_MODEL etc.) o ajustar acá.
+    const poolConfig: Array<{ name: string; key: string; provider: string; tier: ModelClass; model?: string }> = [
+    // TIER 1 (Fast): Extracción simple, clasificación rápida (vision-capable)
+    { name: 'Gemini-3.1-FL', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast', model: 'gemini-3.1-flash-lite' }, // 500 RPD
+    { name: 'Gemini-3-F',   key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast', model: 'gemini-3-flash' },         // 20 RPD
+    { name: 'Gemini-2.5-F', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'fast', model: 'gemini-2.5-flash' },       // 20 RPD (current default)
+    { name: 'Groq',         key: 'GROQ_API_KEY',   provider: 'groq',   tier: 'fast' },
+    { name: 'GLM-5.1',      key: 'NVIDIA_GLM_KEY', provider: 'glm',    tier: 'fast' },
+    { name: 'Deepseek',     key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'fast' },
 
     // TIER 2 (Reasoning): Reflexión profunda, PDR/SR (ReAct)
-    { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'reasoning' },
-    { name: 'Qwen', key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'reasoning' },
-    { name: 'Gemma-4', key: 'NVIDIA_GEMMA_KEY', provider: 'gemma', tier: 'reasoning' },
-    { name: 'Deepseek', key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'reasoning' },
-    { name: 'GLM-5.1', key: 'NVIDIA_GLM_KEY', provider: 'glm', tier: 'reasoning' },
+    { name: 'Gemini-3.1-FL', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'reasoning', model: 'gemini-3.1-flash-lite' },
+    { name: 'Gemini-3-F',    key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'reasoning', model: 'gemini-3-flash' },
+    { name: 'Qwen',          key: 'NVIDIA_QWEN_KEY', provider: 'qwen',   tier: 'reasoning' },
+    { name: 'Gemma-4',       key: 'NVIDIA_GEMMA_KEY', provider: 'gemma', tier: 'reasoning' },
+    { name: 'Deepseek',      key: 'NVIDIA_API_KEY', provider: 'deepseek', tier: 'reasoning' },
+    { name: 'GLM-5.1',       key: 'NVIDIA_GLM_KEY', provider: 'glm',     tier: 'reasoning' },
 
-    // TIER 3 (Ultra): Casos críticos, Diagnóstico complejo, V2VK
-    { name: 'Gemini', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'ultra' }, // Soporte Multimodal nativo
-    { name: 'Minimax', key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax', tier: 'ultra' },
-    { name: 'Gemma-4', key: 'NVIDIA_GEMMA_KEY', provider: 'gemma', tier: 'ultra' },
-    { name: 'Qwen', key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'ultra' },
+    // TIER 3 (Ultra): V2VK, multimodal-required
+    { name: 'Gemini-3.1-FL', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'ultra', model: 'gemini-3.1-flash-lite' },
+    { name: 'Gemini-3-F',    key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'ultra', model: 'gemini-3-flash' },
+    { name: 'Gemini-2.5-F',  key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'ultra', model: 'gemini-2.5-flash' },
+    { name: 'Minimax',       key: 'NVIDIA_MINIMAX_KEY', provider: 'minimax', tier: 'ultra' },
+    { name: 'Gemma-4',       key: 'NVIDIA_GEMMA_KEY', provider: 'gemma', tier: 'ultra' },
+    { name: 'Qwen',          key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'ultra' },
 
     // TIER 4 (OCR): Procesamiento de documentos manuscritos, box-free parsing
     { name: 'Nemotron-OCR-v1', key: 'NVIDIA_API_KEY', provider: 'nemotron-ocr', tier: 'ocr' },
@@ -108,7 +116,7 @@ export function crearAdapterLLM(): ILLMAdapter {
     for (const config of poolConfig) {
       if (process.env[config.key] || (config.key.includes('NVIDIA_') && process.env['NVIDIA_API_KEY'])) {
         try {
-          const adapter = buildAdapter(config.provider)
+          const adapter = buildAdapter(config.provider, config.model)
           pool.push({ name: config.name, adapter, tier: config.tier })
         } catch (e) {
            console.warn(`[llm] Saltando ${config.name} por error de inicialización`)

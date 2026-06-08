@@ -14,23 +14,34 @@ export interface GeminiAdapterConfig {
 
 export class GeminiAdapter implements ILLMAdapter {
   readonly #sdk: InstanceType<typeof GoogleGenerativeAI>
-  readonly #model: string
+  // Cuando el caller pasa `model` explícito en el constructor, esa elección
+  // GANA sobre el mapeo por tier. Permite tener varios GeminiAdapter en el
+  // pool con modelos distintos (ej. gemini-3.1-flash-lite primario,
+  // gemini-3-flash secundario) para sobrevivir cuotas por modelo.
+  readonly #explicitModel: string | undefined
+  readonly #defaultModel: string
 
   constructor(config: GeminiAdapterConfig) {
-    this.#model = config.model ?? process.env['GEMINI_MODEL'] ?? 'gemini-2.5-flash' // ACTUALIZADO: Modelo por defecto actualizado a gemini-2.5-flash según D3
+    this.#explicitModel = config.model
+    this.#defaultModel = process.env['GEMINI_MODEL'] ?? 'gemini-2.5-flash'
     this.#sdk = config.sdkClient ?? new GoogleGenerativeAI(config.apiKey)
   }
 
   async generarTexto(userContent: string, opciones: LLMGeneracionOpciones): Promise<string> {
-    let activeModel = this.#model
-    if (opciones.modelClass === 'fast') {
-    activeModel = process.env['GEMINI_FAST_MODEL'] ?? 'gemini-2.5-flash'
-    } else if (opciones.modelClass === 'reasoning') {
-    activeModel = process.env['GEMINI_PRO_MODEL'] ?? 'gemini-2.5-pro'
-    } else if (opciones.modelClass === 'ultra') {
-    activeModel = process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro' // Modalidad multimodal robusta
-    } else if (opciones.modelClass === 'ocr') {
-    activeModel = process.env['GEMINI_OCR_MODEL'] ?? process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro' // Fallback multimodal
+    let activeModel: string
+    if (this.#explicitModel) {
+      activeModel = this.#explicitModel
+    } else {
+      activeModel = this.#defaultModel
+      if (opciones.modelClass === 'fast') {
+        activeModel = process.env['GEMINI_FAST_MODEL'] ?? 'gemini-2.5-flash'
+      } else if (opciones.modelClass === 'reasoning') {
+        activeModel = process.env['GEMINI_PRO_MODEL'] ?? 'gemini-2.5-pro'
+      } else if (opciones.modelClass === 'ultra') {
+        activeModel = process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro'
+      } else if (opciones.modelClass === 'ocr') {
+        activeModel = process.env['GEMINI_OCR_MODEL'] ?? process.env['GEMINI_ULTRA_MODEL'] ?? 'gemini-1.5-pro'
+      }
     }
 
     const trace = langfuse.trace({ id: opciones.traceId })
