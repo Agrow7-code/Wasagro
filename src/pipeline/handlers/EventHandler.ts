@@ -186,9 +186,19 @@ export async function handleEvento(
     const imagenPath = await subirImagenEvento(media.base64, media.mimeType, usuario.finca_id ?? 'sin-finca')
 
     try {
-      const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId, msg.texto ?? undefined, costCtx)
+      // Detección de Sigatoka en dos vías PARALELAS (sin latencia extra):
+      // - detectarFichaSigatoka: pregunta binaria enfocada, fiable para leer el
+      //   título Dole/LOGBAN que el clasificador multiopción se pierde.
+      // - clasificarTipoImagen: clasificador general para el resto de imágenes.
+      // El `true` del detector binario gana: rutea directo al extractor (tier
+      // ultra/Gemini, sano) y evita el OCR genérico.
+      const [esSigatoka, tipoBase] = await Promise.all([
+        _llm!.detectarFichaSigatoka(media.base64, media.mimeType, traceId, costCtx),
+        _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId, msg.texto ?? undefined, costCtx),
+      ])
+      const tipoImagen = esSigatoka ? 'muestreo_sigatoka_banano' : tipoBase
 
-      langfuse.trace({ id: traceId }).event({ name: 'imagen_clasificada', input: { tipo: tipoImagen } })
+      langfuse.trace({ id: traceId }).event({ name: 'imagen_clasificada', input: { tipo: tipoImagen, detector_sigatoka: esSigatoka, tipo_base: tipoBase } })
 
       // Fast path: clasificador detectó visualmente un formulario Sigatoka.
       // Salteamos el OCR genérico (no transcribe matrices fiablemente) y vamos
@@ -221,7 +231,7 @@ export async function handleEvento(
             tipo_documento: 'muestreo_sigatoka_banano',
             sigatoka,
             caption: msg.texto ?? null,
-            classifier_source: 'sp-03c_direct',
+            classifier_source: esSigatoka ? 'sp-03g_binary' : 'sp-03c_direct',
           },
           descripcion_raw: descripcionRaw,
           confidence_score: sigatoka.confidenceScore,

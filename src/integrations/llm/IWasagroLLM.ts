@@ -35,6 +35,7 @@ export interface IWasagroLLM {
   describirImagenVisual(imageUrl: string, traceId: string, costCtx?: CostContext): Promise<string>
   diagnosticarSintomaV2VK(descripcionVisual: string, contextoRAG: string, input: EntradaEvento, traceId: string, costCtx?: CostContext): Promise<DiagnosticoV2VK>
   clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string, costCtx?: CostContext): Promise<TipoImagen>
+  detectarFichaSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<boolean>
   extraerDocumentoOCR(base64: string, mimeType: string, contexto: ContextoOCR, traceId: string, costCtx?: CostContext): Promise<ResultadoOCR>
   extraerMuestreoSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<SigatokaMuestreo>
   evaluarCalidadFichaSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<CalidadSigatoka>

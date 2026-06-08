@@ -206,6 +206,35 @@ describe('WasagroAIAgent.clasificarTipoImagen — usa tier fast', () => {
   })
 })
 
+describe('WasagroAIAgent.detectarFichaSigatoka — detector binario enfocado', () => {
+  it('devuelve true cuando el modelo lee el título Sigatoka', async () => {
+    const mockResponse = JSON.stringify({ es_sigatoka: true, titulo_leido: 'MUESTREO DE SIGATOKA' })
+    const adapter = createMockAdapter(mockResponse)
+    const agent = new WasagroAIAgent(adapter, { trace: () => ({ generation: () => ({ end: vi.fn() }), event: vi.fn() }) } as any)
+
+    const es = await agent.detectarFichaSigatoka('base64data', 'image/jpeg', 'trace-sig-001')
+
+    expect(es).toBe(true)
+    const callOpts = (adapter.generarTexto as ReturnType<typeof vi.fn>).mock.calls[0][1] as LLMGeneracionOpciones
+    expect(callOpts.modelClass).toBe('fast')
+    expect(callOpts.imageBase64).toBe('base64data')
+  })
+
+  it('devuelve false cuando no es una ficha Sigatoka', async () => {
+    const adapter = createMockAdapter(JSON.stringify({ es_sigatoka: false, titulo_leido: null }))
+    const agent = new WasagroAIAgent(adapter, { trace: () => ({ generation: () => ({ end: vi.fn() }), event: vi.fn() }) } as any)
+
+    expect(await agent.detectarFichaSigatoka('base64data', 'image/jpeg', 'trace-sig-002')).toBe(false)
+  })
+
+  it('fallback a false si la respuesta del modelo es inválida', async () => {
+    const adapter = createMockAdapter('respuesta no-json basura')
+    const agent = new WasagroAIAgent(adapter, { trace: () => ({ generation: () => ({ end: vi.fn() }), event: vi.fn() }) } as any)
+
+    expect(await agent.detectarFichaSigatoka('base64data', 'image/jpeg', 'trace-sig-003')).toBe(false)
+  })
+})
+
 describe('LLMRouter — tier OCR fallback a ultra', () => {
   it('fallback a ultra cuando no hay adapters OCR', async () => {
     const { LLMRouter } = await import('../../../src/integrations/llm/LLMRouter.js')

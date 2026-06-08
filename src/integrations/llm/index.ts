@@ -105,6 +105,12 @@ export function crearAdapterLLM(): ILLMAdapter {
     { name: 'Qwen',          key: 'NVIDIA_QWEN_KEY', provider: 'qwen', tier: 'ultra' },
 
     // TIER 4 (OCR): Procesamiento de documentos manuscritos, box-free parsing
+    // Gemini PRIMARIO: los modelos NVIDIA de abajo devuelven 404 (IDs a verificar)
+    // y Kimi suele dar timeout. Sin un nodo sano acá, extraerDocumentoOCR tira y
+    // el usuario recibe "Tuve un error con tu imagen". Gemini multimodal cubre OCR
+    // de forma fiable; las opciones NVIDIA quedan como fallback para cuando sus
+    // IDs/keys estén corregidos. Ver ADR 007 (D11) — revisar IDs NVIDIA.
+    { name: 'Gemini-OCR', key: 'GEMINI_API_KEY', provider: 'gemini', tier: 'ocr', model: 'gemini-2.5-flash' },
     { name: 'Nemotron-OCR-v1', key: 'NVIDIA_API_KEY', provider: 'nemotron-ocr', tier: 'ocr' },
     { name: 'Kimi-K2.6', key: 'KIMI_K2_API_KEY', provider: 'kimi-k2', tier: 'ocr' },
     { name: 'DeepSeek-OCR', key: 'NVIDIA_OCR_KEY', provider: 'deepseek-ocr', tier: 'ocr' },

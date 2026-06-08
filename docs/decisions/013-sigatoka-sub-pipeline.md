@@ -156,3 +156,22 @@ foto WhatsApp
 3. **Una finca requiere umbrales agronómicos distintos** a los hardcodeados → parametrizar en una tabla `umbrales_agronomicos_finca` (extensión natural de D18).
 4. **`MARCADORES_SIGATOKA` genera falsos positivos** sobre documentos no-Sigatoka → endurecer reglas (combinaciones obligatorias) o subir threshold.
 5. **Volumen de muestreos** supera 100/semana por finca → considerar mover detección a sp-03c para ahorrar el OCR genérico previo (~$0.005 × N fotos).
+
+## Actualización 2026-06-08 — detección binaria `sp-03g` (Nivel A robusto) + Gemini primario en tier OCR
+
+**Contexto.** El primer test end-to-end con fichas Dole/LOGBAN reales (foto 1 A-MICHELI, foto 2 Viva Esperanza) destapó DOS fallas que impedían rutear al extractor:
+
+1. **El clasificador `sp-03c` nunca devolvía `muestreo_sigatoka_banano`.** Con 4 opciones y una imagen dominada por una tabla manuscrita densa, el modelo ancla en `documento_tabla` (probado con `gemini-3.1-flash-lite`, `gemini-2.5-flash`) o `otro` (`gemini-3-flash`). NO es fuerza de modelo ni legibilidad: el MISMO `gemini-3.1-flash-lite`, con un prompt binario enfocado ("¿el encabezado dice MUESTREO DE SIGATOKA/LOGBAN? sí/no"), lee el título perfecto en ambas fotos. El prompt multiopción, por más explícito que sea su PASO 0, diluye la señal del título.
+2. **El tier `ocr` estaba caído.** `nvidia/nemotron-ocr-v1`, `deepseek-ai/deepseek-ocr-v2`, `nvidia/internvl-3.0-78b` → 404; Kimi-K2.6 → timeout. `extraerDocumentoOCR` tiraba `LLMError` y el usuario recibía "Tuve un error con tu imagen". El fallback `ultra→ocr` de `index.ts` no disparaba porque los adapters OCR SÍ estaban registrados (fallan en runtime, no en init).
+
+**Decisión.**
+
+- **Detector binario `detectarFichaSigatoka`** (`prompts/sp-03g-detector-sigatoka.md`, tier `fast`, fallback `false`). Una sola pregunta sí/no. Se corre en `Promise.all` junto a `clasificarTipoImagen` en `EventHandler` (sin latencia extra); su `true` gana → `tipoImagen = 'muestreo_sigatoka_banano'` → ruta directa al extractor (tier `ultra`/Gemini, sano), **evitando por completo el OCR genérico**. `classifier_source` registra `sp-03g_binary` vs `sp-03c_direct`.
+- `detectarFormularioSigatoka` (Nivel B, keyword sobre el OCR) queda como red de seguridad terciaria; ya casi nunca se ejerce porque el Nivel A binario resuelve antes.
+- **Gemini-OCR primario en tier `ocr`** (`gemini-2.5-flash` antes de los NVIDIA en `index.ts`) + `timeoutMs: 35_000` en `extraerDocumentoOCR` para que complete en un intento (sin apilar 3 reintentos ~76s). Esto repara el OCR genérico para CUALQUIER documento, no solo Sigatoka.
+
+**Consecuencias.**
+- Sigatoka ahora se detecta de forma fiable y rápida; el extractor (Gemini ultra) no depende del tier OCR muerto.
+- Validado contra foto 1 y foto 2: ambas → `muestreo_sigatoka_banano` (`detector_binario=true`).
+- **Pendiente:** los IDs NVIDIA del tier OCR siguen dando 404 — verificar nombres correctos en el catálogo NVIDIA NIM (ver D11/ADR 007). El OCR genérico de tablas muy densas con Gemini ronda los ~30s (límite de P3); aceptable como piso, optimizable.
+- Costo: el detector binario agrega 1 llamada `fast` por imagen, pero corre en paralelo (sin latencia) y para Sigatoka ahorra el OCR genérico previo. Neto favorable.

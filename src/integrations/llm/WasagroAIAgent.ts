@@ -370,6 +370,40 @@ export class WasagroAIAgent implements IWasagroLLM {
     return result.tipo
   }
 
+  // Detector binario enfocado de ficha Sigatoka. Existe porque el clasificador
+  // multiopción (sp-03c) ancla en `documento_tabla` con fichas Dole/LOGBAN: con
+  // 4 opciones y una imagen dominada por una tabla densa, el modelo ignora el
+  // título impreso. Una sola pregunta sí/no (sp-03g) SÍ lee el título de forma
+  // fiable con el mismo modelo. Se corre en paralelo a clasificarTipoImagen y
+  // su `true` gana. Fallback = false: nunca fuerza la ruta Sigatoka por error.
+  async detectarFichaSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<boolean> {
+    const promptName = 'sp-03g-detector-sigatoka.md'
+    const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+
+    const DetectarSigatokaSchema = z.object({
+      es_sigatoka: z.boolean(),
+      titulo_leido: z.string().nullable().optional(),
+    })
+
+    const result = await runTypedClassifier({
+      adapter: this.#adapter,
+      systemPrompt: prompt,
+      userContent: '¿Es un formulario de muestreo de Sigatoka?',
+      schema: DetectarSigatokaSchema,
+      traceId,
+      classifierName: 'detectar_ficha_sigatoka',
+      fallback: { es_sigatoka: false },
+      modelClass: 'fast',
+      temperature: 0,
+      imageBase64: base64,
+      imageMimeType: mimeType,
+      langfuseClient: this.#lf,
+      promptClient: PromptManager.getPromptClient(promptName),
+      ...this.#costOpts(costCtx),
+    })
+    return result.es_sigatoka
+  }
+
   // Pase de calidad liviano (tier fast) ANTES de la extracción pesada de
   // Sigatoka. Decide cortada/borrosa/legible. Si el gate mismo falla, el
   // fallback DEJA PASAR — nunca bloqueamos por una falla del control.
@@ -439,6 +473,10 @@ export class WasagroAIAgent implements IWasagroLLM {
         traceId,
         generationName: `ocr_documento_attempt_${attempt}`,
         modelClass: 'ocr',
+        // El OCR de tablas densas con Gemini puede pasar el default de 20s del
+        // router. Sin margen, se corta y reintenta 3 veces (~76s). Con 35s
+        // completa en el primer intento (~30s) y no apila reintentos.
+        timeoutMs: 35_000,
         ...this.#costOpts(costCtx),
       })
 
