@@ -6,10 +6,12 @@ import type { ClasificacionExcel, EntradaClasificacionExcel } from '../../types/
 import type { DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import type { ResultadoOCR } from '../../types/dominio/OCR.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
+import type { CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
 
 // Re-exportar tipos para uso en otros módulos
 export type { ResultadoOCR } from '../../types/dominio/OCR.js'
 export type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
+export type { CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
 
 export type TipoImagen = 'plaga_cultivo' | 'documento_tabla' | 'muestreo_sigatoka_banano' | 'otro'
 
@@ -35,6 +37,7 @@ export interface IWasagroLLM {
   clasificarTipoImagen(base64: string, mimeType: string, traceId: string, caption?: string, costCtx?: CostContext): Promise<TipoImagen>
   extraerDocumentoOCR(base64: string, mimeType: string, contexto: ContextoOCR, traceId: string, costCtx?: CostContext): Promise<ResultadoOCR>
   extraerMuestreoSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<SigatokaMuestreo>
+  evaluarCalidadFichaSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<CalidadSigatoka>
   onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding>
   onboardarAgricultor(mensaje: string, contexto: ContextoOnboardingAgricultor, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding>
   resumirSemana(entrada: EntradaResumenSemanal, traceId: string, costCtx?: CostContext): Promise<ResumenSemanal>

@@ -25,7 +25,9 @@ import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
-import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary } from './SigatokaHandler.js'
+import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes } from './SigatokaHandler.js'
+import { evaluarCalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
+import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
 
 async function resolverMediaImagen(msg: NormalizedMessage, traceId: string): Promise<{ base64: string; mimeType: string } | null> {
   if (msg.mediaBase64) return { base64: msg.mediaBase64, mimeType: msg.mediaMimetype ?? 'image/jpeg' }
@@ -176,6 +178,12 @@ export async function handleEvento(
     const finca = usuario.finca_id ? await getFincaById(usuario.finca_id) : null
     const lotes = usuario.finca_id ? await getLotesByFinca(usuario.finca_id) : []
     const lista_lotes = lotes.map(l => `- ${l.lote_id}: "${l.nombre_coloquial}"`).join('\n') || 'Sin lotes'
+    const lotesRef = lotes.map(l => ({ lote_id: l.lote_id, nombre: l.nombre_coloquial ?? '' }))
+
+    // Persistir la imagen original ANTES de extraer. Es el "raw" auditable del
+    // evento (P5) y el insumo para revisión humana / re-captura. Nunca bloquea:
+    // si Storage falla, imagenPath queda null y el evento se guarda igual (P4).
+    const imagenPath = await subirImagenEvento(media.base64, media.mimeType, usuario.finca_id ?? 'sin-finca')
 
     try {
       const tipoImagen = await _llm!.clasificarTipoImagen(media.base64, media.mimeType, traceId, msg.texto ?? undefined, costCtx)
@@ -188,7 +196,19 @@ export async function handleEvento(
       if (tipoImagen === 'muestreo_sigatoka_banano') {
         langfuse.trace({ id: traceId }).event({ name: 'sigatoka_form_detected', input: { source: 'classifier_direct' } })
 
+        // Pase de calidad ANTES de la extracción pesada: si la foto está cortada
+        // o ilegible, pedimos otra y no gastamos el extractor ni guardamos basura.
+        const calidad = await _llm!.evaluarCalidadFichaSigatoka(media.base64, media.mimeType, traceId, costCtx)
+        const veredicto = evaluarCalidadSigatoka(calidad)
+        if (!veredicto.aceptable) {
+          langfuse.trace({ id: traceId }).event({ name: 'sigatoka_recaptura', input: { problema: veredicto.problema, motivo: calidad.motivo } })
+          await _sender!.enviarTexto(msg.from, veredicto.mensaje ?? 'No pude leer bien la foto. ¿Puedes mandarla de nuevo? ⚠️')
+          await actualizarMensaje(mensajeId, { status: 'processed' })
+          return
+        }
+
         const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
+        sigatoka.puntosMuestreo = mapearSectoresALotes(sigatoka.puntosMuestreo, lotesRef)
         const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
         const descripcionRaw = buildDescripcionRaw(sigatoka)
 
@@ -206,6 +226,7 @@ export async function handleEvento(
           descripcion_raw: descripcionRaw,
           confidence_score: sigatoka.confidenceScore,
           requiere_validacion: sigatoka.requiereValidacion,
+          imagen_path: imagenPath,
           created_by: usuario.id,
           mensaje_id: mensajeId,
         })
@@ -229,6 +250,7 @@ export async function handleEvento(
           langfuse.trace({ id: traceId }).event({ name: 'sigatoka_form_detected', input: { ocr_confianza: ocr.confianza_lectura } })
 
           const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
+          sigatoka.puntosMuestreo = mapearSectoresALotes(sigatoka.puntosMuestreo, lotesRef)
           const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
           const descripcionRaw = buildDescripcionRaw(sigatoka)
 
@@ -246,6 +268,7 @@ export async function handleEvento(
             descripcion_raw: descripcionRaw,
             confidence_score: sigatoka.confidenceScore,
             requiere_validacion: sigatoka.requiereValidacion,
+            imagen_path: imagenPath,
             created_by: usuario.id,
             mensaje_id: mensajeId,
           })
@@ -272,6 +295,7 @@ export async function handleEvento(
           descripcion_raw: ocr.texto_completo_visible || 'Documento fotografiado',
           confidence_score: ocr.confianza_lectura,
           requiere_validacion: ocr.confianza_lectura < 0.5,
+          imagen_path: imagenPath,
           created_by: usuario.id,
           mensaje_id: mensajeId,
         })
@@ -328,6 +352,7 @@ export async function handleEvento(
         descripcion_raw: descripcionVisual,
         confidence_score: diagnostico.confianza,
         requiere_validacion: diagnostico.confianza < 0.6,
+        imagen_path: imagenPath,
         created_by: usuario.id,
         mensaje_id: mensajeId,
       })
@@ -351,6 +376,7 @@ export async function handleEvento(
         descripcion_raw: 'Error procesando imagen',
         confidence_score: 0,
         requiere_validacion: true,
+        imagen_path: imagenPath,
         created_by: usuario.id,
         mensaje_id: mensajeId,
       })

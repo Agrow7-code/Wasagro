@@ -23,7 +23,8 @@ import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal }
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
 import { SigatokaMuestreoSchema, type SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
-import { calcularResumen, detectarCamposDudosos } from '../../pipeline/handlers/SigatokaHandler.js'
+import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -369,6 +370,32 @@ export class WasagroAIAgent implements IWasagroLLM {
     return result.tipo
   }
 
+  // Pase de calidad liviano (tier fast) ANTES de la extracción pesada de
+  // Sigatoka. Decide cortada/borrosa/legible. Si el gate mismo falla, el
+  // fallback DEJA PASAR — nunca bloqueamos por una falla del control.
+  async evaluarCalidadFichaSigatoka(base64: string, mimeType: string, traceId: string, costCtx?: CostContext): Promise<CalidadSigatoka> {
+    const promptName = 'sp-03f-calidad-sigatoka.md'
+    const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+
+    return runTypedClassifier({
+      adapter: this.#adapter,
+      systemPrompt: prompt,
+      userContent: 'Evalúa la calidad de esta foto de formulario de Sigatoka.',
+      schema: CalidadSigatokaSchema,
+      traceId,
+      classifierName: 'calidad_ficha_sigatoka',
+      fallback: CALIDAD_FALLBACK_PASA,
+      modelClass: 'fast',
+      temperature: 0,
+      imageBase64: base64,
+      imageMimeType: mimeType,
+      langfuseClient: this.#lf,
+      generationInput: { formulario: 'muestreo_sigatoka_banano' },
+      promptClient: PromptManager.getPromptClient(promptName),
+      ...this.#costOpts(costCtx),
+    })
+  }
+
   async extraerDocumentoOCR(
     base64: string,
     mimeType: string,
@@ -472,6 +499,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     const generation = trace.generation(genOpts as any)
 
     let lastZodErrors: string | null = null
+    let lastJson: any = null
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const userContent = attempt === 0
@@ -486,10 +514,16 @@ export class WasagroAIAgent implements IWasagroLLM {
           imageMimeType: mimeType,
           traceId,
           generationName: `sigatoka_attempt_${attempt}`,
-          modelClass: 'ocr',
-          // Schema denso (matriz 19×3 + plantas 11 sem + plagas) + prompt
-          // detallado → Kimi necesita ~25-35s. 45s da margen sin pegar el SLA.
-          timeoutMs: 45_000,
+          // Tier 'ultra' = Gemini-3.1-FL/3-F/2.5-F como primarios (multimodal
+          // nativo + temp baja + respeta JSON schemas + 500 RPD propio).
+          // Kimi-K2.6 (tier 'ocr', temp=1.0) fue probado 3 veces: devolvió
+          // placeholders meta, JSONs que fallan Zod, y timeouts cuando se
+          // intentaba retry. Para schema denso (matriz 19×3 + plantas 11sem
+          // + fórmulas A..M) necesitamos un modelo determinístico, no random.
+          modelClass: 'ultra',
+          // Gemini Flash típicamente 5-15s para vision + JSON estructurado.
+          // 30s da margen para casos complejos sin pegar fuerte el SLA P3.
+          timeoutMs: 30_000,
           ...this.#costOpts(costCtx),
         })
 
@@ -500,18 +534,14 @@ export class WasagroAIAgent implements IWasagroLLM {
           trace.event({ name: 'sigatoka_parse_error', level: 'WARNING', input: { attempt, raw: texto.slice(0, 120) } })
           continue
         }
+        lastJson = json
 
-        try {
-          json.resumen = calcularResumen(json.resumen)
-        } catch (err) {
-          lastZodErrors = `calcularResumen falló: ${String(err)}`
-          trace.event({ name: 'sigatoka_calc_error', level: 'WARNING', input: { attempt, error: String(err) } })
-          continue
-        }
+        // Recálculo determinista por columna (null-safe: no tira aunque falte A).
+        json.resumenColumnas = (json.resumenColumnas ?? []).map(calcularColumna)
 
         const camposDudosos = [
           ...(json.camposDudosos ?? []),
-          ...detectarCamposDudosos(json.resumen),
+          ...detectarCamposDudosos(json.resumenColumnas),
         ]
 
         const parsed = SigatokaMuestreoSchema.safeParse({
@@ -529,17 +559,19 @@ export class WasagroAIAgent implements IWasagroLLM {
         trace.event({ name: 'sigatoka_zod_retry', level: 'WARNING', input: { attempt, errors: lastZodErrors } })
 
       } catch (err) {
+        // Error de adapter/red. NO lanzamos: en el último intento caemos al
+        // fallback graceful como cualquier otra falla (P1/P4 — nunca silencio).
+        lastZodErrors = lastZodErrors ?? `error de extracción: ${String(err)}`
         trace.event({ name: 'sigatoka_attempt_error', level: 'ERROR', input: { attempt, error: String(err) } })
-        if (attempt === MAX_RETRIES) {
-          generation.end({ output: String(err), level: 'ERROR' })
-          throw new LLMError('GROQ_ERROR', `Error extrayendo muestreo de Sigatoka tras ${MAX_RETRIES + 1} intentos: ${String(err)}`, err)
-        }
       }
     }
 
+    // Agotados los reintentos: rescatamos lo que se pudo leer y marcamos
+    // requires_review en vez de tirar excepción (el caller persiste igual).
     trace.event({ name: 'sigatoka_zod_exhausted', level: 'ERROR', input: { final_errors: lastZodErrors } })
-    generation.end({ output: { zod_valid: false, attempts: MAX_RETRIES + 1, errors: lastZodErrors }, level: 'ERROR' })
-    throw new LLMError('GROQ_ERROR', `Validación de muestreo Sigatoka falló tras ${MAX_RETRIES + 1} intentos. Último error: ${lastZodErrors}`)
+    const fallback = construirFallbackSigatoka(lastJson, lastZodErrors)
+    generation.end({ output: { zod_valid: false, attempts: MAX_RETRIES + 1, errors: lastZodErrors, fallback: true }, level: 'WARNING' })
+    return fallback
   }
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding> {
