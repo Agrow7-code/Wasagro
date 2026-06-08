@@ -64,10 +64,11 @@ export class LLMRouter implements ILLMAdapter {
       }
 
       const t0 = Date.now()
+      const effectiveTimeout = opciones.timeoutMs ?? ADAPTER_TIMEOUT_MS
 
       try {
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`adapter_timeout_${ADAPTER_TIMEOUT_MS}ms`)), ADAPTER_TIMEOUT_MS)
+          setTimeout(() => reject(new Error(`adapter_timeout_${effectiveTimeout}ms`)), effectiveTimeout)
         )
         
         // Ejecución competitiva con timeout

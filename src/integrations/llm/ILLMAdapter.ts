@@ -22,6 +22,10 @@ export interface LLMGeneracionOpciones {
   tools?: ToolDef[]
   orgId?: string
   fincaId?: string
+  // Override del timeout del router. Default = 20s (LLMRouter.ADAPTER_TIMEOUT_MS).
+  // Subir solo para cargas que legítimamente necesitan más: extractores con
+  // schema pesado, prompts densos. Pasar el límite degrada la latencia P3.
+  timeoutMs?: number
 }
 
 export interface ILLMAdapter {

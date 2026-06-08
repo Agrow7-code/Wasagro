@@ -487,6 +487,9 @@ export class WasagroAIAgent implements IWasagroLLM {
           traceId,
           generationName: `sigatoka_attempt_${attempt}`,
           modelClass: 'ocr',
+          // Schema denso (matriz 19×3 + plantas 11 sem + plagas) + prompt
+          // detallado → Kimi necesita ~25-35s. 45s da margen sin pegar el SLA.
+          timeoutMs: 45_000,
           ...this.#costOpts(costCtx),
         })
 
