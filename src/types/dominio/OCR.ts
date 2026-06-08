@@ -27,7 +27,7 @@ export const RegistroOCRSchema = z.object({
 export type RegistroOCR = z.infer<typeof RegistroOCRSchema>
 
 export const ResultadoOCRSchema = z.object({
-  tipo_documento: z.enum(['planilla_aplicacion', 'registro_cosecha', 'registro_gastos', 'cuaderno_campo', 'otro']),
+  tipo_documento: z.enum(['planilla_aplicacion', 'registro_cosecha', 'registro_gastos', 'cuaderno_campo', 'muestreo_sigatoka_banano', 'otro']),
   fecha_documento: z.string().nullable(),
   registros: z.array(RegistroOCRSchema),
   texto_completo_visible: z.string().min(0),
@@ -42,6 +42,7 @@ export const TipoDocumentoOCRSchema = z.enum([
   'registro_cosecha',
   'registro_gastos',
   'cuaderno_campo',
+  'muestreo_sigatoka_banano',
   'otro',
 ])
 

@@ -22,6 +22,8 @@ import {
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
+import { SigatokaMuestreoSchema, type SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
+import { calcularResumen, detectarCamposDudosos } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -452,6 +454,89 @@ export class WasagroAIAgent implements IWasagroLLM {
     const fallback = construirFallbackOCR(lastJson, lastZodErrors)
     generation.end({ output: { tipo_documento: fallback.tipo_documento, n_registros: fallback.registros.length, confianza: fallback.confianza_lectura, zod_valid: false, attempts: MAX_OCR_RETRIES + 1 } })
     return fallback
+  }
+
+  async extraerMuestreoSigatoka(
+    base64: string,
+    mimeType: string,
+    traceId: string,
+    costCtx?: CostContext,
+  ): Promise<SigatokaMuestreo> {
+    const MAX_RETRIES = 2
+    const trace = this.#lf.trace({ id: traceId })
+    const promptName = 'sp-03e-muestreo-sigatoka.md'
+    const rawPrompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+    const genOpts: Record<string, unknown> = { name: 'sigatoka_extraction', model: 'wasagro-ocr-tier', input: { formulario: 'muestreo_sigatoka_banano' } }
+    const pc = PromptManager.getPromptClient(promptName)
+    if (pc) genOpts['prompt'] = pc
+    const generation = trace.generation(genOpts as any)
+
+    let lastZodErrors: string | null = null
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const userContent = attempt === 0
+        ? 'Extrae los datos de este formulario de muestreo de Sigatoka.'
+        : `Corrección requerida (intento ${attempt}/${MAX_RETRIES}). Tu respuesta anterior falló la validación. Errores: ${lastZodErrors}. Devuelve el JSON COMPLETO corregido siguiendo el schema del system prompt.`
+
+      try {
+        const raw = await this.#adapter.generarTexto(userContent, {
+          systemPrompt: rawPrompt,
+          responseFormat: 'json_object',
+          imageBase64: base64,
+          imageMimeType: mimeType,
+          traceId,
+          generationName: `sigatoka_attempt_${attempt}`,
+          modelClass: 'ocr',
+          ...this.#costOpts(costCtx),
+        })
+
+        const texto = raw.replace(/```json|```/g, '').trim()
+        let json: any
+        try { json = JSON.parse(texto) } catch {
+          lastZodErrors = `JSON inválido: ${texto.slice(0, 120)}`
+          trace.event({ name: 'sigatoka_parse_error', level: 'WARNING', input: { attempt, raw: texto.slice(0, 120) } })
+          continue
+        }
+
+        try {
+          json.resumen = calcularResumen(json.resumen)
+        } catch (err) {
+          lastZodErrors = `calcularResumen falló: ${String(err)}`
+          trace.event({ name: 'sigatoka_calc_error', level: 'WARNING', input: { attempt, error: String(err) } })
+          continue
+        }
+
+        const camposDudosos = [
+          ...(json.camposDudosos ?? []),
+          ...detectarCamposDudosos(json.resumen),
+        ]
+
+        const parsed = SigatokaMuestreoSchema.safeParse({
+          ...json,
+          requiereValidacion: camposDudosos.length > 0 || (json.confidenceScore ?? 0) < 0.75,
+          camposDudosos,
+        })
+
+        if (parsed.success) {
+          generation.end({ output: { semana: parsed.data.semana, finca: parsed.data.nombreFinca, confianza: parsed.data.confidenceScore, requiere_validacion: parsed.data.requiereValidacion, n_dudosos: camposDudosos.length, attempts: attempt + 1 } })
+          return parsed.data
+        }
+
+        lastZodErrors = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+        trace.event({ name: 'sigatoka_zod_retry', level: 'WARNING', input: { attempt, errors: lastZodErrors } })
+
+      } catch (err) {
+        trace.event({ name: 'sigatoka_attempt_error', level: 'ERROR', input: { attempt, error: String(err) } })
+        if (attempt === MAX_RETRIES) {
+          generation.end({ output: String(err), level: 'ERROR' })
+          throw new LLMError('GROQ_ERROR', `Error extrayendo muestreo de Sigatoka tras ${MAX_RETRIES + 1} intentos: ${String(err)}`, err)
+        }
+      }
+    }
+
+    trace.event({ name: 'sigatoka_zod_exhausted', level: 'ERROR', input: { final_errors: lastZodErrors } })
+    generation.end({ output: { zod_valid: false, attempts: MAX_RETRIES + 1, errors: lastZodErrors }, level: 'ERROR' })
+    throw new LLMError('GROQ_ERROR', `Validación de muestreo Sigatoka falló tras ${MAX_RETRIES + 1} intentos. Último error: ${lastZodErrors}`)
   }
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding> {

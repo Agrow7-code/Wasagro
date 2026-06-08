@@ -25,6 +25,7 @@ import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
+import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary } from './SigatokaHandler.js'
 
 async function resolverMediaImagen(msg: NormalizedMessage, traceId: string): Promise<{ base64: string; mimeType: string } | null> {
   if (msg.mediaBase64) return { base64: msg.mediaBase64, mimeType: msg.mediaMimetype ?? 'image/jpeg' }
@@ -187,6 +188,39 @@ export async function handleEvento(
         cultivo_principal: finca?.cultivo_principal ?? undefined,
         lista_lotes,
       }, traceId, costCtx)
+
+        // Sub-clasificación: el OCR genérico ya extrajo el texto. Si contiene marcadores
+        // del formulario de muestreo de Sigatoka, ramificamos al extractor especializado
+        // (sp-03e). Si no, seguimos con la persistencia del OCR genérico.
+        if (detectarFormularioSigatoka(ocr.texto_completo_visible)) {
+          langfuse.trace({ id: traceId }).event({ name: 'sigatoka_form_detected', input: { ocr_confianza: ocr.confianza_lectura } })
+
+          const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
+          const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
+          const descripcionRaw = buildDescripcionRaw(sigatoka)
+
+          const eventoId = await saveEvento({
+            finca_id: usuario.finca_id!,
+            lote_id: null,
+            tipo_evento: 'observacion',
+            status: sigatoka.requiereValidacion ? 'requires_review' : 'complete',
+            datos_evento: {
+              tipo_documento: 'muestreo_sigatoka_banano',
+              sigatoka,
+              caption: msg.texto ?? null,
+              texto_ocr_origen: ocr.texto_completo_visible,
+            },
+            descripcion_raw: descripcionRaw,
+            confidence_score: sigatoka.confidenceScore,
+            requiere_validacion: sigatoka.requiereValidacion,
+            created_by: usuario.id,
+            mensaje_id: mensajeId,
+          })
+
+          await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
+          await _sender!.enviarTexto(msg.from, buildWhatsappSummary(sigatoka, camposAclarar))
+          return
+        }
 
         const eventoId = await saveEvento({
           finca_id: usuario.finca_id!,
