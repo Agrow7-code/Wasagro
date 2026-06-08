@@ -345,7 +345,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     )
 
     const ClasificarImagenSchema = z.object({
-      tipo: z.enum(['plaga_cultivo', 'documento_tabla', 'otro']),
+      tipo: z.enum(['plaga_cultivo', 'documento_tabla', 'muestreo_sigatoka_banano', 'otro']),
       confianza: z.number().min(0).max(1).optional(),
     })
 

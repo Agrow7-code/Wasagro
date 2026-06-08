@@ -11,7 +11,7 @@ import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 export type { ResultadoOCR } from '../../types/dominio/OCR.js'
 export type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 
-export type TipoImagen = 'plaga_cultivo' | 'documento_tabla' | 'otro'
+export type TipoImagen = 'plaga_cultivo' | 'documento_tabla' | 'muestreo_sigatoka_banano' | 'otro'
 
 export interface ContextoOCR {
   finca_nombre?: string | undefined

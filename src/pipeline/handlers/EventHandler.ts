@@ -182,6 +182,39 @@ export async function handleEvento(
 
       langfuse.trace({ id: traceId }).event({ name: 'imagen_clasificada', input: { tipo: tipoImagen } })
 
+      // Fast path: clasificador detectó visualmente un formulario Sigatoka.
+      // Salteamos el OCR genérico (no transcribe matrices fiablemente) y vamos
+      // directo al extractor sp-03e. Ahorra ~8-14s + 1 llamada LLM.
+      if (tipoImagen === 'muestreo_sigatoka_banano') {
+        langfuse.trace({ id: traceId }).event({ name: 'sigatoka_form_detected', input: { source: 'classifier_direct' } })
+
+        const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
+        const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
+        const descripcionRaw = buildDescripcionRaw(sigatoka)
+
+        const eventoId = await saveEvento({
+          finca_id: usuario.finca_id!,
+          lote_id: null,
+          tipo_evento: 'observacion',
+          status: sigatoka.requiereValidacion ? 'requires_review' : 'complete',
+          datos_evento: {
+            tipo_documento: 'muestreo_sigatoka_banano',
+            sigatoka,
+            caption: msg.texto ?? null,
+            classifier_source: 'sp-03c_direct',
+          },
+          descripcion_raw: descripcionRaw,
+          confidence_score: sigatoka.confidenceScore,
+          requiere_validacion: sigatoka.requiereValidacion,
+          created_by: usuario.id,
+          mensaje_id: mensajeId,
+        })
+
+        await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
+        await _sender!.enviarTexto(msg.from, buildWhatsappSummary(sigatoka, camposAclarar))
+        return
+      }
+
       if (tipoImagen === 'documento_tabla') {
       const ocr = await _llm!.extraerDocumentoOCR(media.base64, media.mimeType, {
         finca_nombre: finca?.nombre,
