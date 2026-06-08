@@ -23,32 +23,51 @@ Si hay texto, úsalo como señal primaria para clasificar. La imagen confirma o 
 | `documento_tabla` | Foto de papel, cuaderno, planilla, formato impreso o manuscrito con datos, tabla, lista de números, registros escritos a mano (que NO sea un formulario Sigatoka) |
 | `otro` | Persona, paisaje, objeto no agrícola, imagen irreconocible, o cuando no hay suficiente información para clasificar |
 
-## Señas visuales del formulario de muestreo de Sigatoka (`muestreo_sigatoka_banano`)
+## PASO 0 — LEÉ EL TÍTULO PRIMERO (regla decisiva)
 
-Es un formulario MUY específico de la industria bananera. Lo identificás si la imagen muestra TRES o más de estos elementos visuales:
+ANTES de cualquier otra cosa, leé el TEXTO IMPRESO del encabezado de la imagen.
+Si en el título/encabezado aparece CUALQUIERA de estas palabras impresas:
 
-1. **Título** que contiene "MUESTREO DE SIGATOKA", "LOGBAN", o "SIGATOKA NEGRA" (con o sin logo de exportadora arriba — Dole, Chiquita, etc.)
-2. **Matriz numerada de puntos de muestreo**: filas etiquetadas P1, P2, P3 ... hasta P19 o P24 aproximadamente
-3. **Columnas con encabezados técnicos** como `H`, `H+VLE`, `H+VLQ<5%`, `FUNC`, `EF PAS`, `EF ACT`, `N/V`, `EE2`, `EE3`
-4. **Valores con paréntesis** dentro de las celdas (ejemplo: "2(3)", "4(7)") — son estadios de Sigatoka con piscas
-5. **Sección "Plagas foliares"** con nombres como `CERAMIDA`, `SIBINE`
-6. **Bloque de fórmulas** al pie con letras A, B, C, D, E, F, G, H, I, J, K, L, M y porcentajes
+- "MUESTREO DE SIGATOKA"
+- "SIGATOKA" (negra o no)
+- "LOGBAN"
+- "MUESTREO ... PLANTAS DE 3 METROS Y PLAGAS"
 
-Si la imagen es un papel manuscrito con tablas PERO no tiene estas señas específicas (ejemplo: una planilla de gastos, un registro de cosecha genérico, un cuaderno de campo común) → `documento_tabla`, NO `muestreo_sigatoka_banano`.
+→ entonces `tipo: "muestreo_sigatoka_banano"` con `confianza` alta. **CORTÁ ACÁ, no
+sigas analizando.** Este título es la señal más fuerte y casi nunca falla. La mayoría
+de las fichas llegan SIN texto del agricultor — no esperes un caption, leé la imagen.
+
+⚠️ ERROR FRECUENTE A EVITAR: una ficha de Sigatoka es una tabla manuscrita densa, así
+que es tentador llamarla `documento_tabla`. **NO.** Si tiene el título de Sigatoka, es
+`muestreo_sigatoka_banano`, aunque parezca una planilla cualquiera. No tomes el atajo.
+
+## Señas visuales adicionales (si el título no se lee claro)
+
+Si no pudiste leer el título, clasificá como `muestreo_sigatoka_banano` cuando veas
+DOS o más de estos elementos:
+
+1. **Matriz numerada de puntos**: filas P1, P2, P3 ... hasta ~P19 o P24
+2. **Columnas técnicas**: `H`, `H+VLE`, `H+VLQ<5%`, `FUNC`, `EF PAS`, `EF ACT`, `N/V`, `EE2`, `EE3`, `ESTADO EVOLUTIVO`
+3. **Valores con paréntesis** en las celdas ("2(3)", "4(7)") — estadios con piscas
+4. **Sección de plagas** con `CERAMIDA` y/o `SIBINE`
+5. **Bloque de fórmulas** A, B, C ... M con porcentajes
+6. **Logo de exportadora** (Dole, Chiquita) sobre una tabla técnica de banano
+
+Solo es `documento_tabla` (no Sigatoka) un papel manuscrito SIN título de Sigatoka y
+SIN estas señas: una planilla de gastos, un registro de cosecha común, un cuaderno.
 
 ## Orden de decisión
 
-1. ¿El agricultor dijo algo como "muestreo de Sigatoka", "logban", "formato de sigatoka"? → `muestreo_sigatoka_banano` (validar con la imagen)
-2. ¿La imagen muestra 3+ señas del formulario Sigatoka listadas arriba? → `muestreo_sigatoka_banano`
-3. ¿El agricultor dijo algo como "planilla", "registro", "tabla", "datos de esta semana", "anotaciones", "cuaderno"? → `documento_tabla`
-4. ¿Dijo algo como "mirá esta mancha", "hay una plaga", "está enfermo", "este insecto", "el fruto está mal"? → `plaga_cultivo`
-5. Si no hay texto o no es conclusivo → analizar la imagen:
-   - Formulario estructurado con las señas Sigatoka → `muestreo_sigatoka_banano`
-   - Papel/cuaderno/planilla genérica → `documento_tabla`
-   - Tejido vegetal, insectos, síntomas en planta → `plaga_cultivo`
-   - Ambiguo, borroso, sin contenido agrícola claro → `otro`
-
-En caso de duda genuina entre `plaga_cultivo` y `documento_tabla` sin texto de contexto: mirá si hay papel o soporte físico escrito → `documento_tabla`. Si es tejido vivo → `plaga_cultivo`. Si no podés determinar → `otro`.
+1. **¿El título dice SIGATOKA / LOGBAN? → `muestreo_sigatoka_banano`. FIN.** (PASO 0)
+2. ¿La imagen muestra 2+ señas Sigatoka de la lista? → `muestreo_sigatoka_banano`
+3. ¿El agricultor dijo "muestreo de sigatoka", "logban"? → `muestreo_sigatoka_banano`
+4. ¿Dijo "planilla", "registro", "datos de la semana", "cuaderno"? → `documento_tabla` (solo si NO hay señas Sigatoka)
+5. ¿Dijo "mirá esta mancha", "plaga", "está enfermo", "insecto"? → `plaga_cultivo`
+6. Sin texto → analizar la imagen:
+   - Título o señas de Sigatoka → `muestreo_sigatoka_banano`
+   - Papel/planilla genérica sin señas Sigatoka → `documento_tabla`
+   - Tejido vegetal, insectos, síntomas → `plaga_cultivo`
+   - Ambiguo, borroso, sin contenido agrícola → `otro`
 
 ## Salida (JSON estricto, nada más)
 
