@@ -1,6 +1,6 @@
-# 010 — Billing: Suscripción mensual fija con trial 30 días + Stripe / DeUna
+# 010 — Billing: Suscripción mensual fija con trial 30 días + dLocal Go / DeUna
 
-**Fecha:** 2026-06-06
+**Fecha:** 2026-06-06 (pasarela actualizada Stripe → dLocal Go el 2026-06-08)
 **Estado:** Aceptada
 **Decisiones relacionadas:** D26 (CLAUDE.md), D27 (costos), D28 (back-office)
 
@@ -8,7 +8,7 @@
 
 Wasagro no tiene forma de cobrar. `organizaciones.plan` es TEXT libre sin CHECK constraint — cualquier string es aceptado, no hay trial, no hay vencimiento, no hay pasarela de pago. Los clientes usan Wasagro gratis indefinidamente. Sin billing, no hay negocio.
 
-El modelo de cobro inicial es suscripción mensual fija. El éxito del analyst será monitorear constantemente para encontrar el modelo óptimo (flat, híbrido, pay-per-use) basado en data real de costos (D27) vs. revenue.
+El modelo de cobro inicial es suscripción mensual fija. El éxito será monitorear constantemente para encontrar el modelo óptimo (flat, híbrido, pay-per-use) basado en data real de costos (D27) vs. revenue.
 
 ## Decisión
 
@@ -38,47 +38,52 @@ Después de 30 días sin pago, se bloquea el acceso:
 
 ### Métodos de pago
 
-1. **Stripe** (internacional): Checkout Session → Subscription → Webhooks sincronizan estado. Stripe maneja retry, dunning, facturación.
-2. **DeUna** (Ecuador): Link de pago generado via API, enviado por WhatsApp. Webhook confirma pago.
-3. **Transferencia bancaria** (Ecuador): Cliente envía comprobante por WhatsApp → AI detecta intent `pago_subscription` → marca `requiere_validacion` → founder aprueba manualmente.
+1. **dLocal Go Transparent Checkout / SmartFields** (internacional). dLocal Go ≠ dLocal clásico:
+   - Auth: `Bearer <API_KEY>:<SECRET_KEY>` (sin HMAC, sin X-Login/X-Trans-Key).
+   - URLs: `https://api-sbx.dlocalgo.com` (sandbox), `https://api.dlocalgo.com` (live).
+   - Flow 2 pasos: (1) backend `POST /v1/payments` con `allow_transparent:true, allow_recurring:true` → `merchant_checkout_token`; (2) frontend tokeniza la tarjeta con SmartFields; (3) backend `POST /v1/payments/confirm/{checkoutToken}` con el card token. Si `confirm` devuelve `redirect_url` (3DS), el frontend redirige.
+   - Recurring: `POST /v1/payments/recurring/{merchant_checkout_token}` — el checkout token ES el recurring token.
+   - Webhooks: dLocal Go POSTea el payment object a la `notification_url` definida al crear el payment (`PAID`/`COMPLETED`/`REJECTED`/`DECLINED`/`CANCELLED`/`PENDING`).
+2. **DeUna** (Ecuador): link de pago generado vía API, enviado por WhatsApp. Webhook confirma pago.
+3. **Transferencia bancaria** (Ecuador): cliente envía comprobante por WhatsApp → AI detecta intent `pago_subscription` → marca `requiere_validacion` → founder aprueba manualmente (Rule 3).
 
 ### Cancelación
 
-- Cliente cancela desde dashboard o WhatsApp (intent `cancelar_subscription`)
-- Efecto al fin del período pagado (`cancel_at_period_end`)
-- No prorrateo
-- Org pasa a `free` — data se preserva, solo lectura
+- Cliente cancela desde dashboard o WhatsApp (intent `cancelar_subscription`).
+- Efecto al fin del período pagado (no prorrateo). Se setea `subscription_status='canceled'` y se limpia `dlocalgo_checkout_token`.
+- Org pasa a `free` al expirar — data se preserva, solo lectura.
 
 ### Schema cambios
 
-Campos nuevos en `organizaciones`:
+Campos en `organizaciones` (estado final tras migraciones 53 + 54):
 - `plan plan_org NOT NULL DEFAULT 'trial'` (enum reemplaza TEXT)
 - `trial_inicio TIMESTAMPTZ`
 - `trial_fin TIMESTAMPTZ` (generated: trial_inicio + 30 días)
-- `stripe_customer_id TEXT`
-- `stripe_subscription_id TEXT`
+- `dlocalgo_payment_id TEXT`
+- `dlocalgo_checkout_token TEXT`
 - `subscription_status TEXT` (`active`, `past_due`, `canceled`, `none`)
 - `plan_activo_desde TIMESTAMPTZ`
 - `plan_cancelado_en TIMESTAMPTZ`
-- `metodo_pago TEXT` (`stripe`, `deuna`, `transferencia`)
+- `metodo_pago TEXT` CHECK IN (`dlocalgo`, `deuna`, `transferencia`)
+
+### Implementación
+
+`src/integrations/dlocal/dlocalClient.ts` (Bearer auth, createPayment, confirmPayment, chargeRecurring, getSmartFieldsApiKey), `dlocalWebhookHandler.ts`, `src/integrations/deuna/deunaClient.ts`, `src/pipeline/handlers/BillingIntentHandler.ts`, `src/auth/planGuard.ts`, `landing/src/dashboard/views/BillingView.tsx`. Env: `DLOCALGO_API_KEY`, `DLOCALGO_API_SECRET`, `DLOCALGO_SMARTFIELDS_API_KEY`, `DLOCALGO_API_URL`. Migraciones: `20260101000053_replace-stripe-with-dlocal.sql`, `20260101000054_dlocalgo-correct-columns.sql`.
 
 ## Consecuencias
 
 **Gana:**
-- Primera fuente de revenue
-- Data para calcular margen real por cliente (con D27)
-- Flujo automatizado de trial → paid → cancel
-- Dos vías de pago para Ecuador (DeUna + transferencia) e internacional (Stripe)
+- Primera fuente de revenue.
+- Data para calcular margen real por cliente (con D27).
+- Flujo automatizado de trial → paid → cancel.
+- Cobertura: dLocal Go (internacional + LATAM) + DeUna/transferencia (Ecuador).
 
 **Pierde/Riesgos:**
-- Stripe no soporta todos los bancos ecuatorianos directamente → DeUna y transferencia cubren ese gap
-- Comprobantes por WhatsApp requieren validación manual (Rule 3) → agrega fricción pero es seguro
-- Trial de 30 días puede ser generoso si el costo de servir es alto → D27 permite ajustar
-- DeUna es relativamente nuevo → riesgo de API inestable
+- Comprobantes por WhatsApp requieren validación manual (Rule 3) → fricción, pero seguro.
+- Trial de 30 días puede ser generoso si el costo de servir es alto → D27 permite ajustar.
+- DeUna es relativamente nuevo → riesgo de API inestable.
+- SmartFields exige cargar el SDK JS de dLocal Go en el frontend (dependencia de su CDN).
 
-**Próximos pasos:**
-- Implementar enum + migration
-- Integrar Stripe Checkout + webhooks
-- Integrar DeUna API
-- Implementar intent de pago por WhatsApp
-- Implementar planGuard middleware
+### Historial — por qué se descartó Stripe
+
+La pasarela internacional original de esta decisión fue **Stripe** (Checkout Session + Subscription + webhooks). Se descartó porque **Stripe requiere crear una LLC en EE.UU.**, fuera del alcance del equipo en H0-R. Se ripearon `checkoutService.ts` y `stripeWebhookHandler.ts`, y las columnas `stripe_customer_id`/`stripe_subscription_id` se reemplazaron por `dlocalgo_*` (migraciones 53 → 54). El modelo de planes, trial, bloqueo y cancelación **no cambió** — solo la pasarela.
