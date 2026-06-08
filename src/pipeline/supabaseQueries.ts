@@ -69,6 +69,7 @@ export interface EventoCampoInsert {
   fecha_evento?: string | null
   created_by?: string
   mensaje_id?: string
+  imagen_path?: string | null
 }
 
 export async function getMensajeByWamid(wamid: string, client: SupabaseClient = defaultClient): Promise<MensajeEntradaRow | null> {
