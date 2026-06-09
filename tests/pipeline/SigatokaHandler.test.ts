@@ -333,6 +333,30 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).toMatch(/\b2\b/)
   })
 
+  it('estado general CRÍTICO cuando EE3-6 supera 10', () => {
+    const msg = buildWhatsappSummary(muestreo([fullCol({ J_calculado: 15 })]), [])
+    expect(msg).toMatch(/CRÍTICO/)
+  })
+
+  it('estado general ATENCIÓN cuando EE2 (1-3) alto pero sin severos', () => {
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0, J_calculado: 0, M_calculado: 11 })]), [])
+    expect(msg).toMatch(/ATENCIÓN/)
+    expect(msg).not.toMatch(/CRÍTICO/)
+  })
+
+  it('estado general BAJO CONTROL con valores sanos', () => {
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 })]), [])
+    expect(msg).toMatch(/BAJO CONTROL/)
+  })
+
+  it('muestra supervisor, fecha y diferidos cuando están presentes', () => {
+    const m = muestreo([fullCol()], [], { supervisor: 'Marios', fecha: '2026-06-05', erradicadasBsv: 264, pEfFinca: 0.8 })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toContain('Marios')
+    expect(msg).toContain('2026-06-05')
+    expect(msg).toContain('264')
+  })
+
   it('avisa que el asesor revisa cuando hay camposAclarar — sin prometer un follow-up del bot', () => {
     const msg = buildWhatsappSummary(muestreo([fullCol()]), ['resumen[col1].K (…)'])
     // Honesto: derivamos al asesor (el recálculo es la fuente confiable), no

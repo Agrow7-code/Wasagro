@@ -367,27 +367,57 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
     : '-'
   const n11sem = data.plantas11sem.length
 
+  const porPlanta = (sel: (c: ResumenColumna) => number | null): string =>
+    cols.length ? cols.map(c => { const v = sel(c); return v == null ? '-' : `${v}%` }).join(' / ') : '-'
+
   const alertas: string[] = []
-  if (peorJ != null && peorJ > 10) alertas.push(`⚠️ ${peorJ}% plantas con EE3-6 — revisar programa de fumigación`)
+  if (peorJ != null && peorJ > 10) alertas.push(`⚠️ ${peorJ}% plantas con EE3-6 (severo) — revisar programa de fumigación`)
   if (peorI != null && peorI > 5)  alertas.push(`⚠️ ${peorI}% plantas con EE2 avanzado (4+)`)
   if (peorH != null && peorH > UMBRAL_EE2_LEVE) alertas.push(`⚠️ ${peorH}% plantas con EE2 (1-3) — infección temprana extendida`)
   if (peorM != null && peorM < 9)  alertas.push(`⚠️ Promedio hojas funcionales bajo (${peorM}) — evaluar nutrición`)
 
+  // Estado general de un vistazo (para decidir rápido). Usa los mismos umbrales.
+  const estado =
+    (peorJ != null && peorJ > 10) || (peorI != null && peorI > 5)
+      ? '⚠️ *CRÍTICO*'
+      : (peorH != null && peorH > UMBRAL_EE2_LEVE) || (peorM != null && peorM < 9)
+        ? '⚠️ *ATENCIÓN*'
+        : '✅ *BAJO CONTROL*'
+
+  // Cabecera: identidad de la ficha (lo que esté disponible).
+  const meta = [
+    `Semana ${data.semana ?? '-'}`,
+    data.periodo != null ? `Período ${data.periodo}` : null,
+    data.fecha ?? null,
+  ].filter(Boolean).join(' · ')
+  const supLine = [data.supervisor ? `👤 ${data.supervisor}` : null, data.zona ? `📍 ${data.zona}` : null].filter(Boolean).join(' · ')
+
+  const pl = data.plagasFoliares
+  const plagaLine = (n: string, p: { h: number | null; p: number | null; m: number | null }) =>
+    `• ${n} — huevos:${p.h ?? '-'} pupas:${p.p ?? '-'} muertos:${p.m ?? '-'}`
+
+  // Seguimiento (solo si hay algo que mostrar).
+  const seguimiento: string[] = []
+  if (n11sem > 0) seguimiento.push(`• Plantas 11 sem evaluadas: ${n11sem}`)
+  if (data.erradicadasBsv != null) seguimiento.push(`• Erradicadas por BSV: ${data.erradicadasBsv}`)
+  if (data.pEfFinca != null) seguimiento.push(`• Índice EF finca: ${data.pEfFinca}`)
+
   let msg =
-`✅ *Muestreo Sigatoka semana ${data.semana ?? '-'} — ${data.nombreFinca ?? 'finca'}* registrado
+`✅ *Muestreo Sigatoka — ${data.nombreFinca ?? 'finca'}*
+📅 ${meta}${supLine ? `\n${supLine}` : ''}
 
-📊 *Resumen:* (por planta H1/H2/H3)
-• Plantas muestreadas: ${f(A)}
+🧭 Estado general: ${estado}
+
+📊 *Severidad* (por planta H1/H2/H3 — ${f(A)} plantas)
 • EE2 leve (1-3): ${ee2LevePorPlanta}
-• Peor % EE2 avanzado (4+): ${f(peorI)}%
-• Peor % EE3-6: ${f(peorJ)}%
-• Prom. hoja libre de estría: ${f(K)}
-• Mín. hojas funcionales: ${f(peorM)}
-• Plantas 11 sem evaluadas: ${n11sem}
+• EE2 avanzado (4+): ${porPlanta(c => c.I_calculado)}
+• EE3-6 (severo): ${porPlanta(c => c.J_calculado)}
+• Hoja libre de estría (prom): ${f(K)}
+• Hojas funcionales (mín): ${f(peorM)}`
 
-🐛 *Plagas foliares:*
-• Ceramida — H:${data.plagasFoliares.ceramida.h ?? '-'} P:${data.plagasFoliares.ceramida.p ?? '-'} M:${data.plagasFoliares.ceramida.m ?? '-'}
-• Sibine — H:${data.plagasFoliares.sibine.h ?? '-'} P:${data.plagasFoliares.sibine.p ?? '-'} M:${data.plagasFoliares.sibine.m ?? '-'}`
+  if (seguimiento.length > 0) msg += `\n\n🌱 *Seguimiento*\n${seguimiento.join('\n')}`
+
+  msg += `\n\n🐛 *Plagas foliares*\n${plagaLine('Ceramida', pl.ceramida)}\n${plagaLine('Sibine', pl.sibine)}`
 
   if (alertas.length > 0) msg += '\n\n' + alertas.join('\n')
   if (camposAclarar.length > 0) {
