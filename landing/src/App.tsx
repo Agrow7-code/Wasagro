@@ -17,6 +17,7 @@ import { LaborView } from './dashboard/views/LaborView'
 import { CosechaView } from './dashboard/views/CosechaView'
 import { PlagasView } from './dashboard/views/PlagasView'
 import { SigatokaRevisionView } from './dashboard/views/SigatokaRevisionView'
+import { SigatokaDashboardView } from './dashboard/views/SigatokaDashboardView'
 import { GastosView } from './dashboard/views/GastosView'
 import { ClimaView } from './dashboard/views/ClimaView'
 import { FincaSetupView } from './dashboard/views/FincaSetupView'
@@ -1118,6 +1119,7 @@ export default function App() {
           <Route path="cosecha" element={<CosechaView />} />
           <Route path="plagas" element={<PlagasView />} />
           <Route path="sigatoka" element={<SigatokaRevisionView />} />
+          <Route path="sigatoka-tendencia" element={<SigatokaDashboardView />} />
           <Route path="gastos" element={<GastosView />} />
           <Route path="clima" element={<ClimaView />} />
           <Route path="finca/setup" element={<FincaSetupView />} />

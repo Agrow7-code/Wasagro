@@ -117,6 +117,7 @@ export const NAV_ADMIN: NavItem[] = [
   { to: '/dashboard', label: 'Resumen', icon: iconGrid(), end: true },
   { to: '/dashboard/calculadora', label: 'Calculadora', icon: iconCalc() },
   { to: '/dashboard/sigatoka', label: 'Revisión Sigatoka', icon: iconClipboard() },
+  { to: '/dashboard/sigatoka-tendencia', label: 'Sigatoka — Tendencia', icon: iconBarChart() },
 ]
 
 export const NAV_GERENTE: NavItem[] = [
