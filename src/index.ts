@@ -244,39 +244,49 @@ app.get('/api/billing/smartfields-key', authMiddleware, (c) => {
 })
 
 app.post('/api/billing/create-payment', authMiddleware, async (c) => {
-  const user = c.get('authedUser')
-  if (!user) return c.json({ error: 'No autenticado' }, 401)
+    const user = c.get('authedUser')
+    if (!user) return c.json({ error: 'No autenticado' }, 401)
 
-  const body = await c.req.json().catch(() => ({}))
-  const fincas = Number(body.fincas) || 1
-  const usuarios = Number(body.usuarios) || 1
-  const country = (body.country as string | undefined) ?? 'EC'
+    const body = await c.req.json().catch(() => ({}))
+    const fincas = Number(body.fincas) || 1
+    const usuarios = Number(body.usuarios) || 1
+    const bodyCountry = body.country as string | undefined
 
-  if (fincas < 1 || usuarios < 1) {
-    return c.json({ error: 'fincas y usuarios deben ser >= 1' }, 400)
-  }
+    if (fincas < 1 || usuarios < 1) {
+      return c.json({ error: 'fincas y usuarios deben ser >= 1' }, 400)
+    }
 
-  const { data: usuario } = await supabase
-    .from('usuarios')
-    .select('org_id')
-    .eq('id', user.id)
-    .single()
+    const { data: usuario } = await supabase
+      .from('usuarios')
+      .select('org_id')
+      .eq('id', user.id)
+      .single()
 
-  if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
+    if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
 
-  try {
-    const result = await createPayment(usuario.org_id, fincas, usuarios, country)
-    return c.json({
-      payment_id: result.id,
-      merchant_checkout_token: result.merchant_checkout_token,
-      amount: result.amount,
-      segment: inferPlanSegment(fincas, usuarios),
-    })
-  } catch (err: any) {
-    console.error('[billing] Error creating dLocal Go payment:', err.message)
-    return c.json({ error: 'Error creando el pago' }, 500)
-  }
-})
+    let country = bodyCountry ?? 'EC'
+    if (!bodyCountry) {
+      const { data: org } = await supabase
+        .from('organizaciones')
+        .select('pais')
+        .eq('org_id', usuario.org_id)
+        .single()
+      if (org?.pais) country = org.pais
+    }
+
+    try {
+      const result = await createPayment(usuario.org_id, fincas, usuarios, country)
+      return c.json({
+        payment_id: result.id,
+        merchant_checkout_token: result.merchant_checkout_token,
+        amount: result.amount,
+        segment: inferPlanSegment(fincas, usuarios),
+      })
+    } catch (err: any) {
+      console.error('[billing] Error creating dLocal Go payment:', err.message)
+      return c.json({ error: 'Error creando el pago' }, 500)
+    }
+  })
 
 app.post('/api/billing/confirm-payment', authMiddleware, async (c) => {
   const user = c.get('authedUser')
@@ -400,16 +410,16 @@ app.get('/api/billing/status', authMiddleware, async (c) => {
   if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
 
   const { data: org } = await supabase
-    .from('organizaciones')
-    .select('org_id, nombre, plan, trial_inicio, trial_fin, subscription_status, metodo_pago, plan_activo_desde, plan_cancelado_en, fincas_contratadas, usuarios_contratados, precio_mensual')
-    .eq('org_id', usuario.org_id)
-    .single()
+      .from('organizaciones')
+      .select('org_id, nombre, plan, pais, trial_inicio, trial_fin, subscription_status, metodo_pago, plan_activo_desde, plan_cancelado_en, fincas_contratadas, usuarios_contratados, precio_mensual')
+      .eq('org_id', usuario.org_id)
+      .single()
 
-  if (!org) return c.json({ error: 'Organización no encontrada' }, 404)
+    if (!org) return c.json({ error: 'Organización no encontrada' }, 404)
 
-  const segmentLabel = isPaidPlan(org.plan) ? getSegmentLabel(org.fincas_contratadas, org.usuarios_contratados) : org.plan
+    const segmentLabel = isPaidPlan(org.plan) ? getSegmentLabel(org.fincas_contratadas, org.usuarios_contratados) : org.plan
 
-  return c.json({ ...org, segment_label: segmentLabel })
+    return c.json({ ...org, segment_label: segmentLabel })
 })
 
 app.post('/api/billing/dlocalgo-webhook', bodyLimit({ maxSize: 65_536 }), async (c) => {

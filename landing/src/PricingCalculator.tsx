@@ -81,7 +81,7 @@ export function PricingCalculator() {
           viewport={{ once: true, margin: '-60px' }}
           transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
         >
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— Precios</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">Precios</p>
           <h2
             className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5"
             style={{ fontSize: 'clamp(32px, 4.5vw, 56px)' }}
@@ -91,7 +91,7 @@ Solo pagás por lo que tenés.
         <span className="text-campo">Ni más, ni menos.</span>
         </h2>
         <p className="text-[17px] text-n700 leading-[1.65] max-w-xl mb-14">
-          Base + $8 por finca + $4 por usuario. Mové los números y ves el precio al instante.
+          $8 por finca, $4 por usuario, más una base según tu escala. Probá los números.
           </p>
         </motion.div>
 
@@ -184,7 +184,7 @@ Solo pagás por lo que tenés.
                       <div className="text-right">
                         <span className="text-[28px] font-extrabold text-negro">${price}</span>
                         <span className="text-[14px] font-medium text-n400">/mes</span>
-                        <p className="text-[11px] text-n400 mt-1">Precio de referencia — contáctanos</p>
+                        <p className="text-[11px] text-n400 mt-1">Precio de referencia, contáctanos</p>
                       </div>
                     ) : (
                       <span className="text-[28px] font-extrabold text-negro">
@@ -257,7 +257,7 @@ Solo pagás por lo que tenés.
         <div className="grid gap-3">
           <div className="flex items-start gap-2.5">
             <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
-            <span className="text-[13px] leading-snug text-n700">Pagás solo por lo que usás — sin costos fijos ocultos</span>
+            <span className="text-[13px] leading-snug text-n700">Pagás solo por lo que usás, sin costos fijos ocultos</span>
           </div>
           <div className="flex items-start gap-2.5">
             <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
@@ -265,7 +265,7 @@ Solo pagás por lo que tenés.
           </div>
           <div className="flex items-start gap-2.5">
             <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
-            <span className="text-[13px] leading-snug text-n700">Cancelá en cualquier momento — sin compromiso de permanencia</span>
+            <span className="text-[13px] leading-snug text-n700">Cancelá en cualquier momento, sin permanencia</span>
           </div>
         </div>
       </div>
