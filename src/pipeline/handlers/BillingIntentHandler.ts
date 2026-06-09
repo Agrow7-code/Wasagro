@@ -62,7 +62,8 @@ export async function handleBillingIntent(
           msg.from,
           `Para activar Wasagro ${segment} ($${amount}/mes — ${org.fincas_contratadas} finca${org.fincas_contratadas > 1 ? 's' : ''}, ${org.usuarios_contratados} usuario${org.usuarios_contratados > 1 ? 's' : ''}), pagá con este link: ${link.url}\n\nTambién podés transferir a nuestra cuenta bancaria y enviar el comprobante por aquí.`
         )
-      } catch {
+      } catch (err: any) {
+        trace.event({ name: 'deuna_link_error', level: 'ERROR', output: { message: err?.message ?? String(err) } })
         await sender.enviarTexto(
           msg.from,
           `Para activar tu plan, transferí a nuestra cuenta bancaria y envianos el comprobante por aquí, o ingresá a app.wasagro.ai/billing`
