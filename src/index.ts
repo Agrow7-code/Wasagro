@@ -24,6 +24,7 @@ import { rateLimiter } from './auth/rateLimiter.js'
 import { createPayment, confirmPayment, getSmartFieldsApiKey } from './integrations/dlocal/dlocalClient.js'
 import { handleDLocalGoWebhook } from './integrations/dlocal/dlocalWebhookHandler.js'
 import { handleDeUnaWebhook } from './integrations/deuna/deunaClient.js'
+import { calcularPrecio, getBasePrice, getSegmentLabel, inferPlanSegment, isPaidPlan, PRICE_PER_FINCA, PRICE_PER_USER } from './auth/pricingUtils.js'
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
 
@@ -217,6 +218,22 @@ app.route('/api/metricas', metricasRouter)
 app.route('/api/finca', fincaRouter)
 
 // ── Billing routes (dLocal Go) ──────────────────────────────────────────────
+app.get('/api/billing/calculate-price', (c) => {
+  const fincas = Number(c.req.query('fincas')) || 1
+  const usuarios = Number(c.req.query('usuarios')) || 1
+  if (fincas < 1 || usuarios < 1) return c.json({ error: 'fincas y usuarios deben ser >= 1' }, 400)
+  const base = getBasePrice(fincas, usuarios)
+  const total = calcularPrecio(fincas, usuarios)
+  return c.json({
+    base,
+    fincas_cost: PRICE_PER_FINCA * fincas,
+    usuarios_cost: PRICE_PER_USER * usuarios,
+    total,
+    segment: getSegmentLabel(fincas, usuarios),
+    plan: inferPlanSegment(fincas, usuarios),
+  })
+})
+
 app.get('/api/billing/smartfields-key', authMiddleware, (c) => {
   try {
     const key = getSmartFieldsApiKey()
@@ -231,11 +248,12 @@ app.post('/api/billing/create-payment', authMiddleware, async (c) => {
   if (!user) return c.json({ error: 'No autenticado' }, 401)
 
   const body = await c.req.json().catch(() => ({}))
-  const plan = body.plan as 'starter' | 'enterprise' | undefined
+  const fincas = Number(body.fincas) || 1
+  const usuarios = Number(body.usuarios) || 1
   const country = (body.country as string | undefined) ?? 'EC'
 
-  if (!plan || !['starter', 'enterprise'].includes(plan)) {
-    return c.json({ error: 'plan debe ser starter o enterprise' }, 400)
+  if (fincas < 1 || usuarios < 1) {
+    return c.json({ error: 'fincas y usuarios deben ser >= 1' }, 400)
   }
 
   const { data: usuario } = await supabase
@@ -247,10 +265,12 @@ app.post('/api/billing/create-payment', authMiddleware, async (c) => {
   if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
 
   try {
-    const result = await createPayment(usuario.org_id, plan, country)
+    const result = await createPayment(usuario.org_id, fincas, usuarios, country)
     return c.json({
       payment_id: result.id,
       merchant_checkout_token: result.merchant_checkout_token,
+      amount: result.amount,
+      segment: inferPlanSegment(fincas, usuarios),
     })
   } catch (err: any) {
     console.error('[billing] Error creating dLocal Go payment:', err.message)
@@ -329,12 +349,15 @@ app.get('/api/billing/status', authMiddleware, async (c) => {
 
   const { data: org } = await supabase
     .from('organizaciones')
-    .select('org_id, nombre, plan, trial_inicio, trial_fin, subscription_status, metodo_pago, plan_activo_desde, plan_cancelado_en')
+    .select('org_id, nombre, plan, trial_inicio, trial_fin, subscription_status, metodo_pago, plan_activo_desde, plan_cancelado_en, fincas_contratadas, usuarios_contratados, precio_mensual')
     .eq('org_id', usuario.org_id)
     .single()
 
   if (!org) return c.json({ error: 'Organización no encontrada' }, 404)
-  return c.json(org)
+
+  const segmentLabel = isPaidPlan(org.plan) ? getSegmentLabel(org.fincas_contratadas, org.usuarios_contratados) : org.plan
+
+  return c.json({ ...org, segment_label: segmentLabel })
 })
 
 app.post('/api/billing/dlocalgo-webhook', bodyLimit({ maxSize: 65_536 }), async (c) => {

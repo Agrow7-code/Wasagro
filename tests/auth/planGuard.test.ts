@@ -1,13 +1,5 @@
-// is_test_org bypass — protege a las orgs internas (ORG001, futuras) de
-// cualquier proceso de billing que normalice el plan. Migration 52 añadió
-// la columna; planGuard la lee como override de la lógica de
-// trial/subscription_status.
-
 import { describe, it, expect, vi } from 'vitest'
 
-// planGuard imports supabase which requires SUPABASE_URL at module-load. The
-// helper under test (isOrgBillingActive) is a pure function and doesn't use
-// supabase, but the import path crosses through, so we mock the client.
 vi.mock('../../src/integrations/supabase.js', () => ({
   supabase: {},
   createSupabaseClient: vi.fn(),
@@ -23,16 +15,22 @@ describe('isOrgBillingActive — is_test_org override', () => {
       trial_fin: expired,
       subscription_status: 'none',
       is_test_org: true,
+      fincas_contratadas: 1,
+      usuarios_contratados: 1,
+      precio_mensual: null,
     })
     expect(allowed).toBe(true)
   })
 
   it('is_test_org=true → always active, even with subscription canceled', () => {
     const allowed = isOrgBillingActive({
-      plan: 'enterprise',
+      plan: 'pyme',
       trial_fin: null,
       subscription_status: 'canceled',
       is_test_org: true,
+      fincas_contratadas: 10,
+      usuarios_contratados: 12,
+      precio_mensual: 153,
     })
     expect(allowed).toBe(true)
   })
@@ -43,6 +41,9 @@ describe('isOrgBillingActive — is_test_org override', () => {
       trial_fin: null,
       subscription_status: 'none',
       is_test_org: true,
+      fincas_contratadas: 1,
+      usuarios_contratados: 1,
+      precio_mensual: null,
     })
     expect(allowed).toBe(true)
   })
@@ -53,6 +54,7 @@ describe('isOrgBillingActive — standard logic when is_test_org=false', () => {
     const future = new Date(Date.now() + 7 * 86400000).toISOString()
     expect(isOrgBillingActive({
       plan: 'trial', trial_fin: future, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
     })).toBe(true)
   })
 
@@ -60,36 +62,63 @@ describe('isOrgBillingActive — standard logic when is_test_org=false', () => {
     const past = new Date(Date.now() - 86400000).toISOString()
     expect(isOrgBillingActive({
       plan: 'trial', trial_fin: past, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
     })).toBe(false)
   })
 
-  it('trial sin trial_fin → inactive (guard contra mala data)', () => {
+  it('trial sin trial_fin → inactive', () => {
     expect(isOrgBillingActive({
       plan: 'trial', trial_fin: null, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
     })).toBe(false)
   })
 
-  it('starter con subscription active → active', () => {
+  it('agricultor con subscription active → active', () => {
     expect(isOrgBillingActive({
-      plan: 'starter', trial_fin: null, subscription_status: 'active', is_test_org: false,
+      plan: 'agricultor', trial_fin: null, subscription_status: 'active', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: 22,
     })).toBe(true)
   })
 
-  it('enterprise con subscription past_due → inactive', () => {
+  it('productor con subscription active → active', () => {
     expect(isOrgBillingActive({
-      plan: 'enterprise', trial_fin: null, subscription_status: 'past_due', is_test_org: false,
+      plan: 'productor', trial_fin: null, subscription_status: 'active', is_test_org: false,
+      fincas_contratadas: 3, usuarios_contratados: 5, precio_mensual: 59,
+    })).toBe(true)
+  })
+
+  it('pyme con subscription past_due → inactive', () => {
+    expect(isOrgBillingActive({
+      plan: 'pyme', trial_fin: null, subscription_status: 'past_due', is_test_org: false,
+      fincas_contratadas: 10, usuarios_contratados: 12, precio_mensual: 153,
     })).toBe(false)
   })
 
-  it('enterprise con subscription canceled → inactive', () => {
+  it('corporativo con subscription canceled → inactive', () => {
     expect(isOrgBillingActive({
-      plan: 'enterprise', trial_fin: null, subscription_status: 'canceled', is_test_org: false,
+      plan: 'corporativo', trial_fin: null, subscription_status: 'canceled', is_test_org: false,
+      fincas_contratadas: 50, usuarios_contratados: 50, precio_mensual: 650,
     })).toBe(false)
   })
 
-  it('plan=free sin override → inactive (los free son orgs post-trial bloqueadas)', () => {
+  it('plan=free sin override → inactive', () => {
     expect(isOrgBillingActive({
       plan: 'free', trial_fin: null, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
+    })).toBe(false)
+  })
+
+  it('starter (legado) con subscription active → active', () => {
+    expect(isOrgBillingActive({
+      plan: 'starter', trial_fin: null, subscription_status: 'active', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: 29,
+    })).toBe(true)
+  })
+
+  it('enterprise (legado) con subscription past_due → inactive', () => {
+    expect(isOrgBillingActive({
+      plan: 'enterprise', trial_fin: null, subscription_status: 'past_due', is_test_org: false,
+      fincas_contratadas: 10, usuarios_contratados: 12, precio_mensual: 79,
     })).toBe(false)
   })
 })

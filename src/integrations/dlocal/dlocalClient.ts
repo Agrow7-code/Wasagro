@@ -1,12 +1,11 @@
 import { supabase } from '../supabase.js'
 import { langfuse } from '../langfuse.js'
+import { calcularPrecio, inferPlanSegment } from '../../auth/pricingUtils.js'
+import type { PlanSegment } from '../../auth/pricingUtils.js'
 
 const DLOCALGO_API_URL = process.env['DLOCALGO_API_URL'] ?? 'https://api-sbx.dlocalgo.com'
 const DLOCALGO_API_KEY = process.env['DLOCALGO_API_KEY'] ?? ''
 const DLOCALGO_API_SECRET = process.env['DLOCALGO_API_SECRET'] ?? ''
-
-const STARTER_PRICE_USD = 29
-const ENTERPRISE_PRICE_USD = 79
 
 function requireCredentials(): { apiKey: string; apiSecret: string } {
   if (!DLOCALGO_API_KEY || !DLOCALGO_API_SECRET) {
@@ -54,13 +53,15 @@ export interface DLocalGoRecurringPaymentResponse {
 
 export async function createPayment(
   orgId: string,
-  plan: 'starter' | 'enterprise',
+  fincas: number,
+  usuarios: number,
   country: string
 ): Promise<DLocalGoCreatePaymentResponse> {
-  const trace = langfuse.trace({ name: 'dlocalgo_create_payment', input: { orgId, plan } })
+  const trace = langfuse.trace({ name: 'dlocalgo_create_payment', input: { orgId, fincas, usuarios } })
 
-  const amount = plan === 'enterprise' ? ENTERPRISE_PRICE_USD : STARTER_PRICE_USD
-  const orderId = `wasagro-${plan}-${orgId}-${Date.now()}`
+  const amount = calcularPrecio(fincas, usuarios)
+  const segment = inferPlanSegment(fincas, usuarios)
+  const orderId = `wasagro-${segment}-${orgId}-${Date.now()}`
   const notificationUrl = `${process.env['API_URL'] ?? 'https://wasagro-production.up.railway.app'}/api/billing/dlocalgo-webhook`
   const successUrl = `${process.env['DASHBOARD_URL'] ?? 'https://app.wasagro.ai'}/billing?dlocalgo=success`
 
@@ -69,7 +70,7 @@ export async function createPayment(
     currency: 'USD',
     country,
     order_id: orderId,
-    description: `Wasagro ${plan.charAt(0).toUpperCase() + plan.slice(1)} — Monthly subscription`,
+    description: `Wasagro ${segment} (${fincas}F/${usuarios}U) — Monthly subscription`,
     notification_url: notificationUrl,
     success_url: successUrl,
     back_url: successUrl,
@@ -96,10 +97,13 @@ export async function createPayment(
     .update({
       dlocalgo_checkout_token: data.merchant_checkout_token,
       dlocalgo_payment_id: data.id,
+      fincas_contratadas: fincas,
+      usuarios_contratados: usuarios,
+      precio_mensual: amount,
     })
     .eq('org_id', orgId)
 
-  trace.event({ name: 'dlocalgo_payment_created', output: { id: data.id, token: data.merchant_checkout_token } })
+  trace.event({ name: 'dlocalgo_payment_created', output: { id: data.id, token: data.merchant_checkout_token, amount } })
 
   return data
 }

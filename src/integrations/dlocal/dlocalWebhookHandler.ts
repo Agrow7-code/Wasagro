@@ -1,5 +1,7 @@
 import { supabase } from '../supabase.js'
 import { langfuse } from '../langfuse.js'
+import type { PlanSegment } from '../../auth/pricingUtils.js'
+import { inferPlanSegment, isPaidPlan } from '../../auth/pricingUtils.js'
 
 export interface DLocalGoWebhookPayload {
   id: string
@@ -78,14 +80,24 @@ async function extractOrgId(payload: DLocalGoWebhookPayload): Promise<string | n
   return org?.org_id ?? null
 }
 
-function extractPlanFromOrderId(orderId: string): 'starter' | 'enterprise' | null {
-  if (orderId.includes('-enterprise-')) return 'enterprise'
-  if (orderId.includes('-starter-')) return 'starter'
+function extractSegmentFromOrderId(orderId: string): PlanSegment | null {
+  const match = orderId.match(/wasagro-(agricultor|productor|pyme|corporativo)-/)
+  if (match) return match[1] as PlanSegment
+  if (orderId.includes('-enterprise-')) return 'pyme'
+  if (orderId.includes('-starter-')) return 'productor'
   return null
 }
 
 async function handlePaymentPaid(orgId: string, payload: DLocalGoWebhookPayload): Promise<void> {
-  const plan = extractPlanFromOrderId(payload.order_id) ?? 'starter'
+  const segment = extractSegmentFromOrderId(payload.order_id)
+
+  const { data: org } = await supabase
+    .from('organizaciones')
+    .select('fincas_contratadas, usuarios_contratados')
+    .eq('org_id', orgId)
+    .single()
+
+  const plan = segment ?? (org ? inferPlanSegment(org.fincas_contratadas, org.usuarios_contratados) : 'productor')
 
   const updateData: Record<string, unknown> = {
     plan,

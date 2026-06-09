@@ -3,6 +3,7 @@ import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSende
 import { supabase } from '../../integrations/supabase.js'
 import { createDeUnaPaymentLink } from '../../integrations/deuna/deunaClient.js'
 import { langfuse } from '../../integrations/langfuse.js'
+import { calcularPrecio, getSegmentLabel, inferPlanSegment, isPaidPlan } from '../../auth/pricingUtils.js'
 
 const BILLING_KEYWORDS_PAGO = ['pagar', 'pago', 'suscripción', 'suscribirme', 'activar plan', 'comprar', 'payment', 'checkout']
 const BILLING_KEYWORDS_CANCELAR = ['cancelar', 'cancelar suscripción', 'cancelar plan', 'dar de baja', 'unsubscribe']
@@ -37,7 +38,7 @@ export async function handleBillingIntent(
 
     const { data: org } = await supabase
       .from('organizaciones')
-      .select('plan, nombre, pais')
+      .select('plan, nombre, pais, fincas_contratadas, usuarios_contratados')
       .eq('org_id', usuario.org_id)
       .single()
 
@@ -46,20 +47,20 @@ export async function handleBillingIntent(
       return true
     }
 
-    if (org.plan === 'starter' || org.plan === 'enterprise') {
+    if (isPaidPlan(org.plan)) {
       await sender.enviarTexto(msg.from, 'Ya tenés un plan activo. Si querés cambiar de plan, ingresá a app.wasagro.ai/billing')
       return true
     }
 
-// Ecuador: offer DeUna + transferencia
-// International: direct to billing page (dLocal SmartFields)
+    const amount = calcularPrecio(org.fincas_contratadas, org.usuarios_contratados)
+    const segment = getSegmentLabel(org.fincas_contratadas, org.usuarios_contratados)
+
     if (org.pais === 'EC') {
-      const amount = 29
       try {
-        const link = await createDeUnaPaymentLink(usuario.org_id, amount, `Wasagro Starter — ${org.nombre}`)
+        const link = await createDeUnaPaymentLink(usuario.org_id, amount, `Wasagro ${segment} — ${org.nombre}`)
         await sender.enviarTexto(
           msg.from,
-          `Para activar Wasagro Starter ($${amount}/mes), pagá con este link: ${link.url}\n\nTambién podés transferir a nuestra cuenta bancaria y enviar el comprobante por aquí.`
+          `Para activar Wasagro ${segment} ($${amount}/mes — ${org.fincas_contratadas} finca${org.fincas_contratadas > 1 ? 's' : ''}, ${org.usuarios_contratados} usuario${org.usuarios_contratados > 1 ? 's' : ''}), pagá con este link: ${link.url}\n\nTambién podés transferir a nuestra cuenta bancaria y enviar el comprobante por aquí.`
         )
       } catch {
         await sender.enviarTexto(

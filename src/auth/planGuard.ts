@@ -1,18 +1,22 @@
 import type { Context, Next } from 'hono'
 import { supabase } from '../integrations/supabase.js'
 import type { AuthedUser } from '../auth/middleware.js'
+import { isPaidPlan } from './pricingUtils.js'
 
 interface OrgBillingState {
   plan: string
   trial_fin: string | null
   subscription_status: string
   is_test_org: boolean
+  fincas_contratadas: number
+  usuarios_contratados: number
+  precio_mensual: number | null
 }
 
 async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null> {
   const { data, error } = await supabase
     .from('organizaciones')
-    .select('plan, trial_fin, subscription_status, is_test_org')
+    .select('plan, trial_fin, subscription_status, is_test_org, fincas_contratadas, usuarios_contratados, precio_mensual')
     .eq('org_id', orgId)
     .single()
 
@@ -20,18 +24,12 @@ async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null
   return data as OrgBillingState
 }
 
-// `is_test_org` short-circuits TODA la verificación de billing — las orgs
-// internas de pruebas (ej. ORG001) deben permanecer activas independiente del
-// plan/trial/subscription_status para no bloquear QA y demos. Migration 52
-// añadió el flag; ORG001 quedó marcada como is_test_org=true ahí mismo.
-// Cualquier job de billing reconciliation futuro debe excluir is_test_org=true
-// en sus UPDATE bulk para no pisar este setup.
 export function isOrgBillingActive(state: OrgBillingState): boolean {
   if (state.is_test_org) return true
   if (state.plan === 'trial') {
     return state.trial_fin !== null && new Date(state.trial_fin) > new Date()
   }
-  if (state.plan === 'starter' || state.plan === 'enterprise') {
+  if (isPaidPlan(state.plan)) {
     return state.subscription_status === 'active'
   }
   return false
@@ -77,6 +75,6 @@ export async function planGuard(c: Context, next: Next): Promise<Response | void
 
 export async function planGuardWhatsApp(orgId: string): Promise<{ allowed: boolean; state: OrgBillingState }> {
   const state = await getOrgBillingState(orgId)
-  if (!state) return { allowed: false, state: { plan: 'free', trial_fin: null, subscription_status: 'none', is_test_org: false } }
+  if (!state) return { allowed: false, state: { plan: 'free', trial_fin: null, subscription_status: 'none', is_test_org: false, fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null } }
   return { allowed: isOrgBillingActive(state), state }
 }

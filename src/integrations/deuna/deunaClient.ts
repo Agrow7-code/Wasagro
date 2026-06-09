@@ -1,5 +1,6 @@
 import { supabase } from '../../integrations/supabase.js'
 import { langfuse } from '../../integrations/langfuse.js'
+import { inferPlanSegment } from '../../auth/pricingUtils.js'
 
 const DEUNA_API_URL = process.env['DEUNA_API_URL'] ?? 'https://api.deuna.io'
 const DEUNA_API_KEY = process.env['DEUNA_API_KEY'] ?? ''
@@ -66,16 +67,24 @@ export async function handleDeUnaWebhook(payload: {
     throw new Error('DeUna webhook sin org_id en metadata')
   }
 
+  const { data: org } = await supabase
+    .from('organizaciones')
+    .select('fincas_contratadas, usuarios_contratados')
+    .eq('org_id', orgId)
+    .single()
+
+  const plan = org ? inferPlanSegment(org.fincas_contratadas, org.usuarios_contratados) : 'productor'
+
   await supabase
     .from('organizaciones')
     .update({
-      plan: 'starter',
+      plan,
       subscription_status: 'active',
       plan_activo_desde: new Date().toISOString(),
       metodo_pago: 'deuna',
     })
     .eq('org_id', orgId)
 
-  trace.event({ name: 'deuna_payment_activated', output: { org_id: orgId } })
-  console.log(`[deuna] Pago confirmado: org=${orgId}`)
+  trace.event({ name: 'deuna_payment_activated', output: { org_id: orgId, plan } })
+  console.log(`[deuna] Pago confirmado: org=${orgId} plan=${plan}`)
 }
