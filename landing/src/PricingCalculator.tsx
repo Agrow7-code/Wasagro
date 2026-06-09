@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'motion/react'
-import { ArrowRight, CheckCircle, Minus, Plus } from 'lucide-react'
+import { ArrowRight, CheckCircle, Info, Minus, Plus } from 'lucide-react'
 
 const PRICE_PER_FINCA = 8
 const PRICE_PER_USER = 4
@@ -29,7 +29,7 @@ function isCorporativo(fincas: number): boolean {
   return fincas >= 21
 }
 
-const WA_CTA = 'https://wa.me/50672134878?text=Hola%2C%20quiero%20empezar%20con%20Wasagro'
+const WA_BASE = 'https://wa.me/50672134878?text='
 
 const BASE_FEATURES = [
   'Eventos ilimitados',
@@ -60,11 +60,17 @@ function getFeatures(fincas: number, usuarios: number): string[] {
 export function PricingCalculator() {
   const [fincas, setFincas] = useState(1)
   const [usuarios, setUsuarios] = useState(1)
+  const [showUserHelp, setShowUserHelp] = useState(false)
 
   const price = calcularPrecio(fincas, usuarios)
   const base = getBasePrice(fincas, usuarios)
   const segment = getSegmentLabel(fincas, usuarios)
   const corporate = isCorporativo(fincas)
+
+  const waText = corporate
+    ? `Hola, tengo ${fincas} fincas y necesito un plan Corporativo. Me interesa Wasagro.`
+    : `Hola, quiero empezar con Wasagro. Calculé ${fincas} finca${fincas > 1 ? 's' : ''} y ${usuarios} usuario${usuarios > 1 ? 's' : ''}, plan ${segment} a $${price}/mes.`
+  const waLink = WA_BASE + encodeURIComponent(waText)
   const features = getFeatures(fincas, usuarios)
 
   return (
@@ -105,7 +111,7 @@ Paga solo por lo que necesitas.
           >
             <div className="border-2 border-negro rounded-2xl bg-white shadow-hard overflow-hidden">
               <div className="bg-negro px-6 py-4">
-                <p className="font-mono text-[10px] font-bold tracking-[.12em] uppercase text-senal">Calculá tu precio</p>
+                <p className="font-mono text-[10px] font-bold tracking-[.12em] uppercase text-senal">Calcula tu precio</p>
               </div>
 
               <div className="p-6">
@@ -134,9 +140,27 @@ Paga solo por lo que necesitas.
                   </div>
                 </div>
 
-                {/* Usuarios selector */}
-                <div className="mb-8">
-                  <label className="block text-[14px] font-bold text-negro mb-3">Usuarios</label>
+          {/* Usuarios selector */}
+          <div className="mb-8">
+            <label className="flex items-center gap-1.5 text-[14px] font-bold text-negro mb-3">
+              Usuarios
+              <span className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowUserHelp(!showUserHelp)}
+                  onBlur={() => setShowUserHelp(false)}
+                  className="text-n400 hover:text-campo transition-colors"
+                >
+                  <Info size={14} />
+                </button>
+                {showUserHelp && (
+                  <span className="absolute left-5 top-[-8px] z-10 w-[240px] bg-negro text-pergamino text-[12px] leading-[1.5] p-3 rounded-lg shadow-lg">
+                    Cada persona que interactua con Wasagro en tu organizacion: el dueno que ve reportes, el agricultor que reporta por WhatsApp, el tecnico que revisa alertas.
+                    <span className="block text-senal mt-1">Ejemplo: 1 finca con 3 trabajadores = 4 usuarios</span>
+                  </span>
+                )}
+              </span>
+            </label>
                   <div className="flex items-center gap-4">
                     <button
                       onClick={() => setUsuarios(Math.max(1, usuarios - 1))}
@@ -162,7 +186,7 @@ Paga solo por lo que necesitas.
                 {/* Breakdown */}
                 <div className="border-2 border-negro rounded-xl p-5 bg-pergamino">
                   <div className="flex justify-between items-center mb-3">
-                    <span className="text-[14px] font-bold text-negro">Segmento: {segment}</span>
+                    <span className="text-[14px] font-bold text-negro">Tipo de cuenta: {segment}</span>
                   </div>
 
                   <div className="grid gap-2 mb-4">
@@ -194,16 +218,16 @@ Paga solo por lo que necesitas.
                   </div>
                 </div>
 
-                {/* CTA */}
-                <a
-                  href={WA_CTA}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full mt-6 py-3.5 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-xl shadow-hard-sm hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
-                >
-                  {corporate ? 'Hablar con ventas' : 'Empezar ahora'}
-                  <ArrowRight size={15} strokeWidth={2.5} />
-                </a>
+          {/* CTA */}
+          <a
+            href={waLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full mt-6 py-3.5 font-bold text-[15px] bg-negro text-pergamino border-2 border-negro rounded-xl shadow-hard-sm hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
+          >
+            {corporate ? 'Hablar con ventas' : 'Empezar ahora'}
+            <ArrowRight size={15} strokeWidth={2.5} />
+          </a>
               </div>
             </div>
           </motion.div>
@@ -231,7 +255,7 @@ Paga solo por lo que necesitas.
               </div>
 
               <h3 className={`font-bold text-[18px] mb-5 ${corporate ? 'text-pergamino' : 'text-negro'}`}>
-                {corporate ? 'Plan a medida para tu operación' : 'Todo lo que necesitás incluido'}
+                {corporate ? 'Plan a medida para tu operacion' : 'Todo lo que necesitas incluido'}
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -257,15 +281,15 @@ Paga solo por lo que necesitas.
         <div className="grid gap-3">
           <div className="flex items-start gap-2.5">
             <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
-            <span className="text-[13px] leading-snug text-n700">Pagás solo por lo que usás, sin costos fijos ocultos</span>
+            <span className="text-[13px] leading-snug text-n700">Pagas solo por lo que usas, sin costos fijos ocultos</span>
           </div>
           <div className="flex items-start gap-2.5">
             <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
-            <span className="text-[13px] leading-snug text-n700">Escalá fincas y usuarios cuando quieras, el precio se ajusta automáticamente</span>
+            <span className="text-[13px] leading-snug text-n700">Escala fincas y usuarios cuando quieras, el precio se ajusta automaticamente</span>
           </div>
           <div className="flex items-start gap-2.5">
             <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
-            <span className="text-[13px] leading-snug text-n700">Cancelá en cualquier momento, sin permanencia</span>
+            <span className="text-[13px] leading-snug text-n700">Cancela en cualquier momento, sin permanencia</span>
           </div>
         </div>
       </div>
