@@ -25,6 +25,32 @@ export function buildImagenPath(fincaId: string, mimeType: string, id: string = 
 }
 
 /**
+ * Genera una URL firmada temporal para ver la imagen privada de un evento (UI de
+ * revisión). NUNCA lanza: ante path vacío o error de Storage devuelve null para
+ * que la UI muestre "sin imagen" en vez de romperse (P4). Default 1h de validez.
+ */
+export async function getSignedUrlEvento(
+  path: string | null | undefined,
+  expiresInSec: number = 3600,
+  client: SupabaseClient = supabase,
+): Promise<string | null> {
+  if (!path) return null
+  try {
+    const { data, error } = await client.storage
+      .from(EVENTOS_MEDIA_BUCKET)
+      .createSignedUrl(path, expiresInSec)
+    if (error || !data?.signedUrl) {
+      if (error) console.error('[supabaseStorage] createSignedUrl falló:', error.message)
+      return null
+    }
+    return data.signedUrl
+  } catch (err) {
+    console.error('[supabaseStorage] createSignedUrl excepción:', String(err))
+    return null
+  }
+}
+
+/**
  * Sube la imagen original de un evento al bucket privado eventos-media y
  * devuelve la ruta del objeto. NUNCA lanza: si Storage falla, loggea y devuelve
  * null para que el pipeline guarde el evento igual con imagen_path=null (P4 —

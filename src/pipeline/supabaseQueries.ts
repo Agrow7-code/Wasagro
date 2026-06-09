@@ -214,6 +214,51 @@ export async function actualizarEventoDatos(
   if (error) throw error
 }
 
+export interface EventoRevisionSigatoka {
+  id: string
+  created_at: string
+  datos_evento: Record<string, unknown>
+  imagen_path: string | null
+  confidence_score: number | null
+}
+
+// Lista los muestreos de Sigatoka en requires_review de una finca (cola de
+// revisión del asesor, D28). Filtra por tipo_documento dentro del JSONB.
+export async function getEventosRevisionSigatoka(
+  fincaId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<EventoRevisionSigatoka[]> {
+  const { data, error } = await client
+    .from('eventos_campo')
+    .select('id, created_at, datos_evento, imagen_path, confidence_score')
+    .eq('finca_id', fincaId)
+    .eq('status', 'requires_review')
+    .eq('datos_evento->>tipo_documento', 'muestreo_sigatoka_banano')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as EventoRevisionSigatoka[]
+}
+
+export interface EventoSigatokaDetalle extends EventoRevisionSigatoka {
+  finca_id: string
+  status: string
+}
+
+// Un evento por id (para la pantalla de revisión). Devuelve finca_id para que el
+// router valide acceso (requireFincaAccess) antes de mostrar datos/imagen.
+export async function getEventoSigatokaById(
+  eventoId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<EventoSigatokaDetalle | null> {
+  const { data, error } = await client
+    .from('eventos_campo')
+    .select('id, finca_id, status, created_at, datos_evento, imagen_path, confidence_score')
+    .eq('id', eventoId)
+    .maybeSingle()
+  if (error) throw error
+  return (data ?? null) as EventoSigatokaDetalle | null
+}
+
 export interface ProspectoInsert {
   phone: string
   tipo_contacto: 'trabajador' | 'decision_maker' | 'otro'

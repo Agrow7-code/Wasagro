@@ -8,6 +8,7 @@ vi.mock('../../src/integrations/supabase.js', () => ({ supabase: {} }))
 import {
   buildImagenPath,
   subirImagenEvento,
+  getSignedUrlEvento,
 } from '../../src/integrations/supabaseStorage.js'
 
 describe('buildImagenPath', () => {
@@ -46,5 +47,32 @@ describe('subirImagenEvento', () => {
     const client = { storage: { from: () => ({ upload: vi.fn().mockRejectedValue(new Error('net')) }) } } as any
     const path = await subirImagenEvento('aGVsbG8=', 'image/jpeg', 'F001', client)
     expect(path).toBeNull()
+  })
+})
+
+describe('getSignedUrlEvento', () => {
+  const fakeClient = (result: unknown) =>
+    ({ storage: { from: () => ({ createSignedUrl: vi.fn().mockResolvedValue(result) }) } }) as any
+
+  it('devuelve la URL firmada cuando Storage responde ok', async () => {
+    const url = await getSignedUrlEvento('F001/abc.jpg', 3600, fakeClient({ data: { signedUrl: 'https://x/signed?token=1' }, error: null }))
+    expect(url).toBe('https://x/signed?token=1')
+  })
+
+  it('devuelve null sin llamar a Storage cuando el path es null/vacío', async () => {
+    const createSignedUrl = vi.fn()
+    const client = { storage: { from: () => ({ createSignedUrl }) } } as any
+    expect(await getSignedUrlEvento(null, 3600, client)).toBeNull()
+    expect(await getSignedUrlEvento('', 3600, client)).toBeNull()
+    expect(createSignedUrl).not.toHaveBeenCalled()
+  })
+
+  it('devuelve null cuando Storage responde error (no lanza)', async () => {
+    expect(await getSignedUrlEvento('F001/abc.jpg', 3600, fakeClient({ data: null, error: { message: 'boom' } }))).toBeNull()
+  })
+
+  it('devuelve null cuando createSignedUrl tira excepción (no propaga)', async () => {
+    const client = { storage: { from: () => ({ createSignedUrl: vi.fn().mockRejectedValue(new Error('net')) }) } } as any
+    expect(await getSignedUrlEvento('F001/abc.jpg', 3600, client)).toBeNull()
   })
 })

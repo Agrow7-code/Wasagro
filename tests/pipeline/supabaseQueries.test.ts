@@ -12,6 +12,8 @@ import {
   getLotesByFinca,
   getOrCreateSession,
   saveEvento,
+  getEventosRevisionSigatoka,
+  getEventoSigatokaById,
   createSDRProspecto,
   getSDRProspecto,
   getSDRProspectosPendingApproval,
@@ -22,8 +24,10 @@ function crearThenable(result: unknown) {
   const obj: Record<string, unknown> = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    neq: vi.fn().mockReturnThis(),
     gt: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(result),
@@ -167,6 +171,43 @@ describe('supabaseQueries', () => {
 
       expect(result.session_id).toBe('ses-3')
       expect(mock._chain.neq).toHaveBeenCalledWith('status', 'completed')
+    })
+  })
+
+  describe('getEventosRevisionSigatoka', () => {
+    it('filtra por finca, requires_review y tipo_documento sigatoka', async () => {
+      const eventos = [{ id: 'e1', created_at: '2026-06-08', datos_evento: { tipo_documento: 'muestreo_sigatoka_banano' }, imagen_path: 'F001/a.jpg', confidence_score: 0.5 }]
+      const thenable = crearThenable({ data: eventos, error: null })
+      const mock = { from: vi.fn().mockReturnValue(thenable) }
+
+      const result = await getEventosRevisionSigatoka('F001', mock as any)
+
+      expect(result).toHaveLength(1)
+      expect((thenable['eq'] as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('status', 'requires_review')
+      expect((thenable['eq'] as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('datos_evento->>tipo_documento', 'muestreo_sigatoka_banano')
+    })
+
+    it('devuelve [] cuando no hay eventos', async () => {
+      const thenable = crearThenable({ data: null, error: null })
+      const mock = { from: vi.fn().mockReturnValue(thenable) }
+      expect(await getEventosRevisionSigatoka('F001', mock as any)).toEqual([])
+    })
+  })
+
+  describe('getEventoSigatokaById', () => {
+    it('devuelve el evento con finca_id para authz', async () => {
+      const ev = { id: 'e1', finca_id: 'F001', status: 'requires_review', created_at: 'x', datos_evento: {}, imagen_path: null, confidence_score: 0.4 }
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: ev, error: null })
+
+      const result = await getEventoSigatokaById('e1', mock as any)
+      expect(result?.finca_id).toBe('F001')
+    })
+
+    it('devuelve null cuando no existe', async () => {
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: null, error: null })
+      expect(await getEventoSigatokaById('nope', mock as any)).toBeNull()
     })
   })
 
