@@ -86,12 +86,12 @@ export function PricingCalculator() {
             className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5"
             style={{ fontSize: 'clamp(32px, 4.5vw, 56px)' }}
           >
-            Tu plan se adapta
-            <br />
-            <span className="text-campo">a tu operación.</span>
-          </h2>
-          <p className="text-[17px] text-n700 leading-[1.65] max-w-xl mb-14">
-            Precio base + $8 por finca + $4 por usuario. Sin sorpresas. Agregá o quitá fincas y usuarios cuando quieras.
+Solo pagás por lo que tenés.
+        <br />
+        <span className="text-campo">Ni más, ni menos.</span>
+        </h2>
+        <p className="text-[17px] text-n700 leading-[1.65] max-w-xl mb-14">
+          Base + $8 por finca + $4 por usuario. Mové los números y ves el precio al instante.
           </p>
         </motion.div>
 
@@ -251,26 +251,24 @@ export function PricingCalculator() {
               </div>
             </div>
 
-            {/* Quick comparison */}
-            <div className="border-2 border-negro rounded-2xl bg-white shadow-hard p-6">
-              <p className="font-mono text-[10px] font-bold tracking-[.12em] uppercase text-n400 mb-4">Rangos de precio</p>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { name: 'Agricultor', hint: '1 finca, 1-3 usuarios', from: 22, to: 30 },
-                  { name: 'Productor', hint: '1-5 fincas', from: 31, to: 79 },
-                  { name: 'Pyme', hint: '6-20 fincas', from: 81, to: 258 },
-                  { name: 'Corporativo', hint: '21+ fincas', from: 274, to: null },
-                ].map((tier) => (
-                  <div key={tier.name} className="border border-negro/15 rounded-lg p-3">
-                    <p className="text-[13px] font-bold text-negro">{tier.name}</p>
-                    <p className="text-[11px] text-n400 mb-1">{tier.hint}</p>
-                    <p className="text-[15px] font-extrabold text-campo">
-                      ${tier.from}{tier.to ? `–$${tier.to}` : '+'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
+{/* Trust block */}
+      <div className="border-2 border-negro rounded-2xl bg-white shadow-hard p-6">
+        <p className="font-mono text-[10px] font-bold tracking-[.12em] uppercase text-n400 mb-4">Transparente y sin sorpresas</p>
+        <div className="grid gap-3">
+          <div className="flex items-start gap-2.5">
+            <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
+            <span className="text-[13px] leading-snug text-n700">Pagás solo por lo que usás — sin costos fijos ocultos</span>
+          </div>
+          <div className="flex items-start gap-2.5">
+            <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
+            <span className="text-[13px] leading-snug text-n700">Escalá fincas y usuarios cuando quieras, el precio se ajusta automáticamente</span>
+          </div>
+          <div className="flex items-start gap-2.5">
+            <CheckCircle size={15} color="#3EBB6A" strokeWidth={2.5} className="flex-shrink-0 mt-0.5" />
+            <span className="text-[13px] leading-snug text-n700">Cancelá en cualquier momento — sin compromiso de permanencia</span>
+          </div>
+        </div>
+      </div>
           </motion.div>
         </div>
       </div>
