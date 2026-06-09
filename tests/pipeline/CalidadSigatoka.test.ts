@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   evaluarCalidadSigatoka,
+  decidirRecaptura,
+  MAX_RECAPTURA_SIGATOKA,
   CalidadSigatokaSchema,
   CALIDAD_FALLBACK_PASA,
   type CalidadSigatoka,
@@ -16,6 +18,28 @@ function calidad(overrides: Partial<CalidadSigatoka> = {}): CalidadSigatoka {
     ...overrides,
   }
 }
+
+describe('decidirRecaptura — cap de re-captura (P2)', () => {
+  it('foto aceptable → procesar (sin importar intentos)', () => {
+    expect(decidirRecaptura(true, 0)).toBe('procesar')
+    expect(decidirRecaptura(true, 5)).toBe('procesar')
+  })
+
+  it('no aceptable y por debajo del cap → pedir otra foto', () => {
+    expect(decidirRecaptura(false, 0)).toBe('pedir')
+    expect(decidirRecaptura(false, 1)).toBe('pedir')
+  })
+
+  it('no aceptable y en el cap → procesar igual (no insistir, P2)', () => {
+    expect(decidirRecaptura(false, MAX_RECAPTURA_SIGATOKA)).toBe('procesar')
+    expect(decidirRecaptura(false, MAX_RECAPTURA_SIGATOKA + 1)).toBe('procesar')
+  })
+
+  it('respeta un cap custom', () => {
+    expect(decidirRecaptura(false, 0, 1)).toBe('pedir')
+    expect(decidirRecaptura(false, 1, 1)).toBe('procesar')
+  })
+})
 
 describe('evaluarCalidadSigatoka — acepta', () => {
   it('foto completa y legible → aceptable', () => {

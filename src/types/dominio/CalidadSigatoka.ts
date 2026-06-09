@@ -69,6 +69,23 @@ export function evaluarCalidadSigatoka(
   return { aceptable: true, problema: null, mensaje: null }
 }
 
+// Cap de re-captura (P2): cuántas veces pedimos otra foto antes de procesar
+// igual. 2 = consistente con "máximo 2 preguntas de clarificación".
+export const MAX_RECAPTURA_SIGATOKA = 2
+
+// Decide qué hacer con una foto que NO pasó el gate, según cuántas re-capturas ya
+// pedimos. 'pedir' = solicitar otra foto; 'procesar' = no insistir más (P2 — no
+// torturar) y mandar a extracción igual (el extractor marca lo ilegible →
+// requires_review para el asesor; la imagen ya está persistida).
+export function decidirRecaptura(
+  aceptable: boolean,
+  intentosPrevios: number,
+  max: number = MAX_RECAPTURA_SIGATOKA,
+): 'pedir' | 'procesar' {
+  if (aceptable) return 'procesar'
+  return intentosPrevios < max ? 'pedir' : 'procesar'
+}
+
 // Fallback usado cuando el pase de calidad mismo falla (LLM error, JSON inválido):
 // nunca bloquear por una falla del gate — dejar pasar a extracción.
 export const CALIDAD_FALLBACK_PASA: CalidadSigatoka = {

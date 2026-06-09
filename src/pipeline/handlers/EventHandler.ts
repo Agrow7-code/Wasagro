@@ -28,7 +28,7 @@ import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMed
 import { getBoss } from '../../workers/pgBoss.js'
 import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones } from './SigatokaHandler.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
-import { evaluarCalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
+import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
 
 async function resolverMediaImagen(msg: NormalizedMessage, traceId: string): Promise<{ base64: string; mimeType: string } | null> {
@@ -210,13 +210,28 @@ export async function handleEvento(
 
         // Pase de calidad ANTES de la extracción pesada: si la foto está cortada
         // o ilegible, pedimos otra y no gastamos el extractor ni guardamos basura.
+        // Con cap (P2): tras MAX_RECAPTURA_SIGATOKA pedidos, procesamos igual la
+        // foto (el extractor marca lo ilegible → requires_review) en vez de
+        // insistir infinitamente. El contador vive en la sesión.
         const calidad = await _llm!.evaluarCalidadFichaSigatoka(media.base64, media.mimeType, traceId, costCtx)
         const veredicto = evaluarCalidadSigatoka(calidad)
-        if (!veredicto.aceptable) {
-          langfuse.trace({ id: traceId }).event({ name: 'sigatoka_recaptura', input: { problema: veredicto.problema, motivo: calidad.motivo } })
+        const sesionSig = await getOrCreateSession(msg.from, 'reporte')
+        const intentosRecaptura = Number(sesionSig.contexto_parcial['sigatoka_recaptura_count'] ?? 0)
+
+        if (decidirRecaptura(veredicto.aceptable, intentosRecaptura) === 'pedir') {
+          langfuse.trace({ id: traceId }).event({ name: 'sigatoka_recaptura', input: { problema: veredicto.problema, motivo: calidad.motivo, intento: intentosRecaptura + 1 } })
+          await updateSession(sesionSig.session_id, { contexto_parcial: { ...sesionSig.contexto_parcial, sigatoka_recaptura_count: intentosRecaptura + 1 } })
           await _sender!.enviarTexto(msg.from, veredicto.mensaje ?? 'No pude leer bien la foto. ¿Puedes mandarla de nuevo? ⚠️')
           await actualizarMensaje(mensajeId, { status: 'processed' })
           return
+        }
+
+        // Procesamos: calidad OK, o llegamos al cap (no insistimos más, P2).
+        if (!veredicto.aceptable) {
+          langfuse.trace({ id: traceId }).event({ name: 'sigatoka_recaptura_cap', level: 'WARNING', input: { intentos: intentosRecaptura, problema: veredicto.problema } })
+        }
+        if (intentosRecaptura > 0) {
+          await updateSession(sesionSig.session_id, { contexto_parcial: { ...sesionSig.contexto_parcial, sigatoka_recaptura_count: 0 } })
         }
 
         const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
