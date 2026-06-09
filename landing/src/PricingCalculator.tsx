@@ -155,8 +155,8 @@ Paga solo por lo que necesitas.
                 </button>
                 {showUserHelp && (
                   <span className="absolute left-5 top-[-8px] z-10 w-[240px] bg-negro text-pergamino text-[12px] leading-[1.5] p-3 rounded-lg shadow-lg">
-                    Cada persona que interactua con Wasagro en tu organizacion: el dueno que ve reportes, el agricultor que reporta por WhatsApp, el tecnico que revisa alertas.
-                    <span className="block text-senal mt-1">Ejemplo: 1 finca con 3 trabajadores = 4 usuarios</span>
+                    Cada persona que interactua con Wasagro en tu organizacion: el dueño que ve reportes, el agricultor que reporta por WhatsApp, el tecnico que revisa alertas.
+                    <span className="block text-senal mt-1">Ejemplo: 1 dueño + 3 trabajadores = 4 usuarios</span>
                   </span>
                 )}
               </span>
