@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────
-// WHATSAPP DEMO — segment-aware conversation
+// WHATSAPP DEMO: segment-aware conversation
 // ─────────────────────────────────────────────────────────────
 
 type ChatMessage =
@@ -24,7 +24,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'user', type: 'audio', label: '0:08', waveform: true },
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ Reporte recibido. Procesando trazabilidad...' },
-    { from: 'bot', type: 'card', title: 'Evento registrado — Lote 7B', rows: [
+    { from: 'bot', type: 'card', title: 'Evento registrado, Lote 7B', rows: [
       { label: 'Labor', value: 'Aplicación Urea 46%' },
       { label: 'Cantidad', value: '3 sacos · 150 kg' },
       { label: 'Coordenadas', value: '0.1234° N, 79.5678° O', highlight: true },
@@ -36,7 +36,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'user', type: 'audio', label: '0:11', waveform: true },
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ Práctica registrada. Calculando adopción...' },
-    { from: 'bot', type: 'card', title: 'Adopción técnica — Juan Pérez', rows: [
+    { from: 'bot', type: 'card', title: 'Adopción técnica, Juan Pérez', rows: [
       { label: 'Técnica', value: 'Aplicación bioinsumo Trichoderma' },
       { label: 'Dosis', value: '2 kg · conforme protocolo', highlight: true },
       { label: 'Cultivo', value: 'Cacao CCN-51' },
@@ -48,10 +48,10 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'user', type: 'audio', label: '0:06', waveform: true },
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ Actividad verificada. Actualizando expediente crediticio...' },
-    { from: 'bot', type: 'card', title: 'Verificación de inversión — Crédito #4821', rows: [
+    { from: 'bot', type: 'card', title: 'Verificación de inversión, Crédito #4821', rows: [
       { label: 'Insumo aplicado', value: 'Fertilizante Urea 46%' },
       { label: 'Valor verificado', value: '$312.00 USD', highlight: true },
-      { label: 'Coincide con plan', value: '✓ Sí — semana 6/12', highlight: true },
+      { label: 'Coincide con plan', value: '✓ Sí, semana 6/12', highlight: true },
       { label: 'Riesgo actualizado', value: 'BAJO 🟢' },
       { label: 'Próx. verificación', value: '14 días' },
     ]},
@@ -72,7 +72,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'user', type: 'audio', label: '0:09', waveform: true },
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ Cosecha registrada. Actualizando oferta agregada...' },
-    { from: 'bot', type: 'card', title: 'Producción — Semana 18', rows: [
+    { from: 'bot', type: 'card', title: 'Producción, Semana 18', rows: [
       { label: 'Socio', value: 'Carlos Mendoza · Finca El Prado' },
       { label: 'Cosecha', value: '18 quintales cacao húmedo' },
       { label: 'Calidad', value: 'Fermentación 5 días ✓', highlight: true },
@@ -84,7 +84,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'user', type: 'audio', label: '0:07', waveform: true },
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ Labor registrada. Actualizando costos por lote...' },
-    { from: 'bot', type: 'card', title: 'Costo real — Lote Sector Norte', rows: [
+    { from: 'bot', type: 'card', title: 'Costo real, Lote Sector Norte', rows: [
       { label: 'Labor', value: '4 jornales · deshierba' },
       { label: 'Costo', value: '$48.00 USD hoy', highlight: true },
       { label: 'Acumulado mes', value: '$312.00 USD este lote' },
@@ -99,7 +99,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'bot', type: 'card', title: 'Tu resumen de hoy', rows: [
       { label: 'Aplicación', value: 'Cipermetrina 0.5L · Lote 2' },
       { label: 'Trabajadores', value: '2 personas · mañana' },
-      { label: 'Alerta ⚠️', value: 'Dosis alta — revisar ficha', highlight: true },
+      { label: 'Alerta ⚠️', value: 'Dosis alta, revisar ficha', highlight: true },
       { label: 'Stock bodega', value: '1.5L Cipermetrina restantes' },
       { label: 'Próximo vencimiento', value: 'Aplicación preventiva en 12 días' },
     ]},
@@ -109,7 +109,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ ¡Listo! Guardé tu reporte. Así quedó 👇' },
     { from: 'bot', type: 'card', title: 'Tu anotación de hoy', rows: [
-      { label: 'Qué hiciste', value: 'Cosecha — 4 canastos cacao' },
+      { label: 'Qué hiciste', value: 'Cosecha, 4 canastos cacao' },
       { label: 'Cuánto', value: '~80 kg estimados' },
       { label: 'Precio mercado', value: '$1.20/kg hoy', highlight: true },
       { label: 'Tu ganancia est.', value: '$96.00 esta cosecha', highlight: true },
@@ -121,7 +121,7 @@ const WA_DEMOS: Record<string, ChatMessage[]> = {
     { from: 'bot', type: 'thinking' },
     { from: 'bot', type: 'text', text: '✅ El reporte llegó a tu patrón. ¡Buen trabajo!' },
     { from: 'bot', type: 'card', title: 'Reporte enviado al dueño', rows: [
-      { label: 'Labor', value: 'Podas — Sector B completo' },
+      { label: 'Labor', value: 'Podas, Sector B completo' },
       { label: 'Trabajadores', value: '3 personas · 8 hrs' },
       { label: 'Foto enviada', value: '✓ Evidencia guardada', highlight: true },
       { label: 'Alerta detectada', value: '⚠️ Moniliasis en 2 plantas', highlight: true },
@@ -237,7 +237,7 @@ const SEGMENTS: Record<string, SegmentContent> = {
     },
     solution: {
       headline: 'Datos verificados directamente del campo.',
-      body: 'Wasagro captura eventos reales — aplicaciones, cosechas, labores — con georreferencia, timestamp y confianza de extracción. Via API, los integrás a tu motor de riesgo en minutos.',
+      body: 'Wasagro captura eventos reales, aplicaciones, cosechas, labores, con georreferencia, timestamp y confianza de extracción. Via API, los integrás a tu motor de riesgo en minutos.',
     },
     features: [
       { icon: Zap, title: 'API de eventos productivos', desc: 'Integra labor, cosecha y aplicación de insumos con confidence_score y geolocalización a tu plataforma.' },
@@ -367,7 +367,7 @@ const SEGMENTS: Record<string, SegmentContent> = {
     },
     solution: {
       headline: 'Tus trabajadores reportan, vos controlás.',
-      body: 'Ellos mandan un audio al terminar cada labor. Vos recibís el resumen en tu celular. Si algo está raro — una plaga, una dosis alta — te llega una alerta al instante.',
+      body: 'Ellos mandan un audio al terminar cada labor. Vos recibís el resumen en tu celular. Si algo está raro, una plaga, una dosis alta, te llega una alerta al instante.',
     },
     features: [
       { icon: ShieldCheck, title: 'Evidencia de cada labor', desc: 'Foto y audio que confirman que la tarea se hizo. Nunca más "se supone que lo hicieron".' },
@@ -677,7 +677,7 @@ export default function Brochure() {
           </p>
         </FadeUp>
 
-        {/* DEMO SECTION — WhatsApp simulator + proof numbers */}
+        {/* DEMO SECTION: WhatsApp simulator + proof numbers */}
         <FadeUp delay={0.08}>
           <div className="mb-20">
             <div className="flex items-center gap-2 mb-4">

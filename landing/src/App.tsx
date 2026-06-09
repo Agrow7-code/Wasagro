@@ -35,7 +35,7 @@ const WA_B2B = 'https://wa.me/50672134878?text=Hola%2C%20represento%20una%20orga
 const WA_B2C = 'https://wa.me/50672134878?text=Hola%2C%20tengo%20mi%20propia%20finca%20y%20quiero%20empezar%20con%20Wasagro'
 
 // ─────────────────────────────────────────────────────────────
-// LOGO — isotipo v3: W condensada + señal GPS (dot centrado)
+// LOGO: isotipo v3: W condensada + señal GPS (dot centrado)
 // ─────────────────────────────────────────────────────────────
 function LogoMark({ size = 28, onDark = false }: { size?: number; onDark?: boolean }) {
   const w = Math.round(size * 0.6)
@@ -191,7 +191,7 @@ function Nav() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// WHATSAPP PHONE MOCK — modern redesign
+// WHATSAPP PHONE MOCK: modern redesign
 // ─────────────────────────────────────────────────────────────
 type WaMessage = {
   from: 'user' | 'bot'
@@ -219,7 +219,7 @@ const WA_MESSAGES: WaMessage[] = [
   { from: 'user', text: 'Hay sigatoka en lote 12', time: '10:30' },
   {
     from: 'bot',
-    lines: ['⚠ Alerta — Lote 12', 'Sigatoka · Severidad 3/5', 'Últ. tratamiento: 18 días · Revisar'],
+    lines: ['⚠ Alerta, Lote 12', 'Sigatoka · Severidad 3/5', 'Últ. tratamiento: 18 días · Revisar'],
     time: '10:30',
     alert: true,
   },
@@ -273,13 +273,13 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
   return (
     <div ref={ref} className="select-none mx-auto" style={{ maxWidth: 275, width: '100%', position: 'relative' }}>
 
-      {/* Side buttons — flush with frame, zero shadow of their own */}
+      {/* Side buttons: flush with frame, zero shadow of their own */}
       <div style={{ position: 'absolute', left: -2, top: 112, width: 2, height: 26, background: '#0a0a0a', borderRadius: '1px 0 0 1px' }} />
       <div style={{ position: 'absolute', left: -2, top: 150, width: 2, height: 44, background: '#0a0a0a', borderRadius: '1px 0 0 1px' }} />
       <div style={{ position: 'absolute', left: -2, top: 204, width: 2, height: 44, background: '#0a0a0a', borderRadius: '1px 0 0 1px' }} />
       <div style={{ position: 'absolute', right: -2, top: 164, width: 2, height: 60, background: '#0a0a0a', borderRadius: '0 1px 1px 0' }} />
 
-      {/* Phone frame — padding uniforme en los 4 lados: frame_radius - padding = screen_radius */}
+      {/* Phone frame: padding uniforme en los 4 lados: frame_radius - padding = screen_radius */}
       <div
         style={{
           background: '#111',
@@ -288,16 +288,16 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
           boxShadow: '8px 8px 0 0 #0D0F0C',
         }}
       >
-        {/* Screen — position relative para que el DI sea overlay interno */}
+        {/* Screen: position relative para que el DI sea overlay interno */}
         <div style={{ borderRadius: 40, overflow: 'hidden', position: 'relative' }}>
 
-          {/* Dynamic Island — flota DENTRO de la pantalla, igual que un iPhone real */}
+          {/* Dynamic Island: flota DENTRO de la pantalla, igual que un iPhone real */}
           <div style={{
             position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
             width: 106, height: 28, background: '#000', borderRadius: 999, zIndex: 10,
           }} />
 
-          {/* Status bar — altura suficiente para convivir con el DI */}
+          {/* Status bar: altura suficiente para convivir con el DI */}
           <div style={{ background: '#075E54', height: 44, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 16px 6px' }}>
             <span style={{ color: '#fff', fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>9:41</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -416,7 +416,7 @@ function PhoneMock({ autoPlay = false }: { autoPlay?: boolean }) {
           </div>
         </div>
 
-        {/* Home indicator — dentro del frame, centrado */}
+        {/* Home indicator: dentro del frame, centrado */}
         <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
           <div style={{ width: 42, height: 5, background: 'rgba(255,255,255,0.18)', borderRadius: 999 }} />
         </div>
@@ -476,7 +476,7 @@ function Hero() {
             className="text-[17px] text-n700 leading-[1.65] max-w-md mb-8"
           >
             Captura eventos de campo en{' '}
-            <strong className="text-negro">30 segundos</strong> — voz, texto o foto.
+            <strong className="text-negro">30 segundos</strong>, voz, texto o foto.
             Sin apps nuevas. Sin capacitaciones. Los datos que la exportadora necesita,{' '}
             <strong className="text-negro">estructurados automáticamente.</strong>
           </motion.p>
@@ -619,7 +619,7 @@ const STEPS = [
     num: '01',
     icon: Mic,
     title: 'Habla (o escribe)',
-    desc: 'El trabajador manda un audio, texto o foto por WhatsApp — exactamente como ya lo hace hoy. Sin instrucciones, sin apps, sin cambios.',
+    desc: 'El trabajador manda un audio, texto o foto por WhatsApp, exactamente como ya lo hace hoy. Sin instrucciones, sin apps, sin cambios.',
     example: '"Fungicida · 2.5 L/ha · Lote 3"',
   },
   {
@@ -648,7 +648,7 @@ function HowItWorks() {
     >
       <div className="max-w-6xl mx-auto px-6">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— 03 pasos</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">03 pasos</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5" style={{ fontSize: 'clamp(32px, 4.5vw, 56px)' }}>
             Sin app. Sin form. Sin magia.
             <br />
@@ -694,7 +694,7 @@ function WhatsAppSection() {
       <div className="absolute inset-0 dot-grid-light pointer-events-none opacity-40" />
       <div className="relative max-w-6xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-senal/70 mb-4">— Conversación real de campo</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-senal/70 mb-4">Conversación real de campo</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-pergamino mb-5" style={{ fontSize: 'clamp(30px, 4vw, 52px)' }}>
             Así se ve Wasagro
             <br />
@@ -708,7 +708,7 @@ function WhatsAppSection() {
               { icon: CheckCircle, text: 'Tipo de insumo y dosis por hectárea', color: '#3EBB6A' },
               { icon: CheckCircle, text: 'Lote y hectáreas afectadas', color: '#3EBB6A' },
               { icon: CheckCircle, text: 'Fecha, hora y trabajador', color: '#3EBB6A' },
-              { icon: AlertTriangle, text: 'Alertas de dosis o plagas — automáticas', color: '#C9F03B' },
+              { icon: AlertTriangle, text: 'Alertas de dosis o plagas, automáticas', color: '#C9F03B' },
             ].map(({ icon: Icon, text, color }) => (
               <div key={text} className="flex items-center gap-3">
                 <Icon size={16} color={color} strokeWidth={2} />
@@ -779,7 +779,7 @@ function Features() {
     <section className="py-24 border-b-2 border-negro" style={{ background: '#EAE6DC' }} aria-label="Qué captura Wasagro">
       <div className="max-w-6xl mx-auto px-6">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— Eventos que captura</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">Eventos que captura</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}>
             Todo lo que pasa en el campo.
             <br />
@@ -849,7 +849,7 @@ function Audiences() {
         'Alertas al instante cuando algo sale mal',
         'Historial completo por lote y trabajador',
         'Reporte semanal automático los domingos',
-        'El agricultor solo habla — Wasagro estructura',
+        'El agricultor solo habla, Wasagro estructura',
       ],
       cta: 'Empezar con mi finca',
       link: WA_B2C,
@@ -868,7 +868,7 @@ function Audiences() {
     >
       <div className="max-w-6xl mx-auto px-6">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">— Dos perspectivas</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-3">Dos perspectivas</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-14" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)' }}>
             ¿Tienes fincas proveedoras
             <br />
@@ -928,7 +928,7 @@ function Audiences() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PROOF BAR — animated ticker
+// PROOF BAR: animated ticker
 // ─────────────────────────────────────────────────────────────
 const TICKER_ITEMS = [
   'REGISTRA EN 30 SEGUNDOS',
@@ -978,7 +978,7 @@ function FinalCTA() {
     <section className="py-28 relative overflow-hidden dot-grid" style={{ background: '#F5F1E8' }} aria-label="Llamado a acción">
       <div className="max-w-3xl mx-auto px-6 text-center">
         <FadeUp>
-          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-5">— Empieza hoy</p>
+          <p className="font-mono text-[11px] font-bold tracking-[.14em] uppercase text-n400 mb-5">Empieza hoy</p>
           <h2 className="font-bold leading-[1.0] tracking-[-0.03em] text-negro mb-6" style={{ fontSize: 'clamp(36px, 5vw, 68px)' }}>
             Empieza con un
             <br />

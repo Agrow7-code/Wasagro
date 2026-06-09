@@ -5,7 +5,7 @@ import { Topbar } from '../layout/Topbar'
 import { useAuth } from '../../auth/useAuth'
 
 // ── Datos de la finca ─────────────────────────────────────────────────────────
-// Finca El Porvenir — Federico Aguirre — Pimocha, Babahoyo, Ecuador
+// Finca El Porvenir, Federico Aguirre, Pimocha, Babahoyo, Ecuador
 // Coordenadas reales (~-1.7708°S, 79.5760°W), 9 lotes, 22.4 ha total
 
 const FINCA = {
@@ -17,7 +17,7 @@ const FINCA = {
   fecha: '12 May 2026',
 }
 
-// Coordenadas reales [lat, lng] — Pimocha, Babahoyo (~-1.771°S, 79.576°W)
+// Coordenadas reales [lat, lng], Pimocha, Babahoyo (~-1.771°S, 79.576°W)
 // Los 9 lotes comparten vértices exactos en los bordes adyacentes.
 type LatLng = [number, number]
 
@@ -230,7 +230,7 @@ function MapaFinca({
         // Tooltip permanente con nombre del lote + severidad
         const tooltipHtml = `
           <div style="font-family:system-ui;line-height:1.3;">
-            <div style="font-weight:800;font-size:12px;color:#0D0F0C;">${lote.id} — ${lote.nombre}</div>
+            <div style="font-weight:800;font-size:12px;color:#0D0F0C;">${lote.id} · ${lote.nombre}</div>
             <div style="font-size:11px;color:${c.fill};font-weight:700;margin-top:2px;">
               ${lote.severidad}% ${c.label}
             </div>
@@ -313,7 +313,7 @@ function LoteDetail({ lote }: { lote: Lote }) {
     <div style={{ background: c.bg, border: `2px solid ${c.stroke}`, boxShadow: `3px 3px 0 0 ${c.stroke}`, padding: '16px 18px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#0D0F0C' }}>{lote.id} — {lote.nombre}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#0D0F0C' }}>{lote.id} · {lote.nombre}</div>
           <div style={{ fontSize: 11, color: 'rgba(13,15,12,0.5)', marginTop: 2 }}>{lote.ha} ha · Rev. {lote.ultimaRevision}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -325,7 +325,7 @@ function LoteDetail({ lote }: { lote: Lote }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
         <div style={{ background: 'rgba(255,255,255,0.55)', padding: '8px 10px' }}>
           <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: 'rgba(13,15,12,0.4)', marginBottom: 3 }}>Plaga</div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#0D0F0C' }}>{lote.plaga ?? '— Sin plaga'}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#0D0F0C' }}>{lote.plaga ?? 'Sin plaga'}</div>
         </div>
         <div style={{ background: 'rgba(255,255,255,0.55)', padding: '8px 10px' }}>
           <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: 'rgba(13,15,12,0.4)', marginBottom: 3 }}>Focos</div>
@@ -432,8 +432,8 @@ export function PlagasView() {
         <div style={{ background: '#FFEEEA', border: '2px solid #C43020', boxShadow: '4px 4px 0 0 #C43020', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 18, flexShrink: 0 }}>⚠</span>
           <span style={{ fontSize: 13, color: '#C43020', fontWeight: 600 }}>
-            <strong>ALERTA CRÍTICA — </strong>
-            L4 Central: severidad 78% — brote combinado Sigatoka negra + Trips.
+            <strong>ALERTA CRÍTICA: </strong>
+            L4 Central: severidad 78%, brote combinado Sigatoka negra + Trips.
             Aplicación de Mancozeb pendiente. Riesgo estimado 35% del lote si no se actúa en 48h.
           </span>
         </div>
@@ -573,7 +573,7 @@ export function PlagasView() {
                           <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'monospace', color: c.fill }}>{lote.severidad}%</span>
                         </div>
                       </td>
-                      <td style={{ padding: '11px 13px', fontSize: 11, color: 'rgba(13,15,12,0.65)' }}>{lote.plaga ?? '—'}</td>
+                      <td style={{ padding: '11px 13px', fontSize: 11, color: 'rgba(13,15,12,0.65)' }}>{lote.plaga ?? 'N/A'}</td>
                       <td style={{ padding: '11px 13px', fontSize: 12, fontWeight: 700, color: lote.focos > 4 ? '#C43020' : '#0D0F0C' }}>{lote.focos}</td>
                       <td style={{ padding: '11px 13px', fontSize: 11, color: 'rgba(13,15,12,0.65)' }}>{lote.trabajador}</td>
                       <td style={{ padding: '11px 13px', fontSize: 11, fontFamily: 'monospace', color: 'rgba(13,15,12,0.5)' }}>{lote.ultimaRevision}</td>
@@ -630,7 +630,7 @@ export function PlagasView() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 15px', background: 'rgba(201,240,59,0.08)', border: '1px solid rgba(201,240,59,0.3)' }}>
           <div style={{ width: 6, height: 6, background: '#C9F03B', borderRadius: '50%', flexShrink: 0 }} />
           <span style={{ fontSize: 12, color: 'rgba(13,15,12,0.6)' }}>
-            <strong style={{ color: '#0D0F0C' }}>Wasagro AI — </strong>
+            <strong style={{ color: '#0D0F0C' }}>Wasagro AI: </strong>
             L4 Central: aplicar Mancozeb 80% (2.5 L/ha) + Aceite mineral (1.5 L/ha) de inmediato.
             No aplicar con lluvias en las próximas 6h. Stock disponible: 12L Mancozeb.
           </span>

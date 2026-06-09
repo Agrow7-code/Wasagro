@@ -41,7 +41,7 @@ export function AgricultorIndividual() {
                 {registrosHoy}
               </div>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#1B3D24', marginBottom: 4 }}>
-                ✓ Bien — sigue así
+                ✓ Bien, sigue así
               </div>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(13,15,12,0.45)' }}>
                 Meta: 5 por día

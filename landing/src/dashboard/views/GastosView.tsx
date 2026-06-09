@@ -37,7 +37,7 @@ export function GastosView() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
           {[
             { label: 'Registros hoy',     value: String(eventos.length),                          color: '#C9A800', bg: '#FFFBF0' },
-            { label: 'Gasto total',       value: totalMonto > 0 ? `$${totalMonto.toLocaleString()}` : '—', color: '#0D0F0C', bg: '#F5F1E8' },
+{ label: 'Gasto total', value: totalMonto > 0 ? `$${totalMonto.toLocaleString()}` : 'N/A', color: '#0D0F0C', bg: '#F5F1E8' },
             { label: 'Confirmados',       value: String(eventos.filter(e => e.estado === 'confirmado').length), color: '#3EBB6A', bg: '#F0FFF4' },
             { label: 'Confianza promedio', value: `${avgConf}%`,                                   color: avgConf >= 90 ? '#3EBB6A' : '#C9A800', bg: '#F5F1E8' },
           ].map(k => (

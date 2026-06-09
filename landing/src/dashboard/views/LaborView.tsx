@@ -39,7 +39,7 @@ export function LaborView() {
           {[
             { label: 'Labores registradas', value: String(eventos.length),   color: '#0D0F0C' },
             { label: 'Lotes trabajados',    value: String(lotes.length),      color: '#1B3D24' },
-            { label: 'Jornales totales',    value: totalJornales > 0 ? String(totalJornales) : '—', color: '#2A50D4' },
+{ label: 'Jornales totales', value: totalJornales > 0 ? String(totalJornales) : 'N/A', color: '#2A50D4' },
             { label: 'Confianza promedio',  value: `${avgConf}%`,             color: avgConf >= 90 ? '#3EBB6A' : '#C9A800' },
           ].map(k => (
             <div key={k.label} style={{ background: '#F5F1E8', border: `2px solid ${k.color}`, boxShadow: `3px 3px 0 0 ${k.color}`, padding: '16px 18px' }}>

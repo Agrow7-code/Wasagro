@@ -196,7 +196,7 @@ export function GerenteAgricola() {
                   {[
                     'Finca La Esperanza alcanzó 96% de su meta de registros · 104 eventos',
                     'Finca El Progreso activa pero con 2 alertas de sigatoka y dosis excesiva',
-                    'Finca San Pedro requiere atención — monilia detectada en 3 lotes',
+                    'Finca San Pedro requiere atención, monilia detectada en 3 lotes',
                     '3 trabajadores sin actividad esta semana (San Pedro)',
                   ].map((b, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13 }}>

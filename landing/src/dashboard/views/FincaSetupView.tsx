@@ -220,7 +220,7 @@ export function FincaSetupView() {
         { maxZoom: 20, opacity: 0.55 }
       ).addTo(map)
 
-      // Click handler — añade vértice draggable
+      // Click handler: añade vértice draggable
       map.on('click', (e) => {
         if (!drawingRef.current) return
         const pt: LatLng = [e.latlng.lat, e.latlng.lng]
@@ -490,15 +490,15 @@ export function FincaSetupView() {
   // ── Instrucción contextual ────────────────────────────────────────────────────
 
   function instruccion() {
-    if (editingLotId) return `Editando "${editingLotOrigName}" — mové vértices arrastrándolos o agregá más clicando. Cerrá cuando esté listo.`
+    if (editingLotId) return `Editando "${editingLotOrigName}", mové vértices arrastrándolos o agregá más clicando. Cerrá cuando esté listo.`
     if (drawMode === 'idle') {
       return lots.length === 0
         ? 'Tocá "Nuevo lote" para empezar a dibujar. Cada clic marca un vértice.'
         : 'Tocá "Nuevo lote" para dibujar otro lote, o guardá los que ya tenés.'
     }
     if (wipCount === 0) return 'Tocá sobre el mapa para marcar el primer vértice del lote.'
-    if (wipCount < 3) return `${wipCount} vértice${wipCount > 1 ? 's' : ''} — necesitás al menos 3 para cerrar el lote.`
-    return `${wipCount} vértices — podés arrastrar cualquier vértice para moverlo. Tocá "Cerrar lote" cuando esté listo.`
+    if (wipCount < 3) return `${wipCount} vértice${wipCount > 1 ? 's' : ''}, necesitás al menos 3 para cerrar el lote.`
+    return `${wipCount} vértices, podés arrastrar cualquier vértice para moverlo. Tocá "Cerrar lote" cuando esté listo.`
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -553,7 +553,7 @@ export function FincaSetupView() {
 
       <Topbar
         title="Configurar finca"
-        badge={step === 1 ? 'Paso 1 — Ubicar' : `Paso 2 — Dibujar lotes · ${lots.length} dibujado${lots.length !== 1 ? 's' : ''}`}
+        badge={step === 1 ? 'Paso 1, Ubicar' : `Paso 2, Dibujar lotes · ${lots.length} dibujado${lots.length !== 1 ? 's' : ''}`}
         avatarInitials={user ? getInitials(user.nombre) : 'WA'}
       />
 
@@ -776,7 +776,7 @@ export function FincaSetupView() {
                   {editingLotId ? 'Actualizar nombre del lote' : '¿Cómo se llama este lote?'}
                 </div>
                 <div style={{ fontSize: 12, color: 'rgba(13,15,12,0.5)' }}>
-                  Usá el nombre que usan en el campo — "el de arriba", "lote 3", "río".
+                  Usá el nombre que usan en el campo, "el de arriba", "lote 3", "río".
                 </div>
               </div>
               <input

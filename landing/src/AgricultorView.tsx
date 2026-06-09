@@ -72,14 +72,14 @@ const LOTES: Lote[] = [
 
 const HISTORIAL: GrupoRegistros[] = [
   {
-    label: 'Hoy — Sábado 25 de abril',
+    label: 'Hoy, Sábado 25 de abril',
     items: [
       { id: 'r1', dia: 25, mes: 'Abr', icono: 'insumo', titulo: 'Apliqué fungicida', detalle: 'Mancozeb · 2.5 L/ha', lote: 'Lote A', hora: '14:31', fuente: 'voz' },
       { id: 'r2', dia: 25, mes: 'Abr', icono: 'cosecha', titulo: 'Cosecha', detalle: '420 kg · Variedad Williams', lote: 'Lote A', hora: '11:00', fuente: 'texto' },
     ],
   },
   {
-    label: 'Ayer — Viernes 24 de abril',
+    label: 'Ayer, Viernes 24 de abril',
     items: [
       { id: 'r3', dia: 24, mes: 'Abr', icono: 'labor', titulo: 'Deshoje', detalle: 'Labor cultural · 2.5 ha', lote: 'Lote B', hora: '09:45', fuente: 'voz' },
       { id: 'r4', dia: 24, mes: 'Abr', icono: 'insumo', titulo: 'Abono foliar', detalle: 'Urea foliar · 1.2 L/ha', lote: 'Lote B', hora: '16:00', fuente: 'imagen' },
@@ -269,7 +269,7 @@ export default function AgricultorView() {
         <header className="h-[68px] bg-wa-pergamino border-b-2 border-wa-tierra flex items-center justify-between px-8 sticky top-0 z-40">
           <div>
             <div className="text-[13px] text-[rgba(13,15,12,0.45)] mb-[1px]">Buenos días,</div>
-            <div className="text-[19px] font-bold tracking-[-0.3px]">Luis — ¿qué pasó hoy en La Colina?</div>
+            <div className="text-[19px] font-bold tracking-[-0.3px]">Luis, ¿qué pasó hoy en La Colina?</div>
           </div>
           <div className="flex items-center gap-2.5">
             <div className="font-mono text-[12px] font-bold px-3.5 py-[7px] border-2 border-wa-tierra text-[rgba(13,15,12,0.45)] flex items-center gap-1.5">

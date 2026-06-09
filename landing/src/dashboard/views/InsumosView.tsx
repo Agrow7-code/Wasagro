@@ -48,7 +48,7 @@ export function InsumosView() {
             <div style={{ fontSize: 13, fontWeight: 700, color: '#D45828', marginBottom: 6 }}>⚠ Requiere revisión</div>
             {pendientes.map(e => (
               <div key={e.id} style={{ fontSize: 12, color: 'rgba(13,15,12,0.65)', marginTop: 3 }}>
-                {e.titulo} — {e.nota}
+                {e.titulo} · {e.nota}
               </div>
             ))}
           </div>

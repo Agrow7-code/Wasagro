@@ -319,7 +319,7 @@ function ActividadYMetricas({ metricas, onCrearMetrica }: { metricas: MetricaGua
           })}
         </div>
 
-        {/* Métricas calculadas — integradas en esta sección */}
+        {/* Métricas calculadas: integradas en esta sección */}
         {metricas.length > 0 && (
           <>
             <div style={{ borderTop: '2px solid rgba(13,15,12,0.08)', paddingTop: 16, marginTop: 4 }}>

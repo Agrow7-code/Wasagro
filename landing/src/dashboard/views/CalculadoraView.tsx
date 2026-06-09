@@ -142,7 +142,7 @@ function ultimoTipo(bloques: Bloque[]): Bloque['tipo'] | null {
 
 function esValor(tipo: Bloque['tipo'] | null) {
   return tipo === 'var' || tipo === 'num' || tipo === 'paren'
-  // 'paren' solo el close actúa como valor — refinado en lógica de inserción
+  // 'paren' solo el close actúa como valor, refinado en lógica de inserción
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -599,7 +599,7 @@ export function CalculadoraView() {
                         color: guardado ? '#fff' : nombreMetrica.trim() ? '#F5F1E8' : 'rgba(13,15,12,0.35)',
                         border: '2px solid transparent', padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: nombreMetrica.trim() ? 'pointer' : 'default',
                       }}>
-                      {guardado ? '✓ Guardada — volviendo al resumen…' : 'Guardar métrica'}
+                      {guardado ? '✓ Guardada, volviendo al resumen…' : 'Guardar métrica'}
                     </button>
                   </div>
                   <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(13,15,12,0.4)' }}>

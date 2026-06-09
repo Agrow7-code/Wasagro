@@ -39,7 +39,7 @@ export function CosechaView() {
           {[
             { label: 'Cosechas registradas', value: String(eventos.length),              color: '#3EBB6A' },
             { label: 'Lotes cosechados',     value: String(lotes.length),                color: '#1B3D24' },
-            { label: 'Kg totales',           value: totalKg > 0 ? `${totalKg} kg` : '—', color: '#0D0F0C' },
+{ label: 'Kg totales', value: totalKg > 0 ? `${totalKg} kg` : 'N/A', color: '#0D0F0C' },
             { label: 'Confianza promedio',   value: `${avgConf}%`,                       color: avgConf >= 90 ? '#3EBB6A' : '#C9A800' },
           ].map(k => (
             <div key={k.label} style={{ background: '#F5F1E8', border: `2px solid ${k.color}`, boxShadow: `3px 3px 0 0 ${k.color}`, padding: '16px 18px' }}>
