@@ -552,99 +552,102 @@ export class WasagroAIAgent implements IWasagroLLM {
     return fallback
   }
 
+  // Extracción en TRES PASADAS PARALELAS: la ficha es demasiado densa para una
+  // sola llamada de visión (el modelo suelta secciones de forma no-determinista).
+  // Cada pasada enfoca una zona acotada → captura confiable; luego se mergea.
+  //   1) izquierda: encabezado + matriz P1..P19 + DATOS A..M
+  //   2) tablas: 11 y 00 semanas
+  //   3) plagas: EF + plagas foliares + diferidos
+  // Van en paralelo → la latencia es ~la de una sola llamada. [ADR 016]
   async extraerMuestreoSigatoka(
     base64: string,
     mimeType: string,
     traceId: string,
     costCtx?: CostContext,
   ): Promise<SigatokaMuestreo> {
-    const MAX_RETRIES = 2
     const trace = this.#lf.trace({ id: traceId })
-    const promptName = 'sp-03e-muestreo-sigatoka.md'
-    const rawPrompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
-    const genOpts: Record<string, unknown> = { name: 'sigatoka_extraction', model: 'wasagro-ocr-tier', input: { formulario: 'muestreo_sigatoka_banano' } }
-    const pc = PromptManager.getPromptClient(promptName)
-    if (pc) genOpts['prompt'] = pc
-    const generation = trace.generation(genOpts as any)
+    const generation = trace.generation({ name: 'sigatoka_extraction', model: 'wasagro-ocr-tier', input: { formulario: 'muestreo_sigatoka_banano', modo: 'tres_pasadas' } } as any)
 
-    let lastZodErrors: string | null = null
-    let lastJson: any = null
+    const [izqRaw, tabRaw, plgRaw] = await Promise.all([
+      this.#extraerParteSigatoka('sp-03e1-sigatoka-izquierda.md', 'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.', base64, mimeType, traceId, costCtx),
+      this.#extraerParteSigatoka('sp-03e2-sigatoka-derecha.md', 'Extrae SOLO las tablas de PLANTAS DE 11 SEMANAS y 00 SEMANAS.', base64, mimeType, traceId, costCtx),
+      this.#extraerParteSigatoka('sp-03e3-sigatoka-plagas.md', 'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).', base64, mimeType, traceId, costCtx),
+    ])
+    const izq: any = izqRaw ?? {}
+    const tab: any = tabRaw ?? {}
+    const plg: any = plgRaw ?? {}
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const userContent = attempt === 0
-        ? 'Extrae los datos de este formulario de muestreo de Sigatoka.'
-        : `Corrección requerida (intento ${attempt}/${MAX_RETRIES}). Tu respuesta anterior falló la validación. Errores: ${lastZodErrors}. Devuelve el JSON COMPLETO corregido siguiendo el schema del system prompt.`
-
-      try {
-        const raw = await this.#adapter.generarTexto(userContent, {
-          systemPrompt: rawPrompt,
-          responseFormat: 'json_object',
-          imageBase64: base64,
-          imageMimeType: mimeType,
-          traceId,
-          generationName: `sigatoka_attempt_${attempt}`,
-          // Tier 'ultra' = Gemini-3.1-FL/3-F/2.5-F como primarios (multimodal
-          // nativo + temp baja + respeta JSON schemas + 500 RPD propio).
-          // Kimi-K2.6 (tier 'ocr', temp=1.0) fue probado 3 veces: devolvió
-          // placeholders meta, JSONs que fallan Zod, y timeouts cuando se
-          // intentaba retry. Para schema denso (matriz 19×3 + plantas 11sem
-          // + fórmulas A..M) necesitamos un modelo determinístico, no random.
-          modelClass: 'ultra',
-          // Gemini Flash típicamente 5-15s para vision + JSON estructurado.
-          // 30s da margen para casos complejos sin pegar fuerte el SLA P3.
-          timeoutMs: 30_000,
-          ...this.#costOpts(costCtx),
-        })
-
-        const texto = raw.replace(/```json|```/g, '').trim()
-        let json: any
-        try { json = JSON.parse(texto) } catch {
-          lastZodErrors = `JSON inválido: ${texto.slice(0, 120)}`
-          trace.event({ name: 'sigatoka_parse_error', level: 'WARNING', input: { attempt, raw: texto.slice(0, 120) } })
-          continue
-        }
-        lastJson = json
-
-        // Recálculo determinista por columna (null-safe: no tira aunque falte A).
-        json.resumenColumnas = (json.resumenColumnas ?? []).map(calcularColumna)
-
-        // Estado por celda (I5): envuelve las 9 celdas de muestra de cada punto
-        // a { valor, estado }. Determinista, tolera celdas crudas o ya envueltas.
-        json.puntosMuestreo = (json.puntosMuestreo ?? []).map(normalizarPunto)
-
-        const camposDudosos = [
-          ...(json.camposDudosos ?? []),
-          ...detectarCamposDudosos(json.resumenColumnas),
-        ]
-
-        const parsed = SigatokaMuestreoSchema.safeParse({
-          ...json,
-          requiereValidacion: camposDudosos.length > 0 || (json.confidenceScore ?? 0) < 0.75,
-          camposDudosos,
-        })
-
-        if (parsed.success) {
-          generation.end({ output: { semana: parsed.data.semana, finca: parsed.data.nombreFinca, confianza: parsed.data.confidenceScore, requiere_validacion: parsed.data.requiereValidacion, n_dudosos: camposDudosos.length, attempts: attempt + 1 } })
-          return parsed.data
-        }
-
-        lastZodErrors = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
-        trace.event({ name: 'sigatoka_zod_retry', level: 'WARNING', input: { attempt, errors: lastZodErrors } })
-
-      } catch (err) {
-        // Error de adapter/red. NO lanzamos: en el último intento caemos al
-        // fallback graceful como cualquier otra falla (P1/P4 — nunca silencio).
-        lastZodErrors = lastZodErrors ?? `error de extracción: ${String(err)}`
-        trace.event({ name: 'sigatoka_attempt_error', level: 'ERROR', input: { attempt, error: String(err) } })
-      }
+    const PLAGAS_VACIAS = { ceramida: { h: null, p: null, m: null }, sibine: { h: null, p: null, m: null } }
+    const merged: any = {
+      zona: izq.zona ?? null, codigoFinca: izq.codigoFinca ?? null, nombreFinca: izq.nombreFinca ?? null,
+      semana: izq.semana ?? null, periodo: izq.periodo ?? null, fecha: izq.fecha ?? null, supervisor: izq.supervisor ?? null,
+      puntosMuestreo: (izq.puntosMuestreo ?? []).map(normalizarPunto),
+      resumenColumnas: (izq.resumenColumnas ?? []).map(calcularColumna),
+      plantas: plg.plantas ?? [],
+      plantas11sem: tab.plantas11sem ?? [],
+      plantas00sem: tab.plantas00sem ?? [],
+      plagasFoliares: plg.plagasFoliares ?? PLAGAS_VACIAS,
+      pEfFinca: plg.pEfFinca ?? null,
+      erradicadasBsv: plg.erradicadasBsv ?? null,
+      // Confianza = la PEOR pasada. Cualquiera que falló (null) cuenta 0 → fuerza
+      // requires_review para que el asesor complete lo que faltó en la UI (D30).
+      confidenceScore: Math.min(
+        izqRaw ? (izq.confidenceScore ?? 0.6) : 0,
+        tabRaw ? (tab.confidenceScore ?? 0.6) : 0,
+        plgRaw ? (plg.confidenceScore ?? 0.6) : 0,
+      ),
     }
 
-    // Agotados los reintentos: rescatamos lo que se pudo leer y marcamos
-    // requires_review en vez de tirar excepción (el caller persiste igual).
-    trace.event({ name: 'sigatoka_zod_exhausted', level: 'ERROR', input: { final_errors: lastZodErrors } })
-    const fallback = construirFallbackSigatoka(lastJson, lastZodErrors)
-    generation.end({ output: { zod_valid: false, attempts: MAX_RETRIES + 1, errors: lastZodErrors, fallback: true }, level: 'WARNING' })
+    const camposDudosos = detectarCamposDudosos(merged.resumenColumnas)
+    const parsed = SigatokaMuestreoSchema.safeParse({
+      ...merged,
+      requiereValidacion: camposDudosos.length > 0 || merged.confidenceScore < 0.75,
+      camposDudosos,
+    })
+
+    if (parsed.success) {
+      generation.end({ output: { semana: parsed.data.semana, finca: parsed.data.nombreFinca, confianza: parsed.data.confidenceScore, requiere_validacion: parsed.data.requiereValidacion, n_puntos: parsed.data.puntosMuestreo.length, n_11sem: parsed.data.plantas11sem.length, n_dudosos: camposDudosos.length } })
+      return parsed.data
+    }
+
+    // Aun mergeando dos pasadas, si el schema falla rescatamos lo que haya en
+    // vez de tirar (P1/P4) — marca requires_review para el asesor.
+    const zodErrors = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+    trace.event({ name: 'sigatoka_zod_exhausted', level: 'ERROR', input: { final_errors: zodErrors } })
+    const fallback = construirFallbackSigatoka(merged, zodErrors)
+    generation.end({ output: { zod_valid: false, errors: zodErrors, fallback: true }, level: 'WARNING' })
     return fallback
+  }
+
+  // Una pasada (media ficha). Devuelve el JSON parseado best-effort, o null si la
+  // llamada o el parseo fallan — el coordinador mergea lo que haya disponible.
+  async #extraerParteSigatoka(
+    promptName: string,
+    userContent: string,
+    base64: string,
+    mimeType: string,
+    traceId: string,
+    costCtx?: CostContext,
+  ): Promise<Record<string, unknown> | null> {
+    const trace = this.#lf.trace({ id: traceId })
+    try {
+      const rawPrompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+      const raw = await this.#adapter.generarTexto(userContent, {
+        systemPrompt: rawPrompt,
+        responseFormat: 'json_object',
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        traceId,
+        generationName: promptName.replace('.md', ''),
+        modelClass: 'ultra',
+        timeoutMs: 30_000,
+        ...this.#costOpts(costCtx),
+      })
+      return JSON.parse(raw.replace(/```json|```/g, '').trim())
+    } catch (err) {
+      trace.event({ name: 'sigatoka_parte_error', level: 'WARNING', input: { parte: promptName, error: String(err) } })
+      return null
+    }
   }
 
   async onboardarAdmin(mensaje: string, contexto: ContextoConversacion, traceId: string, costCtx?: CostContext): Promise<RespuestaOnboarding> {
