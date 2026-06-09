@@ -139,12 +139,16 @@ export async function getOrCreateSession(
   tipo: 'reporte' | 'onboarding',
   client: SupabaseClient = defaultClient,
 ): Promise<SesionActivaRow> {
+  // Resume cualquier sesión no terminal (active + todos los pending_*). Excluir
+  // SOLO 'completed' en vez de enumerar estados resumibles: enumerar dejaba
+  // afuera pending_location_confirm / pending_excel_confirm / pending_sigatoka_aclaracion,
+  // que se creaban de nuevo vacíos y perdían el flujo (cada estado nuevo recaía).
   const { data: existing, error: fetchError } = await client
     .from('sesiones_activas')
     .select('*')
     .eq('phone', phone)
     .eq('tipo_sesion', tipo)
-    .in('status', ['active', 'pending_confirmation'])
+    .neq('status', 'completed')
     .gt('expires_at', new Date().toISOString())
     .maybeSingle()
 

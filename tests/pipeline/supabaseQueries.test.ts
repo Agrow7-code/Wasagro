@@ -38,6 +38,7 @@ function crearSupabaseMock() {
   const chainMethods = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    neq: vi.fn().mockReturnThis(),
     gt: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
@@ -152,6 +153,20 @@ describe('supabaseQueries', () => {
 
       const result = await getOrCreateSession('593987654321', 'reporte', mock as any)
       expect(result.session_id).toBe('ses-2')
+    })
+
+    it('resume sesiones en CUALQUIER estado no terminal, no solo active (bug pending_*)', async () => {
+      // Regresión: el filtro enumeraba ['active','pending_confirmation'] y dejaba
+      // afuera pending_location_confirm / pending_excel_confirm / pending_sigatoka_aclaracion,
+      // creando una sesión nueva vacía y perdiendo el flujo. Debe excluir solo 'completed'.
+      const pendingSession = { session_id: 'ses-3', phone: '593987654321', tipo_sesion: 'reporte', clarification_count: 0, contexto_parcial: { sigatoka_evento_id: 'evt-1' }, status: 'pending_sigatoka_aclaracion', finca_id: null, paso_onboarding: null }
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: pendingSession, error: null })
+
+      const result = await getOrCreateSession('593987654321', 'reporte', mock as any)
+
+      expect(result.session_id).toBe('ses-3')
+      expect(mock._chain.neq).toHaveBeenCalledWith('status', 'completed')
     })
   })
 
