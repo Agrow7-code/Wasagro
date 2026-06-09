@@ -171,8 +171,21 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).not.toMatch(/⚠️/)
   })
 
-  it('nota de aclaración cuando hay camposAclarar', () => {
-    expect(buildWhatsappSummary(muestreo([fullCol()]), ['resumen[col1].K (…)'])).toMatch(/1 valor con discrepancia/)
+  it('avisa que el asesor revisa cuando hay camposAclarar — sin prometer un follow-up del bot', () => {
+    const msg = buildWhatsappSummary(muestreo([fullCol()]), ['resumen[col1].K (…)'])
+    // Honesto: derivamos al asesor (el recálculo es la fuente confiable), no
+    // prometemos escribirle nosotros (no existe esa máquina de seguimiento).
+    expect(msg).toMatch(/asesor/)
+    expect(msg).not.toMatch(/te escribo/)
+    expect(msg).not.toMatch(/en un momento/)
+  })
+
+  it('pluraliza el aviso de revisión y no usa el emoji ❓', () => {
+    const unMsg = buildWhatsappSummary(muestreo([fullCol()]), ['a'])
+    const dosMsg = buildWhatsappSummary(muestreo([fullCol()]), ['a', 'b'])
+    expect(unMsg).toMatch(/1 valor\b/)
+    expect(dosMsg).toMatch(/2 valores\b/)
+    expect(unMsg).not.toContain('❓')
   })
 })
 

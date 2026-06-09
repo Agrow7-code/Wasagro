@@ -261,7 +261,12 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
 
   if (alertas.length > 0) msg += '\n\n' + alertas.join('\n')
   if (camposAclarar.length > 0) {
-    msg += `\n\n❓ Encontré ${camposAclarar.length} valor${camposAclarar.length > 1 ? 'es' : ''} con discrepancia — te escribo en un momento.`
+    // Honesto: una discrepancia es entre el recálculo (fuente confiable, desde
+    // los conteos crudos) y el total escrito a mano. No le preguntamos al tomador
+    // por esto ni prometemos un follow-up que no existe — lo deriva el asesor.
+    const n = camposAclarar.length
+    const plural = n > 1
+    msg += `\n\n⚠️ ${n} valor${plural ? 'es' : ''} no ${plural ? 'cuadran' : 'cuadra'} con las cuentas — usé el recálculo y tu asesor lo revisa.`
   }
   return msg
 }
