@@ -177,6 +177,11 @@ describe('normalizarCelda', () => {
   it('basura → vacía', () => {
     expect(normalizarCelda('x')).toEqual({ valor: null, estado: 'vacia' })
   })
+
+  it('número en string ("2", "6,6") → leída (modelos de visión devuelven texto)', () => {
+    expect(normalizarCelda('2')).toEqual({ valor: 2, estado: 'leida' })
+    expect(normalizarCelda({ valor: '6,6' })).toEqual({ valor: 6.6, estado: 'leida' })
+  })
 })
 
 // ─── contarCeldasIlegibles (señal para "preguntar al tomador") ────────────────
@@ -420,6 +425,15 @@ describe('SigatokaMuestreoSchema', () => {
 
   it('rechaza semana > 53', () => {
     expect(() => SigatokaMuestreoSchema.parse(muestreo([fullCol()], [], { semana: 54 }))).toThrow()
+  })
+
+  it('coerce números en string del modelo de visión ("6,6" → 6.6)', () => {
+    const m = muestreo([fullCol()], [])
+    ;(m.resumenColumnas[0] as any).K_formulario = '6,6'
+    ;(m as any).pEfFinca = '0.8'
+    const p = SigatokaMuestreoSchema.parse(m)
+    expect(p.resumenColumnas[0]!.K_formulario).toBe(6.6)
+    expect(p.pEfFinca).toBe(0.8)
   })
 })
 

@@ -49,8 +49,17 @@ variaciones visuales.
      celda vacía es `vacia`, jamás `ilegible` (preguntar por celdas en blanco
      molesta al usuario). Ante la duda entre vacía e ilegible → `vacia`.
 
-7. **FÓRMULAS** → vuelca lo escrito en papel en los campos `_formulario`.
-   Wasagro recalcula H..M por su cuenta. No calcules aquí.
+7. **BLOQUE DATOS — filas A..M, LEÉ CADA UNA POR SU RÓTULO, no por posición.**
+   El bloque tiene 13 filas rotuladas a la izquierda; volcá cada valor en SU campo:
+   - A= T. plantas muestreadas · B= T. H+VLE · C= T. plantas EE2 (1 a 3)
+   - D= T. plantas EE2 (4+) · E= T. plantas EE3-6 · F= T. hojas H+VLQ<5% · G= T. hojas funcionales
+   - H= % plantas EE2 (1-3) → `H_formulario` · I= % plantas EE2 (4+) → `I_formulario`
+   - J= % EE3-6 → `J_formulario` · K= Prom. H+VLE → `K_formulario`
+   - L= Prom. H+VLQ<5% → `L_formulario` · M= Prom. hojas funcionales → `M_formulario`
+   **CRÍTICO — error común a evitar:** si una fila está en blanco o vale 0 (la fila
+   **J = % EE3-6 suele ser 0**), poné `0`/`null` en ESA fila; NO subas el valor de
+   la fila de abajo. NUNCA corras K→J, L→K, M→L. Cada rótulo con su número.
+   Wasagro recalcula H..M; tu trabajo es transcribir fiel, fila por fila.
 
 8. **CONFIANZA** → `confidenceScore` 0 a 1. Celdas borrosas/tachadas → bajarlo.
 
@@ -107,5 +116,7 @@ variaciones visuales.
   "camposDudosos": []
 }
 ```
+
+Los valores numéricos van como NÚMERO JSON (`6.6`, no `"6.6"`); usá punto decimal.
 
 Devuelve SOLO el JSON, sin texto adicional, sin bloque markdown.

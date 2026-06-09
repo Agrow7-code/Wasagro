@@ -23,16 +23,28 @@ export const CELDAS_MUESTRA = [
 // presente no puede ser ilegible); sin valor, respetamos 'ilegible' SOLO si el
 // modelo lo declaró; cualquier otra cosa cae a 'vacia' (conservador — no
 // inventamos "ilegible" sobre celdas en blanco, eso torturaría al usuario, P2).
+// Coerción tolerante a string ("2", "6,6") — los modelos de visión a veces los
+// devuelven como texto. No-numérico → null.
+const aNum = (v: unknown): number | null => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string') {
+    const t = v.trim().replace(',', '.')
+    if (t === '' || t === '-') return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
 export function normalizarCelda(raw: unknown): CeldaMuestra {
-  if (typeof raw === 'number' && Number.isFinite(raw)) return { valor: raw, estado: 'leida' }
   if (raw && typeof raw === 'object') {
-    const v = (raw as { valor?: unknown }).valor
-    const valor = typeof v === 'number' && Number.isFinite(v) ? v : null
+    const valor = aNum((raw as { valor?: unknown }).valor)
     if (valor !== null) return { valor, estado: 'leida' }
     const estado = (raw as { estado?: unknown }).estado
     return { valor: null, estado: estado === 'ilegible' ? 'ilegible' : 'vacia' }
   }
-  return { valor: null, estado: 'vacia' }
+  const valor = aNum(raw)
+  return valor !== null ? { valor, estado: 'leida' } : { valor: null, estado: 'vacia' }
 }
 
 // Envuelve las 9 celdas de un punto crudo a CeldaMuestra; deja el resto intacto.

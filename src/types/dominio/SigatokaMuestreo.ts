@@ -1,5 +1,21 @@
 import { z } from 'zod'
 
+// ─── Coerción numérica tolerante ──────────────────────────────────────────────
+// Los modelos de visión devuelven números como string ("6.6"), con coma decimal,
+// o vacíos. Convertimos a number; lo no-numérico → null. Nunca rompe el parse:
+// el dato se rescata en vez de tirar la ficha entera (P1).
+const aNumero = (v: unknown): number | null => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string') {
+    const t = v.trim().replace(',', '.')
+    if (t === '' || t === '-') return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+const numNullable = () => z.preprocess(aNumero, z.number().nullable())
+
 // ─── Estado por celda (I5) ────────────────────────────────────────────────────
 // Cada celda de MUESTRA lleva valor + estado de lectura. Distinguir 'vacia'
 // (punto no muestreado, null legítimo) de 'ilegible' (hay algo escrito que el
@@ -9,7 +25,7 @@ export const EstadoCeldaSchema = z.enum(['leida', 'vacia', 'ilegible'])
 export type EstadoCelda = z.infer<typeof EstadoCeldaSchema>
 
 export const CeldaMuestraSchema = z.object({
-  valor:  z.number().nullable(),
+  valor:  numNullable(),
   estado: EstadoCeldaSchema,
 })
 export type CeldaMuestra = z.infer<typeof CeldaMuestraSchema>
@@ -59,11 +75,11 @@ export const PuntoMuestreoSigatokaSchema = z.object({
 })
 
 export const PlantaNumeradaSchema = z.object({
-  numero:        z.number(),
-  nuevaOVieja:   z.union([z.literal(0), z.literal(1)]).nullable(),
-  efPasada:      z.number().nullable(),
-  efActual:      z.number().nullable(),
-  referencia:    z.number().nullable(),
+  numero:        z.preprocess(v => aNumero(v) ?? 0, z.number()),
+  nuevaOVieja:   z.preprocess(aNumero, z.union([z.literal(0), z.literal(1)]).nullable()),
+  efPasada:      numNullable(),
+  efActual:      numNullable(),
+  referencia:    numNullable(),
   marcaEspecial: z.string().nullable(),
 })
 
@@ -73,20 +89,20 @@ export const PlantaNumeradaSchema = z.object({
 // completa por planta para no perder el peor caso (ej. una columna con J=95%).
 // Todo nullable: una celda ilegible nunca debe tumbar la extracción (P1).
 export const ResumenColumnaSchema = z.object({
-  A: z.number().nullable(),
-  B: z.number().nullable(),
-  C: z.number().nullable(),
-  D: z.number().nullable(),
-  E: z.number().nullable(),
-  F: z.number().nullable(),
-  G: z.number().nullable(),
+  A: numNullable(),
+  B: numNullable(),
+  C: numNullable(),
+  D: numNullable(),
+  E: numNullable(),
+  F: numNullable(),
+  G: numNullable(),
 
-  H_formulario: z.number().nullable(),
-  I_formulario: z.number().nullable(),
-  J_formulario: z.number().nullable(),
-  K_formulario: z.number().nullable(),
-  L_formulario: z.number().nullable(),
-  M_formulario: z.number().nullable(),
+  H_formulario: numNullable(),
+  I_formulario: numNullable(),
+  J_formulario: numNullable(),
+  K_formulario: numNullable(),
+  L_formulario: numNullable(),
+  M_formulario: numNullable(),
 
   // Recalculado por Wasagro: H=(C/A)·100 | I=(D/A)·100 | J=(E/A)·100
   //                          K=B/A | L=F/A | M=G/A
@@ -100,17 +116,17 @@ export const ResumenColumnaSchema = z.object({
 })
 
 export const Planta11SemanaSchema = z.object({
-  ht:      z.number().nullable(),
-  hVle:    z.number().nullable(),
-  q5menos: z.number().nullable(),
-  q5mas:   z.number().nullable(),
-  lc:      z.number().nullable(),
+  ht:      numNullable(),
+  hVle:    numNullable(),
+  q5menos: numNullable(),
+  q5mas:   numNullable(),
+  lc:      numNullable(),
 })
 
 export const PlagaFoliarSchema = z.object({
-  h: z.number().nullable(),
-  p: z.number().nullable(),
-  m: z.number().nullable(),
+  h: numNullable(),
+  p: numNullable(),
+  m: numNullable(),
 })
 
 export const PlagasFoliaresSchema = z.object({
@@ -121,7 +137,7 @@ export const PlagasFoliaresSchema = z.object({
 // ─── Top-level schema ─────────────────────────────────────────────────────────
 
 export const SigatokaMuestreoSchema = z.object({
-  confidenceScore:    z.number().min(0).max(1),
+  confidenceScore:    z.preprocess(v => aNumero(v) ?? 0, z.number().min(0).max(1)),
   requiereValidacion: z.boolean(),
   camposDudosos:      z.array(z.string()),
 
@@ -130,8 +146,8 @@ export const SigatokaMuestreoSchema = z.object({
   zona:        z.string().nullable(),
   codigoFinca: z.string().nullable(),
   nombreFinca: z.string().nullable(),
-  semana:      z.number().int().min(1).max(53).nullable(),
-  periodo:     z.number().int().nullable(),
+  semana:      z.preprocess(aNumero, z.number().int().min(1).max(53).nullable()),
+  periodo:     z.preprocess(aNumero, z.number().int().nullable()),
   fecha:       z.string().nullable(),
   supervisor:  z.string().nullable(),
 
@@ -144,8 +160,8 @@ export const SigatokaMuestreoSchema = z.object({
   // Diferidos (I9/I10/I11): se capturan si el modelo los ve, pero sin lógica por
   // ahora. Opcionales para no perder la foto ni cargar el extractor.
   plantas00sem:   z.array(Planta11SemanaSchema).optional(),
-  pEfFinca:       z.number().nullable().optional(),
-  erradicadasBsv: z.number().nullable().optional(),
+  pEfFinca:       numNullable().optional(),
+  erradicadasBsv: numNullable().optional(),
 })
 
 export type SigatokaMuestreo       = z.infer<typeof SigatokaMuestreoSchema>
