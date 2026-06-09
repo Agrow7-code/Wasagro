@@ -314,11 +314,13 @@ export function buildDescripcionRaw(data: SigatokaMuestreo): string {
   const K = cols[0]?.K_calculado ?? null
   const f = (v: number | null) => (v == null ? '-' : String(v))
 
+  const peorH = maximo(cols.map(c => c.H_calculado))
   const parts = [
     `Muestreo de Sigatoka semana ${data.semana ?? '-'} finca ${data.nombreFinca ?? '-'}.`,
     `Plantas muestreadas: ${f(A)}.`,
     `Promedio hoja más vieja libre de estría (K): ${f(K)}.`,
-    `Peor % plantas EE2 avanzado (I): ${f(peorI)}%.`,
+    `Peor % plantas EE2 leve 1-3 (H): ${f(peorH)}%.`,
+    `Peor % plantas EE2 avanzado 4+ (I): ${f(peorI)}%.`,
     `Peor % plantas EE3-6 (J): ${f(peorJ)}%.`,
     `Mínimo promedio hojas funcionales (M): ${f(peorM)}.`,
     `Ceramida: huevos ${data.plagasFoliares.ceramida.h ?? '-'}, pupas ${data.plagasFoliares.ceramida.p ?? '-'}, muertos ${data.plagasFoliares.ceramida.m ?? '-'}.`,
@@ -333,29 +335,43 @@ export function buildDescripcionRaw(data: SigatokaMuestreo): string {
 // ─── Resumen para WhatsApp ───────────────────────────────────────────────────
 // Alertas si CUALQUIER columna (planta) supera el umbral — no perder el peor caso.
 
+// Umbral de % EE2 leve (1-3) que dispara alerta de infección temprana extendida.
+// PLACEHOLDER — confirmar con criterio agronómico de la exportadora.
+export const UMBRAL_EE2_LEVE = 30
+
 export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: string[]): string {
   const cols = data.resumenColumnas
   const A = cols[0]?.A ?? null
   const K = cols[0]?.K_calculado ?? null
+  const peorH = maximo(cols.map(c => c.H_calculado))
   const peorI = maximo(cols.map(c => c.I_calculado))
   const peorJ = maximo(cols.map(c => c.J_calculado))
   const peorM = minimo(cols.map(c => c.M_calculado))
   const f = (v: number | null) => (v == null ? '-' : String(v))
+  // EE2 (1-3) por las 3 columnas (plantas H1/H2/H3) — NO colapsar al "peor":
+  // es la categoría que más varía entre plantas y la que el resumen escondía.
+  const ee2LevePorPlanta = cols.length
+    ? cols.map(c => (c.H_calculado == null ? '-' : `${c.H_calculado}%`)).join(' / ')
+    : '-'
+  const n11sem = data.plantas11sem.length
 
   const alertas: string[] = []
   if (peorJ != null && peorJ > 10) alertas.push(`⚠️ ${peorJ}% plantas con EE3-6 — revisar programa de fumigación`)
-  if (peorI != null && peorI > 5)  alertas.push(`⚠️ ${peorI}% plantas con EE2 avanzado (estadios 4+)`)
+  if (peorI != null && peorI > 5)  alertas.push(`⚠️ ${peorI}% plantas con EE2 avanzado (4+)`)
+  if (peorH != null && peorH > UMBRAL_EE2_LEVE) alertas.push(`⚠️ ${peorH}% plantas con EE2 (1-3) — infección temprana extendida`)
   if (peorM != null && peorM < 9)  alertas.push(`⚠️ Promedio hojas funcionales bajo (${peorM}) — evaluar nutrición`)
 
   let msg =
 `✅ *Muestreo Sigatoka semana ${data.semana ?? '-'} — ${data.nombreFinca ?? 'finca'}* registrado
 
-📊 *Resumen:*
+📊 *Resumen:* (por planta H1/H2/H3)
 • Plantas muestreadas: ${f(A)}
+• EE2 leve (1-3): ${ee2LevePorPlanta}
+• Peor % EE2 avanzado (4+): ${f(peorI)}%
+• Peor % EE3-6: ${f(peorJ)}%
 • Prom. hoja libre de estría: ${f(K)}
 • Mín. hojas funcionales: ${f(peorM)}
-• Peor % EE2 avanzado: ${f(peorI)}%
-• Peor % EE3-6: ${f(peorJ)}%
+• Plantas 11 sem evaluadas: ${n11sem}
 
 🐛 *Plagas foliares:*
 • Ceramida — H:${data.plagasFoliares.ceramida.h ?? '-'} P:${data.plagasFoliares.ceramida.p ?? '-'} M:${data.plagasFoliares.ceramida.m ?? '-'}

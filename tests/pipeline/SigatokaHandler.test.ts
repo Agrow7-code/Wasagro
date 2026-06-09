@@ -294,8 +294,38 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
   })
 
   it('sin alertas con valores normales', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ I_calculado: 2, J_calculado: 3, M_calculado: 11 })]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 5, I_calculado: 2, J_calculado: 3, M_calculado: 11 })]), [])
     expect(msg).not.toMatch(/⚠️/)
+  })
+
+  it('muestra EE2 leve (1-3) por las 3 columnas — no esconde el peor caso', () => {
+    const msg = buildWhatsappSummary(muestreo([
+      fullCol({ H_calculado: 0 }), fullCol({ H_calculado: 10.5 }), fullCol({ H_calculado: 47.4 }),
+    ]), [])
+    expect(msg).toMatch(/1-3/)
+    expect(msg).toContain('47.4%')
+    expect(msg).toContain('10.5%')
+  })
+
+  it('distingue EE2 leve (1-3) de EE2 avanzado (4+)', () => {
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0 })]), [])
+    expect(msg).toMatch(/EE2 avanzado/)
+    expect(msg).toMatch(/1-3/)
+  })
+
+  it('alerta cuando EE2 leve (1-3) supera el umbral', () => {
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]), [])
+    expect(msg).toMatch(/⚠️.*EE2 \(1-3\)/)
+  })
+
+  it('muestra cuántas plantas de 11 semanas se evaluaron', () => {
+    const onceSem = [
+      { ht: 8, hVle: 0, q5menos: 3, q5mas: 8, lc: 7 },
+      { ht: 7, hVle: 0, q5menos: 2, q5mas: 7, lc: 6 },
+    ]
+    const msg = buildWhatsappSummary(muestreo([fullCol()], [], { plantas11sem: onceSem }), [])
+    expect(msg).toMatch(/11 sem/)
+    expect(msg).toMatch(/\b2\b/)
   })
 
   it('avisa que el asesor revisa cuando hay camposAclarar — sin prometer un follow-up del bot', () => {
@@ -319,11 +349,12 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
 // ─── buildDescripcionRaw ─────────────────────────────────────────────────────
 
 describe('buildDescripcionRaw', () => {
-  it('incluye finca, semana y el peor J entre columnas', () => {
-    const d = buildDescripcionRaw(muestreo([fullCol({ J_calculado: 3 }), fullCol({ J_calculado: 40 })]))
+  it('incluye finca, semana, el peor J y el peor EE2 (1-3)', () => {
+    const d = buildDescripcionRaw(muestreo([fullCol({ J_calculado: 3, H_calculado: 12 }), fullCol({ J_calculado: 40, H_calculado: 47 })]))
     expect(d).toContain('A-Michell')
     expect(d).toContain('semana 23')
     expect(d).toContain('(J): 40%')
+    expect(d).toContain('47')
   })
 
   it('tolera columnas vacías sin romper', () => {
