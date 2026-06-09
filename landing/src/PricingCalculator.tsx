@@ -86,13 +86,13 @@ export function PricingCalculator() {
             className="font-bold leading-[1.0] tracking-[-0.02em] text-negro mb-5"
             style={{ fontSize: 'clamp(32px, 4.5vw, 56px)' }}
           >
-Solo pagás por lo que tenés.
+Paga solo por lo que necesitas.
         <br />
         <span className="text-campo">Ni más, ni menos.</span>
-        </h2>
-        <p className="text-[17px] text-n700 leading-[1.65] max-w-xl mb-14">
-          $8 por finca, $4 por usuario, más una base según tu escala. Probá los números.
-          </p>
+      </h2>
+      <p className="text-[17px] text-n700 leading-[1.65] max-w-xl mb-14">
+        Base según tu escala, más fincas y usuarios. Ajusta y mira tu precio.
+      </p>
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-8">

@@ -125,7 +125,8 @@ export function BillingView() {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
-        const data = await res.json()
+        const text = await res.text()
+        const data = JSON.parse(text)
         setStatus(data)
         setFincas(data.fincas_contratadas ?? 1)
         setUsuarios(data.usuarios_contratados ?? 1)
@@ -153,14 +154,15 @@ export function BillingView() {
           body: JSON.stringify({ fincas, usuarios, country }),
         })
 
-        if (!payRes.ok) {
-          const text = await payRes.text()
-          let errMsg = 'Error creando el pago'
-          try { errMsg = JSON.parse(text).error || errMsg } catch { /* use default */ }
-          throw new Error(errMsg)
-        }
+            if (!payRes.ok) {
+              const text = await payRes.text()
+              let errMsg = 'Error creando el pago'
+              try { errMsg = JSON.parse(text).error || errMsg } catch { /* use default */ }
+              throw new Error(errMsg)
+            }
 
-        const payData = await payRes.json()
+            const payText = await payRes.text()
+            const payData = JSON.parse(payText)
         const checkoutToken = payData.merchant_checkout_token as string
         if (!checkoutToken) throw new Error('No se recibio checkout token')
         checkoutTokenRef.current = checkoutToken
@@ -308,7 +310,9 @@ export function BillingView() {
         },
         body: JSON.stringify({ fincas, usuarios }),
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data: any
+      try { data = JSON.parse(text) } catch { throw new Error('Respuesta inesperada del servidor') }
       if (res.ok) {
         setPlanSaved(`Plan actualizado a ${data.segment_label}, $${data.precio_mensual}/mes`)
         await fetchStatus()
@@ -350,7 +354,7 @@ export function BillingView() {
           <div style={{ background: '#1B3D24', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h2 style={{ color: '#F5F1E8', margin: 0, fontSize: 18, fontWeight: 700 }}>
-                Pagar plan {segment}
+                Pagar cuenta {segment}
               </h2>
               <p style={{ color: '#C9F03B', margin: '4px 0 0', fontSize: 14, fontWeight: 600 }}>
                 ${price}/mes · {fincas} finca{fincas > 1 ? 's' : ''} · {usuarios} usuario{usuarios > 1 ? 's' : ''}
@@ -412,7 +416,7 @@ export function BillingView() {
               </button>
 
               <p style={{ fontSize: 12, color: '#9C9080', textAlign: 'center', marginTop: 4 }}>
-                Tu tarjeta se guardara de forma segura para cobros mensuales automaticos. Podes cancelar en cualquier momento.
+                Tu tarjeta se guardara de forma segura para cobros mensuales automaticos. Puedes cancelar en cualquier momento.
               </p>
             </div>
           </div>
@@ -421,294 +425,323 @@ export function BillingView() {
     )
   }
 
-  // ── MAIN VIEW: plan management (unified, not tabs) ──
+// ── MAIN VIEW: plan management (unified, not tabs) ──
   const currentPrice = status?.precio_mensual ?? (status ? calcularPrecio(status.fincas_contratadas, status.usuarios_contratados) : 0)
   const diffFincas = fincas - (status?.fincas_contratadas ?? 0)
   const diffUsuarios = usuarios - (status?.usuarios_contratados ?? 0)
   const priceDiff = price - currentPrice
   const planLabel = status?.segment_label ?? status?.plan ?? ''
 
+  const trialEndDate = status?.trial_fin ? new Date(status.trial_fin) : null
+  const now = new Date()
+  const trialDaysLeft = trialEndDate ? Math.max(0, Math.ceil((trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))) : 0
+
   return (
     <div style={{ maxWidth: 680, margin: '0 auto', padding: '32px 24px' }}>
 
       {/* ── PLAN ACTIVO (si ya paga o esta en trial) ── */}
       {status && (isPaid || isTrial) && (
-        <div style={{ border: '2px solid #1B3D24', borderRadius: 16, overflow: 'hidden', background: '#F5F1E8', marginBottom: 24 }}>
-          <div style={{ background: '#1B3D24', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h2 style={{ color: '#F5F1E8', margin: 0, fontSize: 20, fontWeight: 700 }}>
-                {isTrial ? 'Periodo de prueba' : `Plan ${planLabel}`}
-              </h2>
-              {isTrial ? (
-                <p style={{ color: '#C9F03B', margin: '4px 0 0', fontSize: 14, fontWeight: 600 }}>
-                  Termina {status.trial_fin ? new Date(status.trial_fin).toLocaleDateString() : 'pronto'}
-                </p>
-              ) : (
-                <p style={{ color: '#C9F03B', margin: '4px 0 0', fontSize: 14, fontWeight: 600 }}>
-                  ${currentPrice}/mes
-                  {status.subscription_status === 'active' && (
-                    <span style={{ marginLeft: 10, background: '#3EBB6A', borderRadius: 6, padding: '2px 8px', color: '#fff', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', verticalAlign: 'middle' }}>
-                      Activo
-                    </span>
-                  )}
-                </p>
-              )}
-            </div>
+      <div style={{ border: '2px solid #1B3D24', borderRadius: 16, overflow: 'hidden', background: '#F5F1E8', marginBottom: 24 }}>
+        <div style={{ background: '#1B3D24', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 style={{ color: '#F5F1E8', margin: 0, fontSize: 20, fontWeight: 700 }}>
+              {isTrial ? 'Prueba gratis' : `Cuenta ${planLabel}`}
+            </h2>
+            {isTrial ? (
+              <p style={{ color: '#C9F03B', margin: '4px 0 0', fontSize: 14, fontWeight: 600 }}>
+                {trialDaysLeft > 0 ? `${trialDaysLeft} dia${trialDaysLeft > 1 ? 's' : ''} restante${trialDaysLeft > 1 ? 's' : ''}` : 'Vencida'}
+                {trialEndDate && <span style={{ color: '#9C9080', marginLeft: 8 }}>hasta el {trialEndDate.toLocaleDateString()}</span>}
+              </p>
+            ) : (
+              <p style={{ color: '#C9F03B', margin: '4px 0 0', fontSize: 14, fontWeight: 600 }}>
+                ${currentPrice}/mes
+                {status.subscription_status === 'active' && (
+                  <span style={{ marginLeft: 10, background: '#3EBB6A', borderRadius: 6, padding: '2px 8px', color: '#fff', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', verticalAlign: 'middle' }}>
+                    Activo
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          {/* Datos del plan */}
+          <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+            {[
+              { icon: MapPin, label: 'Fincas', value: String(status.fincas_contratadas) },
+              { icon: Users, label: 'Usuarios', value: String(status.usuarios_contratados) },
+              ...(isPaid ? [{ icon: CreditCard, label: 'Metodo de pago', value: status.metodo_pago === 'dlocalgo' ? 'Tarjeta (dLocal Go)' : (status.metodo_pago ?? 'No configurado') }] : []),
+              ...(isPaid ? [{ icon: Calendar, label: 'Activo desde', value: status.plan_activo_desde ? new Date(status.plan_activo_desde).toLocaleDateString() : 'N/A' }] : []),
+            ].map(row => (
+              <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #EAE6DC', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <row.icon size={16} color="#9C9080" strokeWidth={2} />
+                  <span style={{ color: '#9C9080', fontSize: 14 }}>{row.label}</span>
+                </div>
+                <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 700 }}>{row.value}</span>
+              </div>
+            ))}
           </div>
 
-          <div style={{ padding: 24 }}>
-            {/* Datos del plan */}
-            <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+          {/* Desglose del precio (solo pagadores) */}
+          {isPaid && (
+            <div style={{ border: '2px solid #EAE6DC', borderRadius: 12, padding: 16, background: '#fff', marginBottom: 16 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: '#1B3D24', margin: '0 0 10px' }}>Desglose</p>
               {[
-                { icon: MapPin, label: 'Fincas', value: String(status.fincas_contratadas) },
-                { icon: Users, label: 'Usuarios', value: String(status.usuarios_contratados) },
-                { icon: CreditCard, label: 'Metodo de pago', value: status.metodo_pago === 'dlocalgo' ? 'Tarjeta (dLocal Go)' : (status.metodo_pago ?? 'No configurado') },
-                { icon: Calendar, label: 'Activo desde', value: status.plan_activo_desde ? new Date(status.plan_activo_desde).toLocaleDateString() : 'N/A' },
+                { label: 'Base', value: `$${getBasePrice(status.fincas_contratadas, status.usuarios_contratados)}` },
+                { label: `${status.fincas_contratadas} finca${status.fincas_contratadas > 1 ? 's' : ''}`, value: `$${PRICE_PER_FINCA * status.fincas_contratadas}` },
+                { label: `${status.usuarios_contratados} usuario${status.usuarios_contratados > 1 ? 's' : ''}`, value: `$${PRICE_PER_USER * status.usuarios_contratados}` },
               ].map(row => (
-                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #EAE6DC', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <row.icon size={16} color="#9C9080" strokeWidth={2} />
-                    <span style={{ color: '#9C9080', fontSize: 14 }}>{row.label}</span>
-                  </div>
-                  <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 700 }}>{row.value}</span>
+                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ color: '#9C9080', fontSize: 13 }}>{row.label}</span>
+                  <span style={{ color: '#1B3D24', fontSize: 13, fontWeight: 600 }}>{row.value}</span>
                 </div>
               ))}
+              <div style={{ borderTop: '1px solid #EAE6DC', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 700 }}>Total</span>
+                <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 800 }}>${currentPrice}/mes</span>
+              </div>
             </div>
+          )}
 
-            {/* Desglose del precio */}
+          {/* Trial: aviso de vencimiento */}
+          {isTrial && trialDaysLeft > 0 && (
+            <div style={{ border: '2px solid #C9F03B', borderRadius: 12, padding: 16, background: '#FEFCE8', marginBottom: 16 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: '#1B3D24', margin: '0 0 6px' }}>
+                Tu prueba termina el {trialEndDate!.toLocaleDateString()}
+              </p>
+              <p style={{ fontSize: 13, color: '#3A3530', margin: 0 }}>
+                Despues de esa fecha necesitas activar un plan para seguir usando Wasagro. Elige cuantas fincas y usuarios necesitas.
+              </p>
+            </div>
+          )}
+
+          {/* Trial: vencida */}
+          {isTrial && trialDaysLeft <= 0 && (
+            <div style={{ border: '2px solid #D45828', borderRadius: 12, padding: 16, background: '#FEF2F2', marginBottom: 16 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: '#D45828', margin: '0 0 6px' }}>
+                Tu prueba ha vencido
+              </p>
+              <p style={{ fontSize: 13, color: '#3A3530', margin: 0 }}>
+                Activa un plan para seguir usando Wasagro.
+              </p>
+            </div>
+          )}
+
+          {/* Acciones */}
+          <div style={{ display: 'grid', gap: 10 }}>
+            {isTrial && (
+              <button
+                onClick={() => { setShowModify(true); setPaymentStep('none') }}
+                style={primaryBtnStyle}
+              >
+                Activar plan
+              </button>
+            )}
+
             {isPaid && (
-              <div style={{ border: '2px solid #EAE6DC', borderRadius: 12, padding: 16, background: '#fff', marginBottom: 16 }}>
-                <p style={{ fontSize: 13, fontWeight: 700, color: '#1B3D24', margin: '0 0 10px' }}>Desglose</p>
-                {[
-                  { label: 'Base', value: `$${getBasePrice(status.fincas_contratadas, status.usuarios_contratados)}` },
-                  { label: `${status.fincas_contratadas} finca${status.fincas_contratadas > 1 ? 's' : ''}`, value: `$${PRICE_PER_FINCA * status.fincas_contratadas}` },
-                  { label: `${status.usuarios_contratados} usuario${status.usuarios_contratados > 1 ? 's' : ''}`, value: `$${PRICE_PER_USER * status.usuarios_contratados}` },
-                ].map(row => (
-                  <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ color: '#9C9080', fontSize: 13 }}>{row.label}</span>
-                    <span style={{ color: '#1B3D24', fontSize: 13, fontWeight: 600 }}>{row.value}</span>
-                  </div>
-                ))}
-                <div style={{ borderTop: '1px solid #EAE6DC', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 700 }}>Total</span>
-                  <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 800 }}>${currentPrice}/mes</span>
+              <button
+                onClick={() => setShowModify(!showModify)}
+                style={primaryBtnStyle}
+              >
+                {showModify ? 'Cerrar modificacion' : 'Agregar fincas o usuarios'}
+                {!showModify && <ChevronDown size={15} style={{ marginLeft: 6 }} />}
+                {showModify && <ChevronUp size={15} style={{ marginLeft: 6 }} />}
+              </button>
+            )}
+
+            {/* Cancelar (solo si ya paga) */}
+            {isPaid && !confirmCancel && (
+              <button
+                onClick={() => setConfirmCancel(true)}
+                style={{ width: '100%', padding: '10px 0', background: 'transparent', border: '2px solid #D45828', borderRadius: 8, color: '#D45828', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+              >
+                Cancelar suscripcion
+              </button>
+            )}
+            {isPaid && confirmCancel && (
+              <div style={{ border: '2px solid #D45828', borderRadius: 8, padding: 16, background: '#FEF2F2' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <AlertTriangle size={16} color="#D45828" />
+                  <span style={{ fontSize: 14, fontWeight: 600, color: '#D45828' }}>Confirmar cancelacion</span>
+                </div>
+                <p style={{ fontSize: 13, color: '#3A3530', marginBottom: 12 }}>
+                  Se mantendra activa hasta el final del periodo pagado. No se realizara otro cobro.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <button onClick={handleCancel} style={{ padding: '10px 0', background: '#D45828', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                    Si, cancelar
+                  </button>
+                  <button onClick={() => setConfirmCancel(false)} style={{ padding: '10px 0', background: '#fff', border: '2px solid #EAE6DC', borderRadius: 6, color: '#9C9080', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                    No, volver
+                  </button>
                 </div>
               </div>
             )}
-
-            {/* Acciones */}
-            <div style={{ display: 'grid', gap: 10 }}>
-              {isTrial && (
-                <button
-                  onClick={() => { setShowModify(true); setPaymentStep('none') }}
-                  style={primaryBtnStyle}
-                >
-                  Activar plan
-                </button>
-              )}
-
-              {isPaid && (
-                <button
-                  onClick={() => setShowModify(!showModify)}
-                  style={primaryBtnStyle}
-                >
-                  {showModify ? 'Cerrar modificacion' : 'Modificar fincas o usuarios'}
-                  {!showModify && <ChevronDown size={15} style={{ marginLeft: 6 }} />}
-                  {showModify && <ChevronUp size={15} style={{ marginLeft: 6 }} />}
-                </button>
-              )}
-
-              {/* Cancelar (solo si ya paga) */}
-              {isPaid && !confirmCancel && (
-                <button
-                  onClick={() => setConfirmCancel(true)}
-                  style={{ width: '100%', padding: '10px 0', background: 'transparent', border: '2px solid #D45828', borderRadius: 8, color: '#D45828', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-                >
-                  Cancelar suscripcion
-                </button>
-              )}
-              {isPaid && confirmCancel && (
-                <div style={{ border: '2px solid #D45828', borderRadius: 8, padding: 16, background: '#FEF2F2' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <AlertTriangle size={16} color="#D45828" />
-                    <span style={{ fontSize: 14, fontWeight: 600, color: '#D45828' }}>Confirmar cancelacion</span>
-                  </div>
-                  <p style={{ fontSize: 13, color: '#3A3530', marginBottom: 12 }}>
-                    Se mantendra activa hasta el final del periodo pagado. No se realizara otro cobro.
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <button onClick={handleCancel} style={{ padding: '10px 0', background: '#D45828', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-                      Si, cancelar
-                    </button>
-                    <button onClick={() => setConfirmCancel(false)} style={{ padding: '10px 0', background: '#fff', border: '2px solid #EAE6DC', borderRadius: 6, color: '#9C9080', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                      No, volver
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
+      </div>
       )}
 
       {/* ── MODIFY PLAN (collapsible section) ── */}
       {showModify && status && (
-        <div style={{ border: '2px solid #1B3D24', borderRadius: 16, padding: 24, background: '#fff', marginBottom: 24 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 700, color: '#1B3D24', margin: '0 0 8px' }}>
-            {isPaid ? 'Modificar tu plan' : 'Configura tu plan'}
-          </h3>
-          <p style={{ fontSize: 14, color: '#9C9080', marginBottom: 20 }}>
-            {isTrial
-              ? 'Selecciona cuantas fincas y usuarios necesitas para activar tu plan.'
-              : 'Agrega o quita fincas y usuarios. El cambio se aplica de inmediato.'}
-          </p>
+      <div style={{ border: '2px solid #1B3D24', borderRadius: 16, padding: 24, background: '#fff', marginBottom: 24 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, color: '#1B3D24', margin: '0 0 8px' }}>
+          {isPaid ? 'Agregar fincas o usuarios' : 'Configura tu plan'}
+        </h3>
+        <p style={{ fontSize: 14, color: '#9C9080', marginBottom: 20 }}>
+          {isTrial
+            ? 'Selecciona cuantas fincas y usuarios necesitas para activar tu plan.'
+            : 'Agrega o quita fincas y usuarios. El cambio se aplica de inmediato.'}
+        </p>
 
-          {/* Selectors */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#1B3D24', marginBottom: 8 }}>
-                <MapPin size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                Fincas
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button onClick={() => setFincas(Math.max(1, fincas - 1))} disabled={fincas <= 1} style={counterBtnStyle(fincas <= 1)}>
-                  <Minus size={16} strokeWidth={3} />
-                </button>
-                <span style={{ fontSize: 28, fontWeight: 800, color: '#1B3D24', minWidth: 40, textAlign: 'center' }}>{fincas}</span>
-                <button onClick={() => setFincas(fincas + 1)} style={counterBtnStyle(false)}>
-                  <Plus size={16} strokeWidth={3} />
-                </button>
-              </div>
-              <span style={{ fontSize: 13, color: '#9C9080' }}>$8 cada una</span>
-              {isPaid && diffFincas !== 0 && (
-                <span style={{ fontSize: 12, color: diffFincas > 0 ? '#D45828' : '#3EBB6A', marginLeft: 8 }}>
-                  {diffFincas > 0 ? `+${diffFincas}` : diffFincas}
-                </span>
-              )}
+        {/* Selectors */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#1B3D24', marginBottom: 8 }}>
+              <MapPin size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+              Fincas
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button onClick={() => setFincas(Math.max(1, fincas - 1))} disabled={fincas <= 1} style={counterBtnStyle(fincas <= 1)}>
+                <Minus size={16} strokeWidth={3} />
+              </button>
+              <span style={{ fontSize: 28, fontWeight: 800, color: '#1B3D24', minWidth: 40, textAlign: 'center' }}>{fincas}</span>
+              <button onClick={() => setFincas(fincas + 1)} style={counterBtnStyle(false)}>
+                <Plus size={16} strokeWidth={3} />
+              </button>
             </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#1B3D24', marginBottom: 8 }}>
-                <Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-                Usuarios
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button onClick={() => setUsuarios(Math.max(1, usuarios - 1))} disabled={usuarios <= 1} style={counterBtnStyle(usuarios <= 1)}>
-                  <Minus size={16} strokeWidth={3} />
-                </button>
-                <span style={{ fontSize: 28, fontWeight: 800, color: '#1B3D24', minWidth: 40, textAlign: 'center' }}>{usuarios}</span>
-                <button onClick={() => setUsuarios(usuarios + 1)} style={counterBtnStyle(false)}>
-                  <Plus size={16} strokeWidth={3} />
-                </button>
-              </div>
-              <span style={{ fontSize: 13, color: '#9C9080' }}>$4 cada uno</span>
-              {isPaid && diffUsuarios !== 0 && (
-                <span style={{ fontSize: 12, color: diffUsuarios > 0 ? '#D45828' : '#3EBB6A', marginLeft: 8 }}>
-                  {diffUsuarios > 0 ? `+${diffUsuarios}` : diffUsuarios}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Price breakdown */}
-          <div style={{ border: '2px solid #EAE6DC', borderRadius: 12, padding: 16, background: '#F5F1E8', marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#1B3D24' }}>Segmento: {segment}</span>
-            </div>
-            <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
-              {[
-                { label: 'Base', value: `$${base}` },
-                { label: `${fincas} finca${fincas > 1 ? 's' : ''}`, value: `$${PRICE_PER_FINCA * fincas}` },
-                { label: `${usuarios} usuario${usuarios > 1 ? 's' : ''}`, value: `$${PRICE_PER_USER * usuarios}` },
-              ].map(row => (
-                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#9C9080', fontSize: 14 }}>{row.label}</span>
-                  <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 600 }}>{row.value}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ borderTop: '2px solid #1B3D24', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: '#1B3D24' }}>Total mensual</span>
-              <span style={{ fontSize: 28, fontWeight: 800, color: '#1B3D24' }}>
-                ${price}<span style={{ fontSize: 14, fontWeight: 500, color: '#9C9080' }}>/mes</span>
+            <span style={{ fontSize: 13, color: '#9C9080' }}>$8 cada una</span>
+            {isPaid && diffFincas !== 0 && (
+              <span style={{ fontSize: 12, color: diffFincas > 0 ? '#D45828' : '#3EBB6A', marginLeft: 8 }}>
+                {diffFincas > 0 ? `+${diffFincas}` : diffFincas}
               </span>
-            </div>
-            {isPaid && priceDiff !== 0 && (
-              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: priceDiff > 0 ? '#FEF2F2' : '#F0FFF4', border: `1px solid ${priceDiff > 0 ? '#FECACA' : '#BBF7D0'}` }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: priceDiff > 0 ? '#D45828' : '#3EBB6A' }}>
-                  {priceDiff > 0 ? `+$${priceDiff}/mes` : `-$${Math.abs(priceDiff)}/mes`} respecto a tu plan actual
-                </span>
-              </div>
             )}
           </div>
 
-          {/* Features */}
-          <div style={{ marginBottom: 16 }}>
-            <h4 style={{ fontSize: 14, fontWeight: 700, color: '#1B3D24', marginBottom: 10 }}>Que incluye:</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-              {[
-                'Eventos ilimitados',
-                'Alertas de plaga y clima',
-                'Dashboard en tiempo real',
-                'Reportes semanales',
-                'Captura via WhatsApp',
-                'Clasificacion inteligente',
-                ...(fincas >= 6 ? ['API para integraciones'] : []),
-                ...(fincas >= 2 || (fincas === 1 && usuarios >= 4) ? ['Soporte prioritario'] : []),
-                ...(fincas >= 21 ? ['Trazabilidad avanzada', 'Gestion multi-org'] : []),
-              ].map(f => (
-                <div key={f} style={{ fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle size={14} color="#3EBB6A" strokeWidth={2.5} />
-                  <span style={{ color: '#3A3530' }}>{f}</span>
-                </div>
-              ))}
+          <div>
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#1B3D24', marginBottom: 8 }}>
+              <Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+              Usuarios
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button onClick={() => setUsuarios(Math.max(1, usuarios - 1))} disabled={usuarios <= 1} style={counterBtnStyle(usuarios <= 1)}>
+                <Minus size={16} strokeWidth={3} />
+              </button>
+              <span style={{ fontSize: 28, fontWeight: 800, color: '#1B3D24', minWidth: 40, textAlign: 'center' }}>{usuarios}</span>
+              <button onClick={() => setUsuarios(usuarios + 1)} style={counterBtnStyle(false)}>
+                <Plus size={16} strokeWidth={3} />
+              </button>
             </div>
+            <span style={{ fontSize: 13, color: '#9C9080' }}>$4 cada uno</span>
+            {isPaid && diffUsuarios !== 0 && (
+              <span style={{ fontSize: 12, color: diffUsuarios > 0 ? '#D45828' : '#3EBB6A', marginLeft: 8 }}>
+                {diffUsuarios > 0 ? `+${diffUsuarios}` : diffUsuarios}
+              </span>
+            )}
           </div>
+        </div>
 
-          {/* Actions */}
-          {planSaved && (
-            <div style={{ padding: '12px 16px', borderRadius: 8, background: planSaved.includes('Error') ? '#FEF2F2' : '#F0FFF4', border: `1px solid ${planSaved.includes('Error') ? '#FECACA' : '#BBF7D0'}`, marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: planSaved.includes('Error') ? '#D45828' : '#3EBB6A' }}>{planSaved}</span>
+        {/* Price breakdown */}
+        <div style={{ border: '2px solid #EAE6DC', borderRadius: 12, padding: 16, background: '#F5F1E8', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#1B3D24' }}>Tipo de cuenta: {segment}</span>
+          </div>
+          <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+            {[
+              { label: 'Base', value: `$${base}` },
+              { label: `${fincas} finca${fincas > 1 ? 's' : ''}`, value: `$${PRICE_PER_FINCA * fincas}` },
+              { label: `${usuarios} usuario${usuarios > 1 ? 's' : ''}`, value: `$${PRICE_PER_USER * usuarios}` },
+            ].map(row => (
+              <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#9C9080', fontSize: 14 }}>{row.label}</span>
+                <span style={{ color: '#1B3D24', fontSize: 14, fontWeight: 600 }}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ borderTop: '2px solid #1B3D24', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 16, fontWeight: 700, color: '#1B3D24' }}>Total mensual</span>
+            <span style={{ fontSize: 28, fontWeight: 800, color: '#1B3D24' }}>
+              ${price}<span style={{ fontSize: 14, fontWeight: 500, color: '#9C9080' }}>/mes</span>
+            </span>
+          </div>
+          {isPaid && priceDiff !== 0 && (
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: priceDiff > 0 ? '#FEF2F2' : '#F0FFF4', border: `1px solid ${priceDiff > 0 ? '#FECACA' : '#BBF7D0'}` }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: priceDiff > 0 ? '#D45828' : '#3EBB6A' }}>
+                {priceDiff > 0 ? `+$${priceDiff}/mes` : `-$${Math.abs(priceDiff)}/mes`} respecto a tu plan actual
+              </span>
             </div>
-          )}
-
-          {isPaid ? (
-            <div style={{ display: 'grid', gap: 10 }}>
-              <button
-                onClick={handleChangePlan}
-                disabled={savingPlan || (diffFincas === 0 && diffUsuarios === 0)}
-                style={{
-                  ...primaryBtnStyle,
-                  background: (diffFincas === 0 && diffUsuarios === 0) ? '#EAE6DC' : '#1B3D24',
-                  color: (diffFincas === 0 && diffUsuarios === 0) ? '#9C9080' : '#F5F1E8',
-                  cursor: (diffFincas === 0 && diffUsuarios === 0) ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {savingPlan ? 'Guardando...' : `Guardar cambios, $${price}/mes`}
-              </button>
-              <button
-                onClick={() => setPaymentStep('card_form')}
-                style={{ width: '100%', padding: '12px 0', background: 'transparent', border: '2px solid #1B3D24', borderRadius: 8, color: '#1B3D24', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-              >
-                <CreditCard size={15} />
-                Actualizar metodo de pago
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setPaymentStep('card_form')}
-              style={primaryBtnStyle}
-            >
-              Continuar al pago, ${price}/mes
-            </button>
           )}
         </div>
+
+        {/* Features */}
+        <div style={{ marginBottom: 16 }}>
+          <h4 style={{ fontSize: 14, fontWeight: 700, color: '#1B3D24', marginBottom: 10 }}>Que incluye:</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            {[
+              'Eventos ilimitados',
+              'Alertas de plaga y clima',
+              'Dashboard en tiempo real',
+              'Reportes semanales',
+              'Captura via WhatsApp',
+              'Clasificacion inteligente',
+              ...(fincas >= 6 ? ['API para integraciones'] : []),
+              ...(fincas >= 2 || (fincas === 1 && usuarios >= 4) ? ['Soporte prioritario'] : []),
+              ...(fincas >= 21 ? ['Trazabilidad avanzada', 'Gestion multi-org'] : []),
+            ].map(f => (
+              <div key={f} style={{ fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CheckCircle size={14} color="#3EBB6A" strokeWidth={2.5} />
+                <span style={{ color: '#3A3530' }}>{f}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Actions */}
+        {planSaved && (
+          <div style={{ padding: '12px 16px', borderRadius: 8, background: planSaved.includes('Error') ? '#FEF2F2' : '#F0FFF4', border: `1px solid ${planSaved.includes('Error') ? '#FECACA' : '#BBF7D0'}`, marginBottom: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: planSaved.includes('Error') ? '#D45828' : '#3EBB6A' }}>{planSaved}</span>
+          </div>
+        )}
+
+        {isPaid ? (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <button
+              onClick={handleChangePlan}
+              disabled={savingPlan || (diffFincas === 0 && diffUsuarios === 0)}
+              style={{
+                ...primaryBtnStyle,
+                background: (diffFincas === 0 && diffUsuarios === 0) ? '#EAE6DC' : '#1B3D24',
+                color: (diffFincas === 0 && diffUsuarios === 0) ? '#9C9080' : '#F5F1E8',
+                cursor: (diffFincas === 0 && diffUsuarios === 0) ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {savingPlan ? 'Guardando...' : `Guardar cambios, $${price}/mes`}
+            </button>
+            <button
+              onClick={() => setPaymentStep('card_form')}
+              style={{ width: '100%', padding: '12px 0', background: 'transparent', border: '2px solid #1B3D24', borderRadius: 8, color: '#1B3D24', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            >
+              <CreditCard size={15} />
+              Actualizar metodo de pago
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setPaymentStep('card_form')}
+            style={primaryBtnStyle}
+          >
+            Continuar al pago, ${price}/mes
+          </button>
+        )}
+      </div>
       )}
 
       {/* ── SI NO HAY PLAN (no trial, no paid) ── */}
       {status && !isPaid && !isTrial && !showModify && (
         <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <p style={{ fontSize: 16, color: '#9C9080', marginBottom: 16 }}>No tenes un plan activo.</p>
+          <p style={{ fontSize: 16, color: '#9C9080', marginBottom: 16 }}>No tienes un plan activo.</p>
           <button
             onClick={() => setShowModify(true)}
             style={primaryBtnStyle}
