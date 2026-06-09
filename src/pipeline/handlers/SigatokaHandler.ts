@@ -3,8 +3,68 @@ import type {
   SigatokaMuestreo,
   ResumenColumna,
   PuntoMuestreoSigatoka,
+  CeldaMuestra,
 } from '../../types/dominio/SigatokaMuestreo.js'
 import { PromptManager } from '../promptManager.js'
+
+// ─── Estado por celda (I5) ────────────────────────────────────────────────────
+// Las 9 celdas de MUESTRA de cada punto. Excluye contexto (punto/sector) y la
+// marca especial — solo lo que se cuenta para "preguntar al tomador".
+export const CELDAS_MUESTRA = [
+  'planta1_estadio', 'planta1_piscas',
+  'planta2_estadio', 'planta2_piscas',
+  'planta3_estadio', 'planta3_piscas',
+  'hVle', 'hVlq', 'func',
+] as const
+
+// Normaliza una celda cruda del modelo a { valor, estado }. Determinista, nunca
+// lanza. Reglas (en orden): un valor numérico SIEMPRE es 'leida' (un número
+// presente no puede ser ilegible); sin valor, respetamos 'ilegible' SOLO si el
+// modelo lo declaró; cualquier otra cosa cae a 'vacia' (conservador — no
+// inventamos "ilegible" sobre celdas en blanco, eso torturaría al usuario, P2).
+export function normalizarCelda(raw: unknown): CeldaMuestra {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return { valor: raw, estado: 'leida' }
+  if (raw && typeof raw === 'object') {
+    const v = (raw as { valor?: unknown }).valor
+    const valor = typeof v === 'number' && Number.isFinite(v) ? v : null
+    if (valor !== null) return { valor, estado: 'leida' }
+    const estado = (raw as { estado?: unknown }).estado
+    return { valor: null, estado: estado === 'ilegible' ? 'ilegible' : 'vacia' }
+  }
+  return { valor: null, estado: 'vacia' }
+}
+
+// Envuelve las 9 celdas de un punto crudo a CeldaMuestra; deja el resto intacto.
+// Corre PRE-parse (como calcularColumna), sobre JSON no confiable del LLM.
+export function normalizarPunto(p: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...p }
+  for (const campo of CELDAS_MUESTRA) out[campo] = normalizarCelda(p?.[campo])
+  return out
+}
+
+export interface ConteoIlegibles {
+  total: number
+  ubicaciones: Array<{ punto: string; sector: string | null; campo: string }>
+  // 0 → completo (no preguntar) · 1-5 → preguntar al tomador · >5 → corrección manual
+  ruta: 'completo' | 'preguntar' | 'manual'
+}
+
+// Cuenta SOLO celdas con estado 'ilegible' (no 'vacia') y las ubica para poder
+// formular la pregunta. Es la señal que habilita el follow-up "preguntar al
+// tomador" del diseño D29 (umbral ≤5 por P2).
+export function contarCeldasIlegibles(puntos: PuntoMuestreoSigatoka[]): ConteoIlegibles {
+  const ubicaciones: ConteoIlegibles['ubicaciones'] = []
+  for (const p of puntos) {
+    for (const campo of CELDAS_MUESTRA) {
+      if ((p as unknown as Record<string, CeldaMuestra>)[campo]?.estado === 'ilegible') {
+        ubicaciones.push({ punto: p.punto, sector: p.sector, campo })
+      }
+    }
+  }
+  const total = ubicaciones.length
+  const ruta: ConteoIlegibles['ruta'] = total === 0 ? 'completo' : total <= 5 ? 'preguntar' : 'manual'
+  return { total, ubicaciones, ruta }
+}
 
 // ─── Fórmulas y validación cruzada (por columna) ──────────────────────────────
 
@@ -101,12 +161,14 @@ export type SigatokaVisionFn = (params: SigatokaVisionParams) => Promise<string>
 
 function postProcesar(parsed: any): { data: SigatokaMuestreo; camposAclarar: string[] } {
   const columnas: ResumenColumna[] = (parsed.resumenColumnas ?? []).map(calcularColumna)
+  const puntos = (parsed.puntosMuestreo ?? []).map(normalizarPunto)
   const camposDudosos = [
     ...(parsed.camposDudosos ?? []),
     ...detectarCamposDudosos(columnas),
   ]
   const data = SigatokaMuestreoSchema.parse({
     ...parsed,
+    puntosMuestreo: puntos,
     resumenColumnas: columnas,
     requiereValidacion: camposDudosos.length > 0 || (parsed.confidenceScore ?? 0) < 0.75,
     camposDudosos,
@@ -144,10 +206,10 @@ function sanPunto(p: any): PuntoMuestreoSigatoka {
     punto: str(p?.punto) ?? '?',
     sector: str(p?.sector),
     lote_id: str(p?.lote_id),
-    planta1_estadio: num(p?.planta1_estadio), planta1_piscas: num(p?.planta1_piscas),
-    planta2_estadio: num(p?.planta2_estadio), planta2_piscas: num(p?.planta2_piscas),
-    planta3_estadio: num(p?.planta3_estadio), planta3_piscas: num(p?.planta3_piscas),
-    hVle: num(p?.hVle), hVlq: num(p?.hVlq), func: num(p?.func),
+    planta1_estadio: normalizarCelda(p?.planta1_estadio), planta1_piscas: normalizarCelda(p?.planta1_piscas),
+    planta2_estadio: normalizarCelda(p?.planta2_estadio), planta2_piscas: normalizarCelda(p?.planta2_piscas),
+    planta3_estadio: normalizarCelda(p?.planta3_estadio), planta3_piscas: normalizarCelda(p?.planta3_piscas),
+    hVle: normalizarCelda(p?.hVle), hVlq: normalizarCelda(p?.hVlq), func: normalizarCelda(p?.func),
     marcaEspecial: str(p?.marcaEspecial),
   }
 }

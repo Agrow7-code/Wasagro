@@ -174,4 +174,24 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — loop retry + fallback (path
     expect(data.nombreFinca).toBeNull()
     expect(data.camposDudosos[0]).toContain('extracción incompleta')
   })
+
+  it('normaliza el estado por celda de los puntos (I5) en el path de extracción', async () => {
+    const ficha = JSON.parse(fichaValida())
+    ficha.puntosMuestreo = [{
+      punto: 'P1', sector: 'Corrijal', lote_id: null, marcaEspecial: null,
+      planta1_estadio: 2,                                   // crudo → leida
+      planta1_piscas: { valor: null, estado: 'ilegible' },  // ilegible
+      planta2_estadio: null,                                // → vacia
+      planta2_piscas: null, planta3_estadio: null, planta3_piscas: null,
+      hVle: null, hVlq: null, func: null,
+    }]
+    const adapter = adapterConRespuestas(JSON.stringify(ficha))
+    const agent = new WasagroAIAgent(adapter, lfStub)
+
+    const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-celdas')
+    const p = data.puntosMuestreo[0]!
+    expect(p.planta1_estadio).toEqual({ valor: 2, estado: 'leida' })
+    expect(p.planta1_piscas).toEqual({ valor: null, estado: 'ilegible' })
+    expect(p.planta2_estadio).toEqual({ valor: null, estado: 'vacia' })
+  })
 })

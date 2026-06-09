@@ -38,7 +38,16 @@ variaciones visuales.
      casi siempre DIFIEREN. Captura cada columna tal cual está escrita.
    - Si solo hay una columna, emite un array de 1.
 
-6. **VALORES ILEGIBLES** → `null`. NUNCA inventar un número.
+6. **CELDAS DE MUESTRA → `{ "valor": …, "estado": … }`** (las 9 celdas de cada
+   punto: `planta{1,2,3}_estadio`, `planta{1,2,3}_piscas`, `hVle`, `hVlq`, `func`).
+   Cada una es un objeto con `valor` (número o null) y `estado`:
+   - Número legible → `{ "valor": 3, "estado": "leida" }`.
+   - Celda EN BLANCO (nada escrito, punto no muestreado) → `{ "valor": null, "estado": "vacia" }`.
+   - Hay algo escrito que NO podés leer (borroso, tachado, ambiguo) →
+     `{ "valor": null, "estado": "ilegible" }`. NUNCA inventes el número.
+   - REGLA DE ORO: marcá `ilegible` SOLO si hay tinta/marca que no descifrás. Una
+     celda vacía es `vacia`, jamás `ilegible` (preguntar por celdas en blanco
+     molesta al usuario). Ante la duda entre vacía e ilegible → `vacia`.
 
 7. **FÓRMULAS** → vuelca lo escrito en papel en los campos `_formulario`.
    Wasagro recalcula H..M por su cuenta. No calcules aquí.
@@ -62,10 +71,16 @@ variaciones visuales.
   "puntosMuestreo": [
     {
       "punto": "P1", "sector": null, "lote_id": null,
-      "planta1_estadio": null, "planta1_piscas": null,
-      "planta2_estadio": null, "planta2_piscas": null,
-      "planta3_estadio": null, "planta3_piscas": null,
-      "hVle": null, "hVlq": null, "func": null, "marcaEspecial": null
+      "planta1_estadio": { "valor": null, "estado": "vacia" },
+      "planta1_piscas":  { "valor": null, "estado": "vacia" },
+      "planta2_estadio": { "valor": null, "estado": "vacia" },
+      "planta2_piscas":  { "valor": null, "estado": "vacia" },
+      "planta3_estadio": { "valor": null, "estado": "vacia" },
+      "planta3_piscas":  { "valor": null, "estado": "vacia" },
+      "hVle": { "valor": null, "estado": "vacia" },
+      "hVlq": { "valor": null, "estado": "vacia" },
+      "func": { "valor": null, "estado": "vacia" },
+      "marcaEspecial": null
     }
   ],
   "plantas": [

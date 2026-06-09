@@ -16,6 +16,8 @@ import {
   buildDescripcionRaw,
   buildWhatsappSummary,
   extractSigatokaMuestreo,
+  normalizarCelda,
+  contarCeldasIlegibles,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -24,6 +26,8 @@ import {
   type SigatokaMuestreo,
   type ResumenColumna,
   type PuntoMuestreoSigatoka,
+  type CeldaMuestra,
+  type EstadoCelda,
 } from '../../src/types/dominio/SigatokaMuestreo.js'
 import { PromptManager } from '../../src/pipeline/promptManager.js'
 
@@ -55,13 +59,17 @@ function muestreo(columnas: ResumenColumna[], camposDudosos: string[] = [], top:
   }
 }
 
+function celda(valor: number | null = null, estado: EstadoCelda = valor != null ? 'leida' : 'vacia'): CeldaMuestra {
+  return { valor, estado }
+}
+
 function punto(o: Partial<PuntoMuestreoSigatoka> = {}): PuntoMuestreoSigatoka {
   return {
     punto: 'P1', sector: null, lote_id: null,
-    planta1_estadio: null, planta1_piscas: null,
-    planta2_estadio: null, planta2_piscas: null,
-    planta3_estadio: null, planta3_piscas: null,
-    hVle: null, hVlq: null, func: null, marcaEspecial: null, ...o,
+    planta1_estadio: celda(), planta1_piscas: celda(),
+    planta2_estadio: celda(), planta2_piscas: celda(),
+    planta3_estadio: celda(), planta3_piscas: celda(),
+    hVle: celda(), hVlq: celda(), func: celda(), marcaEspecial: null, ...o,
   }
 }
 
@@ -146,6 +154,62 @@ describe('mapearSectoresALotes', () => {
   })
 })
 
+// ─── normalizarCelda (estado por celda — I5) ─────────────────────────────────
+
+describe('normalizarCelda', () => {
+  it('número crudo → leída', () => {
+    expect(normalizarCelda(5)).toEqual({ valor: 5, estado: 'leida' })
+  })
+  it('null → vacía', () => {
+    expect(normalizarCelda(null)).toEqual({ valor: null, estado: 'vacia' })
+  })
+  it('objeto con estado ilegible y valor null → ilegible', () => {
+    expect(normalizarCelda({ valor: null, estado: 'ilegible' })).toEqual({ valor: null, estado: 'ilegible' })
+  })
+  it('valor presente fuerza leída aunque el modelo diga ilegible (no contradicción)', () => {
+    expect(normalizarCelda({ valor: 7, estado: 'ilegible' })).toEqual({ valor: 7, estado: 'leida' })
+  })
+  it('estado desconocido con valor null → vacía (conservador, no inventa ilegible)', () => {
+    expect(normalizarCelda({ valor: null, estado: 'raro' })).toEqual({ valor: null, estado: 'vacia' })
+  })
+  it('basura → vacía', () => {
+    expect(normalizarCelda('x')).toEqual({ valor: null, estado: 'vacia' })
+  })
+})
+
+// ─── contarCeldasIlegibles (señal para "preguntar al tomador") ────────────────
+
+describe('contarCeldasIlegibles', () => {
+  it('0 ilegibles → ruta completo', () => {
+    const r = contarCeldasIlegibles([punto(), punto({ planta1_estadio: celda(2) })])
+    expect(r.total).toBe(0)
+    expect(r.ruta).toBe('completo')
+  })
+
+  it('1-5 ilegibles → ruta preguntar, con ubicación localizable', () => {
+    const p = punto({ punto: 'P3', sector: 'Corrijal', planta2_estadio: celda(null, 'ilegible') })
+    const r = contarCeldasIlegibles([p])
+    expect(r.total).toBe(1)
+    expect(r.ruta).toBe('preguntar')
+    expect(r.ubicaciones[0]).toMatchObject({ punto: 'P3', sector: 'Corrijal', campo: 'planta2_estadio' })
+  })
+
+  it('>5 ilegibles → ruta manual', () => {
+    const p = punto({
+      planta1_estadio: celda(null, 'ilegible'), planta1_piscas: celda(null, 'ilegible'),
+      planta2_estadio: celda(null, 'ilegible'), planta2_piscas: celda(null, 'ilegible'),
+      planta3_estadio: celda(null, 'ilegible'), planta3_piscas: celda(null, 'ilegible'),
+    })
+    const r = contarCeldasIlegibles([p])
+    expect(r.total).toBe(6)
+    expect(r.ruta).toBe('manual')
+  })
+
+  it('una celda vacía NO cuenta como ilegible (no torturar por celdas en blanco)', () => {
+    expect(contarCeldasIlegibles([punto({ planta1_estadio: celda(null, 'vacia') })]).total).toBe(0)
+  })
+})
+
 // ─── buildWhatsappSummary (alerta sobre la PEOR columna — I8) ─────────────────
 
 describe('buildWhatsappSummary — alerta multi-columna', () => {
@@ -220,7 +284,7 @@ describe('construirFallbackSigatoka', () => {
     expect(() => SigatokaMuestreoSchema.parse(construirFallbackSigatoka(null, null))).not.toThrow()
   })
 
-  it('rescata lo que sí es del tipo correcto', () => {
+  it('rescata lo que sí es del tipo correcto (celdas crudas → leída)', () => {
     const fb = construirFallbackSigatoka({
       nombreFinca: 'A-Michell', semana: 23,
       resumenColumnas: [{ A: 19, B: 127, C: 9 }],
@@ -229,7 +293,8 @@ describe('construirFallbackSigatoka', () => {
     expect(fb.nombreFinca).toBe('A-Michell')
     expect(fb.resumenColumnas[0]!.H_calculado).toBe(47.4) // (9/19)*100
     expect(fb.puntosMuestreo[0]!.sector).toBe('Corrijal')
-    expect(fb.puntosMuestreo[0]!.planta1_piscas).toBe(3)
+    expect(fb.puntosMuestreo[0]!.planta1_piscas).toEqual({ valor: 3, estado: 'leida' })
+    expect(fb.puntosMuestreo[0]!.planta2_estadio).toEqual({ valor: null, estado: 'vacia' })
   })
 })
 
@@ -245,9 +310,14 @@ describe('SigatokaMuestreoSchema', () => {
   })
 
   it('acepta planta1_estadio=2 / planta1_piscas=3 (valor "2(3)")', () => {
-    const m = muestreo([fullCol()], [], { puntosMuestreo: [punto({ planta1_estadio: 2, planta1_piscas: 3 })] })
+    const m = muestreo([fullCol()], [], { puntosMuestreo: [punto({ planta1_estadio: celda(2), planta1_piscas: celda(3) })] })
     const p = SigatokaMuestreoSchema.parse(m)
-    expect(p.puntosMuestreo[0]!.planta1_piscas).toBe(3)
+    expect(p.puntosMuestreo[0]!.planta1_piscas.valor).toBe(3)
+  })
+
+  it('rechaza un estado de celda inválido', () => {
+    const m = muestreo([fullCol()], [], { puntosMuestreo: [punto({ planta1_estadio: { valor: null, estado: 'borrosa' as EstadoCelda } })] })
+    expect(() => SigatokaMuestreoSchema.parse(m)).toThrow()
   })
 
   it('rechaza confidenceScore fuera de 0-1', () => {

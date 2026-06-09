@@ -24,7 +24,7 @@ import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } 
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
 import { SigatokaMuestreoSchema, type SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
-import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka } from '../../pipeline/handlers/SigatokaHandler.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -576,6 +576,10 @@ export class WasagroAIAgent implements IWasagroLLM {
 
         // Recálculo determinista por columna (null-safe: no tira aunque falte A).
         json.resumenColumnas = (json.resumenColumnas ?? []).map(calcularColumna)
+
+        // Estado por celda (I5): envuelve las 9 celdas de muestra de cada punto
+        // a { valor, estado }. Determinista, tolera celdas crudas o ya envueltas.
+        json.puntosMuestreo = (json.puntosMuestreo ?? []).map(normalizarPunto)
 
         const camposDudosos = [
           ...(json.camposDudosos ?? []),

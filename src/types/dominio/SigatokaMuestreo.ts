@@ -1,5 +1,19 @@
 import { z } from 'zod'
 
+// ─── Estado por celda (I5) ────────────────────────────────────────────────────
+// Cada celda de MUESTRA lleva valor + estado de lectura. Distinguir 'vacia'
+// (punto no muestreado, null legítimo) de 'ilegible' (hay algo escrito que el
+// modelo no pudo leer) es lo que habilita el "preguntar al tomador" sin molestar
+// por celdas en blanco a propósito (P2). 'leida' ⟺ valor presente.
+export const EstadoCeldaSchema = z.enum(['leida', 'vacia', 'ilegible'])
+export type EstadoCelda = z.infer<typeof EstadoCeldaSchema>
+
+export const CeldaMuestraSchema = z.object({
+  valor:  z.number().nullable(),
+  estado: EstadoCeldaSchema,
+})
+export type CeldaMuestra = z.infer<typeof CeldaMuestraSchema>
+
 // ─── Sub-schemas ──────────────────────────────────────────────────────────────
 
 export const PuntoMuestreoSigatokaSchema = z.object({
@@ -15,16 +29,17 @@ export const PuntoMuestreoSigatokaSchema = z.object({
   // c/u. Valores como "2(3)" llevan dos números distintos:
   //   principal (2) = estadio de Sigatoka → planta{N}_estadio
   //   paréntesis (3) = piscas/lesiones    → planta{N}_piscas
-  planta1_estadio: z.number().nullable(),
-  planta1_piscas:  z.number().nullable(),
-  planta2_estadio: z.number().nullable(),
-  planta2_piscas:  z.number().nullable(),
-  planta3_estadio: z.number().nullable(),
-  planta3_piscas:  z.number().nullable(),
+  // Cada una es una CeldaMuestra ({ valor, estado }) — ver I5 arriba.
+  planta1_estadio: CeldaMuestraSchema,
+  planta1_piscas:  CeldaMuestraSchema,
+  planta2_estadio: CeldaMuestraSchema,
+  planta2_piscas:  CeldaMuestraSchema,
+  planta3_estadio: CeldaMuestraSchema,
+  planta3_piscas:  CeldaMuestraSchema,
 
-  hVle: z.number().nullable(),
-  hVlq: z.number().nullable(),
-  func: z.number().nullable(),
+  hVle: CeldaMuestraSchema,
+  hVlq: CeldaMuestraSchema,
+  func: CeldaMuestraSchema,
 
   marcaEspecial: z.string().nullable(),
 })
