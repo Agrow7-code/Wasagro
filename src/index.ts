@@ -335,6 +335,58 @@ app.post('/api/billing/cancel', authMiddleware, async (c) => {
   }
 })
 
+app.post('/api/billing/change-plan', authMiddleware, async (c) => {
+  const user = c.get('authedUser')
+  if (!user) return c.json({ error: 'No autenticado' }, 401)
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('org_id, rol')
+    .eq('id', user.id)
+    .single()
+
+  if (!usuario?.org_id) return c.json({ error: 'Usuario sin organización' }, 403)
+  if (!['admin_org', 'director', 'propietario'].includes(usuario.rol)) {
+    return c.json({ error: 'Solo un administrador puede cambiar el plan' }, 403)
+  }
+
+  const body = await c.req.json().catch(() => ({}))
+  const fincas = Number(body.fincas)
+  const usuarios = Number(body.usuarios)
+
+  if (!fincas || fincas < 1 || !usuarios || usuarios < 1) {
+    return c.json({ error: 'fincas y usuarios deben ser >= 1' }, 400)
+  }
+
+  const newPlan = inferPlanSegment(fincas, usuarios)
+  const newPrice = calcularPrecio(fincas, usuarios)
+
+  try {
+    const { error } = await supabase
+      .from('organizaciones')
+      .update({
+        fincas_contratadas: fincas,
+        usuarios_contratados: usuarios,
+        precio_mensual: newPrice,
+        plan: newPlan,
+      })
+      .eq('org_id', usuario.org_id)
+
+    if (error) throw error
+
+    return c.json({
+      plan: newPlan,
+      fincas_contratadas: fincas,
+      usuarios_contratados: usuarios,
+      precio_mensual: newPrice,
+      segment_label: getSegmentLabel(fincas, usuarios),
+    })
+  } catch (err: any) {
+    console.error('[billing] Error changing plan:', err.message)
+    return c.json({ error: 'Error cambiando el plan' }, 500)
+  }
+})
+
 app.get('/api/billing/status', authMiddleware, async (c) => {
   const user = c.get('authedUser')
   if (!user) return c.json({ error: 'No autenticado' }, 401)

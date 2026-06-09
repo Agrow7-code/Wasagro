@@ -22,6 +22,7 @@ import { FincaSetupView } from './dashboard/views/FincaSetupView'
 import { BillingView } from './dashboard/views/BillingView'
 import LoginPage from './auth/LoginPage'
 import Brochure from './Brochure'
+import { PricingCalculator } from './PricingCalculator'
 import { useAuth } from './auth/useAuth'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -111,6 +112,7 @@ function Nav() {
 
   const links = [
     { href: '#como-funciona', label: 'Cómo funciona' },
+    { href: '#precios', label: 'Precios' },
     { href: '#exportadoras', label: 'Exportadoras' },
   ]
 
@@ -1080,6 +1082,7 @@ function LandingPage() {
         <HowItWorks />
         <WhatsAppSection />
         <Features />
+        <PricingCalculator />
         <Audiences />
         <ProofBar />
         <FinalCTA />
