@@ -22,7 +22,7 @@ import {
 import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal } from '../../types/dominio/Resumen.js'
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
-import { SigatokaMuestreoSchema, type SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
+import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
 import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
@@ -428,6 +428,37 @@ export class WasagroAIAgent implements IWasagroLLM {
       promptClient: PromptManager.getPromptClient(promptName),
       ...this.#costOpts(costCtx),
     })
+  }
+
+  // Interpreta la respuesta de texto del tomador a las celdas ilegibles. Tier
+  // fast (parseo simple). Si falla, devuelve [] (sin aclaraciones → las celdas
+  // siguen ilegibles, el evento queda para el asesor; nunca inventamos).
+  async interpretarAclaracionSigatoka(
+    respuestaUsuario: string,
+    ubicaciones: Array<{ punto: string; campo: string }>,
+    traceId: string,
+    costCtx?: CostContext,
+  ): Promise<AclaracionCelda[]> {
+    const promptName = 'sp-03h-aclaracion-sigatoka.md'
+    const prompt = await PromptManager.getPrompt(promptName, `prompts/${promptName}`, traceId)
+
+    const userContent = `Celdas ilegibles:\n${JSON.stringify(ubicaciones)}\n\nRespuesta del agricultor:\n"${respuestaUsuario}"`
+
+    const result = await runTypedClassifier({
+      adapter: this.#adapter,
+      systemPrompt: prompt,
+      userContent,
+      schema: AclaracionSigatokaSchema,
+      traceId,
+      classifierName: 'aclaracion_sigatoka',
+      fallback: { aclaraciones: [] },
+      modelClass: 'fast',
+      temperature: 0,
+      langfuseClient: this.#lf,
+      promptClient: PromptManager.getPromptClient(promptName),
+      ...this.#costOpts(costCtx),
+    })
+    return result.aclaraciones
   }
 
   async extraerDocumentoOCR(

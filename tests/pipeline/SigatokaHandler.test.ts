@@ -18,6 +18,8 @@ import {
   extractSigatokaMuestreo,
   normalizarCelda,
   contarCeldasIlegibles,
+  buildPreguntaAclaracion,
+  aplicarAclaraciones,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -207,6 +209,67 @@ describe('contarCeldasIlegibles', () => {
 
   it('una celda vacía NO cuenta como ilegible (no torturar por celdas en blanco)', () => {
     expect(contarCeldasIlegibles([punto({ planta1_estadio: celda(null, 'vacia') })]).total).toBe(0)
+  })
+})
+
+// ─── buildPreguntaAclaracion (follow-up "preguntar al tomador") ───────────────
+
+describe('buildPreguntaAclaracion', () => {
+  it('lista las celdas ilegibles con etiqueta legible y pluraliza', () => {
+    const q = buildPreguntaAclaracion([
+      { punto: 'P3', sector: 'Corrijal', campo: 'planta2_estadio' },
+      { punto: 'P5', sector: null, campo: 'hVle' },
+    ])
+    expect(q).toContain('P3')
+    expect(q).toContain('planta 2 estadio')
+    expect(q).toContain('P5')
+    expect(q).toContain('H+VLE')
+    expect(q).toMatch(/2 valores/)
+  })
+
+  it('singular con una sola celda', () => {
+    const q = buildPreguntaAclaracion([{ punto: 'P1', sector: null, campo: 'func' }])
+    expect(q).toMatch(/1 valor\b/)
+  })
+})
+
+// ─── aplicarAclaraciones (merge de respuestas del tomador) ────────────────────
+
+describe('aplicarAclaraciones', () => {
+  const base = () => muestreo([fullCol()], [], {
+    confidenceScore: 0.9,
+    puntosMuestreo: [
+      punto({ punto: 'P3', planta2_estadio: celda(null, 'ilegible') }),
+      punto({ punto: 'P5', hVle: celda(null, 'ilegible') }),
+    ],
+  })
+
+  it('completa la celda ilegible con el valor del tomador → leída', () => {
+    const r = aplicarAclaraciones(base(), [{ punto: 'P3', campo: 'planta2_estadio', valor: 4 }])
+    expect(r.puntosMuestreo[0]!.planta2_estadio).toEqual({ valor: 4, estado: 'leida' })
+  })
+
+  it('deja en ilegible la celda no respondida y mantiene requiereValidacion', () => {
+    const r = aplicarAclaraciones(base(), [{ punto: 'P3', campo: 'planta2_estadio', valor: 4 }])
+    expect(r.puntosMuestreo[1]!.hVle.estado).toBe('ilegible')
+    expect(r.requiereValidacion).toBe(true)
+  })
+
+  it('resueltas TODAS y sin otras dudas → requiereValidacion false', () => {
+    const r = aplicarAclaraciones(base(), [
+      { punto: 'P3', campo: 'planta2_estadio', valor: 4 },
+      { punto: 'P5', campo: 'hVle', valor: 7 },
+    ])
+    expect(r.requiereValidacion).toBe(false)
+  })
+
+  it('ignora valor null y no pisa una celda ya leída (solo toca ilegibles)', () => {
+    const m = muestreo([fullCol()], [], { puntosMuestreo: [punto({ punto: 'P1', planta1_estadio: celda(2) })] })
+    const r = aplicarAclaraciones(m, [
+      { punto: 'P1', campo: 'planta1_estadio', valor: 9 }, // ya leída → no pisar
+      { punto: 'P3', campo: 'planta2_estadio', valor: null }, // null → ignorar
+    ])
+    expect(r.puntosMuestreo[0]!.planta1_estadio.valor).toBe(2)
   })
 })
 

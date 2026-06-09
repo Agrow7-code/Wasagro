@@ -193,6 +193,23 @@ export async function saveEvento(insert: EventoCampoInsert, client: SupabaseClie
   return (data as { id: string }).id
 }
 
+// Actualiza datos_evento + status de un evento ya persistido. Lo usa el follow-up
+// de aclaración de Sigatoka: el evento se guarda primero como requires_review
+// (P4 — no se pierde si el tomador no responde) y se actualiza con su respuesta.
+export async function actualizarEventoDatos(
+  eventoId: string,
+  datos_evento: Record<string, unknown>,
+  status: string,
+  requiere_validacion: boolean,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('eventos_campo')
+    .update({ datos_evento, status, requiere_validacion })
+    .eq('id', eventoId)
+  if (error) throw error
+}
+
 export interface ProspectoInsert {
   phone: string
   tipo_contacto: 'trabajador' | 'decision_maker' | 'otro'

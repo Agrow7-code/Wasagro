@@ -4,6 +4,7 @@ import type {
   ResumenColumna,
   PuntoMuestreoSigatoka,
   CeldaMuestra,
+  AclaracionCelda,
 } from '../../types/dominio/SigatokaMuestreo.js'
 import { PromptManager } from '../promptManager.js'
 
@@ -64,6 +65,45 @@ export function contarCeldasIlegibles(puntos: PuntoMuestreoSigatoka[]): ConteoIl
   const total = ubicaciones.length
   const ruta: ConteoIlegibles['ruta'] = total === 0 ? 'completo' : total <= 5 ? 'preguntar' : 'manual'
   return { total, ubicaciones, ruta }
+}
+
+// Etiqueta legible de cada celda de muestra para el mensaje al tomador.
+const LABEL_CELDA: Record<string, string> = {
+  planta1_estadio: 'planta 1 estadio', planta1_piscas: 'planta 1 piscas',
+  planta2_estadio: 'planta 2 estadio', planta2_piscas: 'planta 2 piscas',
+  planta3_estadio: 'planta 3 estadio', planta3_piscas: 'planta 3 piscas',
+  hVle: 'H+VLE', hVlq: 'H+VLQ', func: 'func',
+}
+
+// Pregunta al tomador por las celdas ilegibles (ruta 'preguntar', ≤5 por P2).
+// Tuteo Ec/Gt, conciso, solo ⚠️. Pide los valores con un ejemplo de formato.
+export function buildPreguntaAclaracion(ubicaciones: ConteoIlegibles['ubicaciones']): string {
+  const lista = ubicaciones.map(u => `${u.punto} ${LABEL_CELDA[u.campo] ?? u.campo}`).join(', ')
+  const n = ubicaciones.length
+  const ej = ubicaciones[0]
+  return `⚠️ En tu ficha no pude leer ${n} valor${n > 1 ? 'es' : ''}: ${lista}. ¿Me los pasás? Ej: "${ej?.punto ?? 'P1'} 4"`
+}
+
+// Aplica las respuestas del tomador a las celdas ILEGIBLES (nunca pisa una celda
+// ya leída ni inventa: ignora valor null). Recalcula requiereValidacion: queda
+// true si persisten ilegibles, discrepancias previas o confianza baja.
+export function aplicarAclaraciones(sigatoka: SigatokaMuestreo, respuestas: AclaracionCelda[]): SigatokaMuestreo {
+  const puntos: PuntoMuestreoSigatoka[] = sigatoka.puntosMuestreo.map(p => ({ ...p }))
+  for (const r of respuestas) {
+    if (r.valor == null || !Number.isFinite(r.valor)) continue
+    if (!(r.campo in LABEL_CELDA)) continue
+    const p = puntos.find(pt => pt.punto === r.punto)
+    if (!p) continue
+    const celdaActual = (p as unknown as Record<string, CeldaMuestra>)[r.campo]
+    if (celdaActual?.estado !== 'ilegible') continue // solo resolvemos ilegibles
+    ;(p as unknown as Record<string, CeldaMuestra>)[r.campo] = { valor: r.valor, estado: 'leida' }
+  }
+  const restantes = contarCeldasIlegibles(puntos).total
+  return {
+    ...sigatoka,
+    puntosMuestreo: puntos,
+    requiereValidacion: sigatoka.camposDudosos.length > 0 || sigatoka.confidenceScore < 0.75 || restantes > 0,
+  }
 }
 
 // ─── Fórmulas y validación cruzada (por columna) ──────────────────────────────

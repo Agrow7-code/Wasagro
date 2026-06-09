@@ -14,6 +14,20 @@ export const CeldaMuestraSchema = z.object({
 })
 export type CeldaMuestra = z.infer<typeof CeldaMuestraSchema>
 
+// Respuesta del tomador a una celda ilegible (follow-up "preguntar al tomador").
+// `valor` null = no la respondió / no se pudo interpretar → la celda sigue ilegible.
+export const AclaracionCeldaSchema = z.object({
+  punto: z.string(),
+  campo: z.string(),
+  valor: z.number().nullable(),
+})
+export type AclaracionCelda = z.infer<typeof AclaracionCeldaSchema>
+
+export const AclaracionSigatokaSchema = z.object({
+  aclaraciones: z.array(AclaracionCeldaSchema),
+})
+export type AclaracionSigatoka = z.infer<typeof AclaracionSigatokaSchema>
+
 // ─── Sub-schemas ──────────────────────────────────────────────────────────────
 
 export const PuntoMuestreoSigatokaSchema = z.object({

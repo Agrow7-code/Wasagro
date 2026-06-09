@@ -175,6 +175,33 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — loop retry + fallback (path
     expect(data.camposDudosos[0]).toContain('extracción incompleta')
   })
 
+  it('interpretarAclaracionSigatoka mapea la respuesta del tomador a las celdas (tier fast)', async () => {
+    const adapter = adapterConRespuestas(JSON.stringify({
+      aclaraciones: [
+        { punto: 'P3', campo: 'planta2_estadio', valor: 4 },
+        { punto: 'P5', campo: 'hVle', valor: null },
+      ],
+    }))
+    const agent = new WasagroAIAgent(adapter, lfStub)
+
+    const ubic = [{ punto: 'P3', campo: 'planta2_estadio' }, { punto: 'P5', campo: 'hVle' }]
+    const out = await agent.interpretarAclaracionSigatoka('P3 fue 4, el otro ni idea', ubic, 'trace-acl')
+
+    expect(out).toEqual([
+      { punto: 'P3', campo: 'planta2_estadio', valor: 4 },
+      { punto: 'P5', campo: 'hVle', valor: null },
+    ])
+    const opts = generarTextoDe(adapter).mock.calls[0][1] as LLMGeneracionOpciones
+    expect(opts.modelClass).toBe('fast')
+  })
+
+  it('interpretarAclaracionSigatoka → [] cuando el modelo devuelve basura (no inventa)', async () => {
+    const adapter = adapterConRespuestas('no json')
+    const agent = new WasagroAIAgent(adapter, lfStub)
+    const out = await agent.interpretarAclaracionSigatoka('cualquier cosa', [{ punto: 'P1', campo: 'func' }], 'trace-acl2')
+    expect(out).toEqual([])
+  })
+
   it('normaliza el estado por celda de los puntos (I5) en el path de extracción', async () => {
     const ficha = JSON.parse(fichaValida())
     ficha.puntosMuestreo = [{

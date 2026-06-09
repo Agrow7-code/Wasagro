@@ -12,6 +12,7 @@ import {
   getOrCreateSession,
   updateSession,
   saveEvento,
+  actualizarEventoDatos,
   updateFincaCoordenadas,
   actualizarMensaje,
   getPendingAgricultoresByFinca,
@@ -25,7 +26,8 @@ import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
-import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes } from './SigatokaHandler.js'
+import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones } from './SigatokaHandler.js'
+import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { evaluarCalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
 
@@ -219,30 +221,12 @@ export async function handleEvento(
 
         const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
         sigatoka.puntosMuestreo = mapearSectoresALotes(sigatoka.puntosMuestreo, lotesRef)
-        const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
-        const descripcionRaw = buildDescripcionRaw(sigatoka)
-
-        const eventoId = await saveEvento({
-          finca_id: usuario.finca_id!,
-          lote_id: null,
-          tipo_evento: 'observacion',
-          status: sigatoka.requiereValidacion ? 'requires_review' : 'complete',
-          datos_evento: {
-            tipo_documento: 'muestreo_sigatoka_banano',
-            sigatoka,
-            caption: msg.texto ?? null,
-            classifier_source: esSigatoka ? 'sp-03g_binary' : 'sp-03c_direct',
-          },
-          descripcion_raw: descripcionRaw,
-          confidence_score: sigatoka.confidenceScore,
-          requiere_validacion: sigatoka.requiereValidacion,
-          imagen_path: imagenPath,
-          created_by: usuario.id,
-          mensaje_id: mensajeId,
+        await finalizarMuestreoSigatoka(sigatoka, {
+          from: msg.from, fincaId: usuario.finca_id!, usuarioId: usuario.id, mensajeId,
+          imagenPath, caption: msg.texto ?? null,
+          datosExtra: { classifier_source: esSigatoka ? 'sp-03g_binary' : 'sp-03c_direct' },
+          traceId, costCtx,
         })
-
-        await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
-        await _sender!.enviarTexto(msg.from, buildWhatsappSummary(sigatoka, camposAclarar))
         return
       }
 
@@ -261,30 +245,12 @@ export async function handleEvento(
 
           const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
           sigatoka.puntosMuestreo = mapearSectoresALotes(sigatoka.puntosMuestreo, lotesRef)
-          const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
-          const descripcionRaw = buildDescripcionRaw(sigatoka)
-
-          const eventoId = await saveEvento({
-            finca_id: usuario.finca_id!,
-            lote_id: null,
-            tipo_evento: 'observacion',
-            status: sigatoka.requiereValidacion ? 'requires_review' : 'complete',
-            datos_evento: {
-              tipo_documento: 'muestreo_sigatoka_banano',
-              sigatoka,
-              caption: msg.texto ?? null,
-              texto_ocr_origen: ocr.texto_completo_visible,
-            },
-            descripcion_raw: descripcionRaw,
-            confidence_score: sigatoka.confidenceScore,
-            requiere_validacion: sigatoka.requiereValidacion,
-            imagen_path: imagenPath,
-            created_by: usuario.id,
-            mensaje_id: mensajeId,
+          await finalizarMuestreoSigatoka(sigatoka, {
+            from: msg.from, fincaId: usuario.finca_id!, usuarioId: usuario.id, mensajeId,
+            imagenPath, caption: msg.texto ?? null,
+            datosExtra: { texto_ocr_origen: ocr.texto_completo_visible },
+            traceId, costCtx,
           })
-
-          await actualizarMensaje(mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
-          await _sender!.enviarTexto(msg.from, buildWhatsappSummary(sigatoka, camposAclarar))
           return
         }
 
@@ -455,6 +421,63 @@ export async function handleEvento(
       ? `Procesé ${insertados} registros de tu archivo. ${errores} filas tuvieron errores y quedaron pendientes de revisión. ✅`
       : `Procesé ${insertados} registros de tu archivo. Todos quedaron guardados para revisión. ✅`
     await _sender!.enviarTexto(msg.from, msj)
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  // ── Aclaración de celdas ilegibles de Sigatoka (follow-up al tomador) ─────
+  if (session.status === 'pending_sigatoka_aclaracion') {
+    const cp = session.contexto_parcial as {
+      sigatoka_evento_id?: string
+      sigatoka_datos_evento?: Record<string, unknown>
+      sigatoka_ubicaciones?: Array<{ punto: string; sector: string | null; campo: string }>
+    }
+    const eventoId = cp.sigatoka_evento_id
+    const datos = cp.sigatoka_datos_evento
+    const ubicaciones = cp.sigatoka_ubicaciones ?? []
+
+    // Estado corrupto/incompleto → salida limpia (el evento ya quedó persistido).
+    if (!eventoId || !datos || ubicaciones.length === 0) {
+      await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+      await _sender!.enviarTexto(msg.from, '¿Qué quieres registrar?')
+      await actualizarMensaje(mensajeId, { status: 'processed' })
+      return
+    }
+
+    const respuestas = await _llm!.interpretarAclaracionSigatoka(
+      transcripcion,
+      ubicaciones.map(u => ({ punto: u.punto, campo: u.campo })),
+      traceId,
+      costCtx,
+    )
+    const sigatokaPrev = datos['sigatoka'] as SigatokaMuestreo
+    const actualizado = aplicarAclaraciones(sigatokaPrev, respuestas)
+    datos['sigatoka'] = actualizado
+
+    const nuevoStatus = actualizado.requiereValidacion ? 'requires_review' : 'complete'
+    await actualizarEventoDatos(eventoId, datos, nuevoStatus, actualizado.requiereValidacion)
+
+    const ileg = contarCeldasIlegibles(actualizado.puntosMuestreo)
+
+    // P2: una sola repregunta. Si tras la primera respuesta aún quedan celdas
+    // ilegibles y no agotamos la cuota, repreguntamos por las que faltan.
+    if (ileg.ruta === 'preguntar' && session.clarification_count < 1) {
+      await updateSession(session.session_id, {
+        status: 'pending_sigatoka_aclaracion',
+        clarification_count: session.clarification_count + 1,
+        contexto_parcial: { sigatoka_evento_id: eventoId, sigatoka_datos_evento: datos, sigatoka_ubicaciones: ileg.ubicaciones },
+      })
+      await _sender!.enviarTexto(msg.from, buildPreguntaAclaracion(ileg.ubicaciones))
+      await actualizarMensaje(mensajeId, { status: 'processing' })
+      return
+    }
+
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    const restantes = ileg.total
+    const mensajeFinal = restantes === 0
+      ? '✅ Listo, completé los valores que faltaban. ¡Gracias!'
+      : `✅ Gracias. ${restantes} valor${restantes > 1 ? 'es' : ''} sigue${restantes > 1 ? 'n' : ''} sin definir — tu asesor lo revisa.`
+    await _sender!.enviarTexto(msg.from, mensajeFinal)
     await actualizarMensaje(mensajeId, { status: 'processed' })
     return
   }
@@ -748,6 +771,64 @@ export async function handleEvento(
 
   await guardarLoteIntenciones(session.session_id, intencionesPendientes, transcripcion)
   await actualizarMensaje(mensajeId, { status: 'processing' })
+}
+
+// Persiste el muestreo, responde el resumen y —si quedan 1-5 celdas ilegibles—
+// abre el follow-up "preguntar al tomador" (estado pending_sigatoka_aclaracion).
+// El evento se guarda SIEMPRE primero (P4): si el tomador no responde, no se pierde.
+async function finalizarMuestreoSigatoka(
+  sigatoka: SigatokaMuestreo,
+  ctx: {
+    from: string
+    fincaId: string
+    usuarioId: string
+    mensajeId: string
+    imagenPath: string | null
+    caption: string | null
+    datosExtra: Record<string, unknown>
+    traceId: string
+    costCtx?: CostContext | undefined
+  },
+): Promise<void> {
+  const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
+  const datos_evento: Record<string, unknown> = {
+    tipo_documento: 'muestreo_sigatoka_banano',
+    sigatoka,
+    caption: ctx.caption,
+    ...ctx.datosExtra,
+  }
+
+  const eventoId = await saveEvento({
+    finca_id: ctx.fincaId,
+    lote_id: null,
+    tipo_evento: 'observacion',
+    status: sigatoka.requiereValidacion ? 'requires_review' : 'complete',
+    datos_evento,
+    descripcion_raw: buildDescripcionRaw(sigatoka),
+    confidence_score: sigatoka.confidenceScore,
+    requiere_validacion: sigatoka.requiereValidacion,
+    imagen_path: ctx.imagenPath,
+    created_by: ctx.usuarioId,
+    mensaje_id: ctx.mensajeId,
+  })
+
+  await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
+  await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka, camposAclarar))
+
+  const ileg = contarCeldasIlegibles(sigatoka.puntosMuestreo)
+  if (ileg.ruta === 'preguntar' && eventoId) {
+    const session = await getOrCreateSession(ctx.from, 'reporte')
+    await updateSession(session.session_id, {
+      status: 'pending_sigatoka_aclaracion',
+      clarification_count: 0,
+      contexto_parcial: {
+        sigatoka_evento_id: eventoId,
+        sigatoka_datos_evento: datos_evento,
+        sigatoka_ubicaciones: ileg.ubicaciones,
+      },
+    })
+    await _sender!.enviarTexto(ctx.from, buildPreguntaAclaracion(ileg.ubicaciones))
+  }
 }
 
 async function handleAprobacion(
