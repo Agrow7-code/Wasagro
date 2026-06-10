@@ -157,11 +157,24 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
 
     const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-throw')
 
-    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(3)
+    // 3 pasadas + 1 reintento de cada una que falló = 6 llamadas.
+    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(6)
     expect(data.confidenceScore).toBe(0)
     expect(data.requiereValidacion).toBe(true)
     expect(data.puntosMuestreo).toEqual([])
     expect(data.resumenColumnas).toEqual([])
+  })
+
+  it('reintenta la pasada izquierda que falló y recupera la severidad (data crítica)', async () => {
+    // 1ª izquierda = JSON inválido → null; el reintento la recupera.
+    const adapter = adapterConRespuestas('no es json', tab(), plg(), izq())
+    const agent = new WasagroAIAgent(adapter, lfStub)
+
+    const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-retry')
+
+    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(4) // 3 + 1 reintento (solo la nula)
+    expect(data.nombreFinca).toBe('Finca Test')
+    expect(data.resumenColumnas[0]!.H_calculado).toBe(10)
   })
 
   it('interpretarAclaracionSigatoka mapea la respuesta del tomador a las celdas (tier fast)', async () => {

@@ -577,11 +577,28 @@ export class WasagroAIAgent implements IWasagroLLM {
       const cap = new Promise<null>(res => { t = setTimeout(() => res(null), 45_000) })
       return Promise.race([p.finally(() => clearTimeout(t)), cap])
     }
-    const [izqRaw, tabRaw, plgRaw] = await Promise.all([
-      conCap(this.#extraerParteSigatoka('sp-03e1-sigatoka-izquierda.md', 'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.', base64, mimeType, traceId, costCtx)),
-      conCap(this.#extraerParteSigatoka('sp-03e2-sigatoka-derecha.md', 'Extrae SOLO las tablas de PLANTAS DE 11 SEMANAS y 00 SEMANAS.', base64, mimeType, traceId, costCtx)),
-      conCap(this.#extraerParteSigatoka('sp-03e3-sigatoka-plagas.md', 'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).', base64, mimeType, traceId, costCtx)),
-    ])
+    const PASADAS: Array<[string, string]> = [
+      ['sp-03e1-sigatoka-izquierda.md', 'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.'],
+      ['sp-03e2-sigatoka-derecha.md', 'Extrae SOLO las tablas de PLANTAS DE 11 SEMANAS y 00 SEMANAS.'],
+      ['sp-03e3-sigatoka-plagas.md', 'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).'],
+    ]
+    const correr = (i: number) => conCap(this.#extraerParteSigatoka(PASADAS[i]![0], PASADAS[i]![1], base64, mimeType, traceId, costCtx))
+
+    let [izqRaw, tabRaw, plgRaw] = await Promise.all([correr(0), correr(1), correr(2)])
+
+    // Reintento ÚNICO de las pasadas que fallaron (hiccup transitorio del
+    // proveedor). Solo re-corre las nulas, en paralelo → no penaliza el caso OK
+    // (~12s) y recupera la data crítica (izquierda) cuando hubo un timeout suelto.
+    if (!izqRaw || !tabRaw || !plgRaw) {
+      trace.event({ name: 'sigatoka_pasada_reintento', level: 'WARNING', input: { izq: !izqRaw, tab: !tabRaw, plg: !plgRaw } })
+      const [r0, r1, r2] = await Promise.all([
+        izqRaw ?? correr(0),
+        tabRaw ?? correr(1),
+        plgRaw ?? correr(2),
+      ])
+      izqRaw = r0; tabRaw = r1; plgRaw = r2
+    }
+
     const izq: any = izqRaw ?? {}
     const tab: any = tabRaw ?? {}
     const plg: any = plgRaw ?? {}
