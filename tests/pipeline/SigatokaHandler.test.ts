@@ -349,12 +349,19 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).toMatch(/BAJO CONTROL/)
   })
 
-  it('muestra supervisor y fecha; NO muestra erradicadas/índice EF (zona poco confiable)', () => {
-    const m = muestreo([fullCol()], [], { supervisor: 'Marios', fecha: '2026-06-05', erradicadasBsv: 264, pEfFinca: 0.8 })
+  it('muestra supervisor, fecha, erradicadas e índice EF cuando están presentes', () => {
+    const m = muestreo([fullCol()], [], { supervisor: 'Marios', fecha: '2026-06-05', erradicadasBsv: 0, pEfFinca: 0.8 })
     const msg = buildWhatsappSummary(m, [])
     expect(msg).toContain('Marios')
     expect(msg).toContain('2026-06-05')
-    expect(msg).not.toContain('264')
+    expect(msg).toMatch(/Erradicadas por BSV: 0/)
+    expect(msg).toMatch(/Índice EF finca: 0\.8/)
+  })
+
+  it('omite erradicadas/índice EF cuando la pasada no los leyó (null)', () => {
+    const m = muestreo([fullCol()], [], { erradicadasBsv: null, pEfFinca: null })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).not.toMatch(/Erradicadas por BSV/)
     expect(msg).not.toMatch(/Índice EF/)
   })
 

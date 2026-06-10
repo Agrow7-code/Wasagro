@@ -12,7 +12,9 @@ Filas numeradas (1..24). Por cada fila CON datos, un objeto:
 `{ "ht": …, "hVle": …, "q5menos": …, "q5mas": …, "lc": … }`
 (HT = hojas totales · H+VLE · Q<5 menos · Q5 más · LC). Filas en blanco: omitir.
 Leé TODAS las filas con datos, de arriba a abajo, sin saltarte ninguna.
-→ array `plantas11sem`.
+⚠️ Al final de la tabla hay filas de TOTALES/PROMEDIOS rotuladas `T=` y `Pr=`
+(ej. `T= 264 128 230 264 258`). **NO las incluyas como plantas** — son agregados.
+→ array `plantas11sem` (solo filas de plantas individuales).
 
 ## PLANTAS DE 00 SEMANAS (debajo de 11 semanas)
 Mismo formato → array `plantas00sem`. Si está vacía, `[]`.

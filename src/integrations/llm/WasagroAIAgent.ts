@@ -568,10 +568,19 @@ export class WasagroAIAgent implements IWasagroLLM {
     const trace = this.#lf.trace({ id: traceId })
     const generation = trace.generation({ name: 'sigatoka_extraction', model: 'wasagro-ocr-tier', input: { formulario: 'muestreo_sigatoka_banano', modo: 'tres_pasadas' } } as any)
 
+    // Cap duro por pasada: si el router se cuelga reintentando proveedores, una
+    // pasada NO debe arrastrar la latencia total (Promise.all espera a la más
+    // lenta). A los 45s la damos por fallida (null) → esa sección queda para
+    // revisión, pero el SLA P3 se respeta.
+    const conCap = <T>(p: Promise<T>): Promise<T | null> => {
+      let t: ReturnType<typeof setTimeout>
+      const cap = new Promise<null>(res => { t = setTimeout(() => res(null), 45_000) })
+      return Promise.race([p.finally(() => clearTimeout(t)), cap])
+    }
     const [izqRaw, tabRaw, plgRaw] = await Promise.all([
-      this.#extraerParteSigatoka('sp-03e1-sigatoka-izquierda.md', 'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.', base64, mimeType, traceId, costCtx),
-      this.#extraerParteSigatoka('sp-03e2-sigatoka-derecha.md', 'Extrae SOLO las tablas de PLANTAS DE 11 SEMANAS y 00 SEMANAS.', base64, mimeType, traceId, costCtx),
-      this.#extraerParteSigatoka('sp-03e3-sigatoka-plagas.md', 'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).', base64, mimeType, traceId, costCtx),
+      conCap(this.#extraerParteSigatoka('sp-03e1-sigatoka-izquierda.md', 'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.', base64, mimeType, traceId, costCtx)),
+      conCap(this.#extraerParteSigatoka('sp-03e2-sigatoka-derecha.md', 'Extrae SOLO las tablas de PLANTAS DE 11 SEMANAS y 00 SEMANAS.', base64, mimeType, traceId, costCtx)),
+      conCap(this.#extraerParteSigatoka('sp-03e3-sigatoka-plagas.md', 'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).', base64, mimeType, traceId, costCtx)),
     ])
     const izq: any = izqRaw ?? {}
     const tab: any = tabRaw ?? {}

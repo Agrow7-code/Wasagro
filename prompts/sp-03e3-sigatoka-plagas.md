@@ -3,22 +3,32 @@
 
 ---
 
-Eres un extractor especializado. Lee SOLO estas zonas (parte derecha/inferior de
-la ficha). Ignorá la matriz de puntos, el bloque DATOS y la tabla de 11 semanas.
+Eres un extractor especializado. Lee SOLO estas zonas (franja inferior-derecha de
+la ficha). Ignorá la matriz de puntos, el bloque DATOS y la tabla de 11 semanas
+(esa tabla la lee otra pasada — NO copies sus números acá).
 
-## 1. Tabla EF (columnas N/V, EF PAS, EF ACT, REF.)
-Por planta numerada: `{ "numero": 1, "nuevaOVieja": 0|1|null, "efPasada": …, "efActual": …, "referencia": …, "marcaEspecial": null }`.
-N/V: 0 = nueva, 1 = vieja. Letras (PR, T, EF, FR) → `marcaEspecial`, nuevaOVieja null.
-→ array `plantas`. Si no la ves clara, `[]`.
+## 1. P-EF-FINCA (franja sobre las plantas de 00 semanas)
+Tiene un valor grande escrito (ej. `0.80`) y a su derecha `T= …`, `Pr= …`, `Frec …`.
+→ `pEfFinca` = el promedio `Pr` (ej. **0.80**). Es un decimal entre 0 y ~10.
 
-## 2. PLAGAS FOLIARES (abajo a la derecha) → CERAMIDA y SIBINE
-Cada una con columnas H (huevos), P (pupas), M (muertos). Si hay varias filas por
-sector, usá la fila de TOTAL o sumá las filas. Es una sección IMPORTANTE — no la
-omitas. → `plagasFoliares.ceramida` y `.sibine` como `{ "h": …, "p": …, "m": … }`.
+## 2. PLANTAS ERRADICADAS POR BSV (abajo del todo, esquina)
+Junto al rótulo "PLANTAS ERRADICADAS POR BSV" hay UN solo número escrito a mano,
+frecuentemente un **0** (puede estar circulado). → `erradicadasBsv` = ESE número.
+⚠️ TRAMPA FRECUENTE: encima/al lado está la fila de TOTALES de la tabla de 11
+semanas (`T= 264 128 230 264 258` y `Pr= 13.8 6.7 …`). **Esos NO son erradicadas.**
+Si solo ves un 0 junto a "POR BSV", `erradicadasBsv` = 0.
 
-## 3. Diferidos
-P-EF-FINCA / "Pr" → `pEfFinca` (número, ej. 0.80).
-PLANTAS ERRADICADAS POR BSV → `erradicadasBsv` (número, ej. 264).
+## 3. PLAGAS FOLIARES → CERAMIDA y SIBINE
+Dos bloques con columnas **H** (huevos), **P** (pupas), **M** (muertos), G.
+- Si las celdas H/P/M están EN BLANCO (sin números escritos) → dejá `null`. Es
+  común que no haya conteo de plagas: en ese caso TODO null. NO inventes ceros.
+- ⚠️ A la DERECHA de Ceramida/Sibine está la tabla de 11 semanas (columnas H.T,
+  H+VLE, Q<5%, Q>5%, LC) con muchos números. **NO los copies como plagas.** Solo
+  los valores escritos DEBAJO de las columnas H/P/M de Ceramida/Sibine cuentan.
+
+## 4. Tabla EF (columnas N/V, EF PAS, EF ACT, REF.)
+Por planta: `{ "numero": 1, "nuevaOVieja": 0|1|null, "efPasada": …, "efActual": …, "referencia": …, "marcaEspecial": null }`.
+N/V: 0 = nueva, 1 = vieja. Letras (PR, T, EF, FR) → `marcaEspecial`. → `plantas`. Si no la ves clara, `[]`.
 
 ## Salida (JSON estricto, números como NÚMERO JSON, punto decimal, sin markdown)
 
