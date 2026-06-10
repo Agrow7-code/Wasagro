@@ -349,12 +349,25 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).toMatch(/BAJO CONTROL/)
   })
 
-  it('muestra supervisor, fecha y diferidos cuando están presentes', () => {
+  it('muestra supervisor y fecha; NO muestra erradicadas/índice EF (zona poco confiable)', () => {
     const m = muestreo([fullCol()], [], { supervisor: 'Marios', fecha: '2026-06-05', erradicadasBsv: 264, pEfFinca: 0.8 })
     const msg = buildWhatsappSummary(m, [])
     expect(msg).toContain('Marios')
     expect(msg).toContain('2026-06-05')
-    expect(msg).toContain('264')
+    expect(msg).not.toContain('264')
+    expect(msg).not.toMatch(/Índice EF/)
+  })
+
+  it('omite plagas foliares cuando vienen en 0/null (no muestra ceros no confiables)', () => {
+    const m = muestreo([fullCol()], [], { plagasFoliares: { ceramida: { h: 0, p: 0, m: 0 }, sibine: { h: null, p: null, m: null } } })
+    expect(buildWhatsappSummary(m, [])).not.toMatch(/Plagas foliares/)
+  })
+
+  it('muestra plagas foliares cuando hay algún valor real', () => {
+    const m = muestreo([fullCol()], [], { plagasFoliares: { ceramida: { h: 13, p: 7, m: 12 }, sibine: { h: 0, p: 0, m: 0 } } })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/Plagas foliares/)
+    expect(msg).toContain('13')
   })
 
   it('avisa que el asesor revisa cuando hay camposAclarar — sin prometer un follow-up del bot', () => {

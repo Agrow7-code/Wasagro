@@ -396,11 +396,12 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
   const plagaLine = (n: string, p: { h: number | null; p: number | null; m: number | null }) =>
     `• ${n} — huevos:${p.h ?? '-'} pupas:${p.p ?? '-'} muertos:${p.m ?? '-'}`
 
-  // Seguimiento (solo si hay algo que mostrar).
+  // Seguimiento: SOLO el conteo de 11-sem (confiable). Erradicadas BSV e índice
+  // EF se extraen de la esquina inferior-derecha (densa, multi-columna sin
+  // encabezados claros) donde el modelo toma celdas equivocadas → NO se muestran
+  // hasta que sp-03e3 lea esa zona con confianza. Mejor omitir que mostrar mal.
   const seguimiento: string[] = []
   if (n11sem > 0) seguimiento.push(`• Plantas 11 sem evaluadas: ${n11sem}`)
-  if (data.erradicadasBsv != null) seguimiento.push(`• Erradicadas por BSV: ${data.erradicadasBsv}`)
-  if (data.pEfFinca != null) seguimiento.push(`• Índice EF finca: ${data.pEfFinca}`)
 
   let msg =
 `✅ *Muestreo Sigatoka — ${data.nombreFinca ?? 'finca'}*
@@ -417,7 +418,12 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
 
   if (seguimiento.length > 0) msg += `\n\n🌱 *Seguimiento*\n${seguimiento.join('\n')}`
 
-  msg += `\n\n🐛 *Plagas foliares*\n${plagaLine('Ceramida', pl.ceramida)}\n${plagaLine('Sibine', pl.sibine)}`
+  // Plagas foliares: solo si hay algún valor real (no mostrar 0/null — esa zona
+  // de la ficha aún se lee mal y unos ceros falsos confunden al cliente).
+  const algunaPlaga = [pl.ceramida, pl.sibine].some(p => [p.h, p.p, p.m].some(v => v != null && v !== 0))
+  if (algunaPlaga) {
+    msg += `\n\n🐛 *Plagas foliares*\n${plagaLine('Ceramida', pl.ceramida)}\n${plagaLine('Sibine', pl.sibine)}`
+  }
 
   if (alertas.length > 0) msg += '\n\n' + alertas.join('\n')
   if (camposAclarar.length > 0) {
