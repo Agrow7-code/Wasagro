@@ -24,7 +24,7 @@ import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } 
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
 import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
-import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto } from '../../pipeline/handlers/SigatokaHandler.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -552,13 +552,16 @@ export class WasagroAIAgent implements IWasagroLLM {
     return fallback
   }
 
-  // Extracción en TRES PASADAS PARALELAS: la ficha es demasiado densa para una
+  // Extracción en CUATRO PASADAS PARALELAS: la ficha es demasiado densa para una
   // sola llamada de visión (el modelo suelta secciones de forma no-determinista).
   // Cada pasada enfoca una zona acotada → captura confiable; luego se mergea.
-  //   1) izquierda: encabezado + matriz P1..P19 + DATOS A..M
-  //   2) tablas: 11 y 00 semanas
-  //   3) plagas: EF + plagas foliares + diferidos
-  // Van en paralelo → la latencia es ~la de una sola llamada. [ADR 016]
+  //   e1)  izquierda: encabezado + matriz P1..P19 + DATOS A..M
+  //   e2a) tabla 11 semanas (filas + T=/Pr=)
+  //   e2b) tabla 00 semanas (filas + T=/Pr=)
+  //   e3)  plagas: EF + plagas foliares + diferidos
+  // Van en paralelo → la latencia es ~la de una sola llamada. [ADR 016/017]
+  // Tras el merge, se verifica checksum T= vs suma de filas. Si no cuadra,
+  // se re-extrae esa tabla UNA sola vez con un hint correctivo. [ADR 017]
   async extraerMuestreoSigatoka(
     base64: string,
     mimeType: string,
@@ -566,61 +569,157 @@ export class WasagroAIAgent implements IWasagroLLM {
     costCtx?: CostContext,
   ): Promise<SigatokaMuestreo> {
     const trace = this.#lf.trace({ id: traceId })
-    const generation = trace.generation({ name: 'sigatoka_extraction', model: 'wasagro-ocr-tier', input: { formulario: 'muestreo_sigatoka_banano', modo: 'tres_pasadas' } } as any)
+    const generation = trace.generation({ name: 'sigatoka_extraction', model: 'wasagro-ocr-tier', input: { formulario: 'muestreo_sigatoka_banano', modo: 'cuatro_pasadas' } } as any)
 
     // Cap duro por pasada: si el router se cuelga reintentando proveedores, una
-    // pasada NO debe arrastrar la latencia total (Promise.all espera a la más
-    // lenta). A los 45s la damos por fallida (null) → esa sección queda para
-    // revisión, pero el SLA P3 se respeta.
+    // pasada NO debe arrastrar la latencia total. A los 45s la damos por fallida
+    // (null) → esa sección queda para revisión, pero el SLA P3 se respeta.
     const conCap = <T>(p: Promise<T>): Promise<T | null> => {
       let t: ReturnType<typeof setTimeout>
       const cap = new Promise<null>(res => { t = setTimeout(() => res(null), 45_000) })
       return Promise.race([p.finally(() => clearTimeout(t)), cap])
     }
     const PASADAS: Array<[string, string]> = [
-      ['sp-03e1-sigatoka-izquierda.md', 'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.'],
-      ['sp-03e2-sigatoka-derecha.md', 'Extrae SOLO las tablas de PLANTAS DE 11 SEMANAS y 00 SEMANAS.'],
-      ['sp-03e3-sigatoka-plagas.md', 'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).'],
+      ['sp-03e1-sigatoka-izquierda.md',  'Extrae SOLO la mitad izquierda: encabezado, matriz de puntos P1..P19 y bloque DATOS A..M.'],
+      ['sp-03e2a-sigatoka-11sem.md',      'Extrae SOLO la tabla PLANTAS DE 11 SEMANAS con sus filas y totales T=/Pr=.'],
+      ['sp-03e2b-sigatoka-00sem.md',      'Extrae SOLO la tabla PLANTAS DE 00 SEMANAS con sus filas y totales T=/Pr=.'],
+      ['sp-03e3-sigatoka-plagas.md',      'Extrae SOLO la tabla EF, las PLAGAS FOLIARES (Ceramida/Sibine) y los diferidos (P-EF-FINCA, erradicadas por BSV).'],
     ]
     const correr = (i: number) => conCap(this.#extraerParteSigatoka(PASADAS[i]![0], PASADAS[i]![1], base64, mimeType, traceId, costCtx))
 
-    let [izqRaw, tabRaw, plgRaw] = await Promise.all([correr(0), correr(1), correr(2)])
+    let [izqRaw, tab11Raw, tab00Raw, plgRaw] = await Promise.all([correr(0), correr(1), correr(2), correr(3)])
 
-    // Reintento ÚNICO de las pasadas que fallaron (hiccup transitorio del
-    // proveedor). Solo re-corre las nulas, en paralelo → no penaliza el caso OK
-    // (~12s) y recupera la data crítica (izquierda) cuando hubo un timeout suelto.
-    if (!izqRaw || !tabRaw || !plgRaw) {
-      trace.event({ name: 'sigatoka_pasada_reintento', level: 'WARNING', input: { izq: !izqRaw, tab: !tabRaw, plg: !plgRaw } })
-      const [r0, r1, r2] = await Promise.all([
-        izqRaw ?? correr(0),
-        tabRaw ?? correr(1),
-        plgRaw ?? correr(2),
+    // Reintento ÚNICO de las pasadas que fallaron (hiccup transitorio del proveedor).
+    // Solo re-corre las nulas, en paralelo → no penaliza el caso OK y recupera
+    // la data crítica (izquierda) cuando hubo un timeout suelto.
+    if (!izqRaw || !tab11Raw || !tab00Raw || !plgRaw) {
+      trace.event({ name: 'sigatoka_pasada_reintento', level: 'WARNING', input: { izq: !izqRaw, tab11: !tab11Raw, tab00: !tab00Raw, plg: !plgRaw } })
+      const [r0, r1, r2, r3] = await Promise.all([
+        izqRaw   ?? correr(0),
+        tab11Raw ?? correr(1),
+        tab00Raw ?? correr(2),
+        plgRaw   ?? correr(3),
       ])
-      izqRaw = r0; tabRaw = r1; plgRaw = r2
+      izqRaw = r0; tab11Raw = r1; tab00Raw = r2; plgRaw = r3
     }
 
-    const izq: any = izqRaw ?? {}
-    const tab: any = tabRaw ?? {}
-    const plg: any = plgRaw ?? {}
+    const izq:   any = izqRaw   ?? {}
+    const t11:   any = tab11Raw ?? {}
+    const t00:   any = tab00Raw ?? {}
+    const plg:   any = plgRaw   ?? {}
 
-    const PLAGAS_VACIAS = { ceramida: { h: null, p: null, m: null }, sibine: { h: null, p: null, m: null } }
+    // e2a/e2b emiten { filas, totales, promedios }; normalizar cada fila a CeldaMuestra.
+    const arr = (v: unknown): any[] => (Array.isArray(v) ? v : [])
+    const filas11 = arr(t11.filas).map(normalizarFilaSemana)
+    const filas00 = arr(t00.filas).map(normalizarFilaSemana)
+
+    // ─── Checksum + re-extracción dirigida (ADR 017) ──────────────────────────
+    // Si una tabla no cuadra con los T= y hay totales legibles, re-extraemos ESA
+    // pasada UNA vez con un hint correctivo. Nos quedamos con el resultado que
+    // tenga MÁS columnas que cuadran.
+    const totales11 = t11.totales ?? null
+    const totales00 = t00.totales ?? null
+
+    const reExtaerConHint = async (promptIdx: number, totales: any, filas: any[], prefijo: string): Promise<{ filas: any[]; totales: any; promedios: any } | null> => {
+      // Construir hint por columna que no cuadra
+      const ver = verificarChecksumTabla(filas, totales)
+      const noOK = ver.columnas.filter(c => c.cuadra === false)
+      if (noOK.length === 0) return null // ya cuadra, no re-extraer
+
+      const hints = noOK.map(c => `columna ${c.columna}: tu lectura suma ${c.sumaFilas}, pero la ficha dice T=${c.totalFicha}`).join('; ')
+      const hint = `VERIFICACIÓN: ${hints}. Releé la tabla ${prefijo} fila por fila, sin saltarte ninguna ni duplicar.`
+      const extra = PASADAS[promptIdx]!
+      const reRaw = await conCap(this.#extraerParteSigatoka(extra[0], `${extra[1]}\n\n${hint}`, base64, mimeType, traceId, costCtx))
+      if (!reRaw) return null
+      const r: any = reRaw
+      return { filas: arr(r.filas).map(normalizarFilaSemana), totales: r.totales ?? null, promedios: r.promedios ?? null }
+    }
+
+    // Tablas 11 semanas
+    let filas11Final = filas11
+    let totales11Final = totales11
+    let promedios11Final = t11.promedios ?? null
+
+    if (totales11 && tab11Raw) {
+      const ver11 = verificarChecksumTabla(filas11, totales11)
+      if (ver11.cuadraTodo === false) {
+        trace.event({ name: 'sigatoka_checksum_fallo_11sem', level: 'WARNING', input: { noOK: ver11.columnas.filter(c => c.cuadra === false).map(c => c.columna) } })
+        const retry = await reExtaerConHint(1, totales11, filas11, '11 semanas')
+        if (retry) {
+          const verRetry = verificarChecksumTabla(retry.filas, totales11)
+          const original = ver11.columnas.filter(c => c.cuadra === true).length
+          const nuevo = verRetry.columnas.filter(c => c.cuadra === true).length
+          if (nuevo >= original) {
+            filas11Final = retry.filas
+            totales11Final = retry.totales ?? totales11Final
+            promedios11Final = retry.promedios ?? promedios11Final
+            trace.event({ name: 'sigatoka_checksum_mejoro_11sem', level: 'DEFAULT', input: { original, nuevo } })
+          } else {
+            // P4: el reintento que empeora también queda trazado (se descarta).
+            trace.event({ name: 'sigatoka_checksum_no_mejoro_11sem', level: 'WARNING', input: { original, nuevo } })
+          }
+        }
+      }
+    }
+
+    // Tablas 00 semanas
+    let filas00Final = filas00
+    let totales00Final = totales00
+    let promedios00Final = t00.promedios ?? null
+
+    if (totales00 && tab00Raw) {
+      const ver00 = verificarChecksumTabla(filas00, totales00)
+      if (ver00.cuadraTodo === false) {
+        trace.event({ name: 'sigatoka_checksum_fallo_00sem', level: 'WARNING', input: { noOK: ver00.columnas.filter(c => c.cuadra === false).map(c => c.columna) } })
+        const retry = await reExtaerConHint(2, totales00, filas00, '00 semanas')
+        if (retry) {
+          const verRetry = verificarChecksumTabla(retry.filas, totales00)
+          const original = ver00.columnas.filter(c => c.cuadra === true).length
+          const nuevo = verRetry.columnas.filter(c => c.cuadra === true).length
+          if (nuevo >= original) {
+            filas00Final = retry.filas
+            totales00Final = retry.totales ?? totales00Final
+            promedios00Final = retry.promedios ?? promedios00Final
+            trace.event({ name: 'sigatoka_checksum_mejoro_00sem', level: 'DEFAULT', input: { original, nuevo } })
+          } else {
+            // P4: el reintento que empeora también queda trazado (se descarta).
+            trace.event({ name: 'sigatoka_checksum_no_mejoro_00sem', level: 'WARNING', input: { original, nuevo } })
+          }
+        }
+      }
+    }
+
+    // Verificación final para persistir en datos_evento
+    const ver11Final = totales11Final ? verificarChecksumTabla(filas11Final, totales11Final) : null
+    const ver00Final = totales00Final ? verificarChecksumTabla(filas00Final, totales00Final) : null
+
+    const PLAGAS_VACIAS = { ceramida: { h: null, p: null, m: null, g: null }, sibine: { h: null, p: null, m: null, g: null } }
     const merged: any = {
       zona: izq.zona ?? null, codigoFinca: izq.codigoFinca ?? null, nombreFinca: izq.nombreFinca ?? null,
       semana: izq.semana ?? null, periodo: izq.periodo ?? null, fecha: izq.fecha ?? null, supervisor: izq.supervisor ?? null,
       puntosMuestreo: (izq.puntosMuestreo ?? []).map(normalizarPunto),
       resumenColumnas: (izq.resumenColumnas ?? []).map(calcularColumna),
-      plantas: plg.plantas ?? [],
-      plantas11sem: tab.plantas11sem ?? [],
-      plantas00sem: tab.plantas00sem ?? [],
-      plagasFoliares: plg.plagasFoliares ?? PLAGAS_VACIAS,
-      pEfFinca: plg.pEfFinca ?? null,
-      erradicadasBsv: plg.erradicadasBsv ?? null,
+      plantas:         plg.plantas ?? [],
+      plantas11sem:    filas11Final,
+      plantas00sem:    filas00Final,
+      totales11sem:    totales11Final,
+      promedios11sem:  promedios11Final,
+      totales00sem:    totales00Final,
+      promedios00sem:  promedios00Final,
+      verificacion11sem: ver11Final,
+      verificacion00sem: ver00Final,
+      plagasFoliares:  plg.plagasFoliares ?? PLAGAS_VACIAS,
+      pEfFinca:        plg.pEfFinca    ?? null,
+      pEfFincaT:       plg.pEfFincaT   ?? null,
+      pEfFincaFrec:    plg.pEfFincaFrec ?? null,
+      erradicadasBsv:  plg.erradicadasBsv ?? null,
       // Confianza = la PEOR pasada. Cualquiera que falló (null) cuenta 0 → fuerza
       // requires_review para que el asesor complete lo que faltó en la UI (D30).
       confidenceScore: Math.min(
-        izqRaw ? (izq.confidenceScore ?? 0.6) : 0,
-        tabRaw ? (tab.confidenceScore ?? 0.6) : 0,
-        plgRaw ? (plg.confidenceScore ?? 0.6) : 0,
+        izqRaw   ? (izq.confidenceScore ?? 0.6) : 0,
+        tab11Raw ? (t11.confidenceScore ?? 0.6) : 0,
+        tab00Raw ? (t00.confidenceScore ?? 0.6) : 0,
+        plgRaw   ? (plg.confidenceScore ?? 0.6) : 0,
       ),
     }
 
@@ -632,11 +731,11 @@ export class WasagroAIAgent implements IWasagroLLM {
     })
 
     if (parsed.success) {
-      generation.end({ output: { semana: parsed.data.semana, finca: parsed.data.nombreFinca, confianza: parsed.data.confidenceScore, requiere_validacion: parsed.data.requiereValidacion, n_puntos: parsed.data.puntosMuestreo.length, n_11sem: parsed.data.plantas11sem.length, n_dudosos: camposDudosos.length } })
+      generation.end({ output: { semana: parsed.data.semana, finca: parsed.data.nombreFinca, confianza: parsed.data.confidenceScore, requiere_validacion: parsed.data.requiereValidacion, n_puntos: parsed.data.puntosMuestreo.length, n_11sem: parsed.data.plantas11sem.length, n_dudosos: camposDudosos.length, checksum_11: ver11Final?.cuadraTodo, checksum_00: ver00Final?.cuadraTodo } })
       return parsed.data
     }
 
-    // Aun mergeando dos pasadas, si el schema falla rescatamos lo que haya en
+    // Aun mergeando cuatro pasadas, si el schema falla rescatamos lo que haya en
     // vez de tirar (P1/P4) — marca requires_review para el asesor.
     const zodErrors = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
     trace.event({ name: 'sigatoka_zod_exhausted', level: 'ERROR', input: { final_errors: zodErrors } })

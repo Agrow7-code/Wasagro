@@ -115,18 +115,89 @@ export const ResumenColumnaSchema = z.object({
   M_calculado: z.number().nullable(),
 })
 
-export const Planta11SemanaSchema = z.object({
+// ─── FilaSemanaSchema — tabla PLANTAS DE 11/00 SEMANAS ────────────────────────
+// Reemplaza el uso de Planta11SemanaSchema (números planos) para filas:
+// cada columna de la fila es un CeldaMuestra ({ valor, estado }) para
+// habilitar el follow-up "preguntar al tomador" sobre celdas ilegibles.
+//
+// Backward compat: el preprocess eleva la forma vieja (número plano o null)
+// a CeldaMuestra. Objetos {valor,estado} pasan intactos. Filas sin los campos
+// fila/sector/lote_id (persistidas antes de esta migración) → null en esos campos.
+
+const elevaCelda = (v: unknown): unknown => {
+  if (v === null || v === undefined) return { valor: null, estado: 'vacia' }
+  if (typeof v === 'object' && 'estado' in (v as object)) return v
+  const n = aNumero(v)
+  return n !== null ? { valor: n, estado: 'leida' } : { valor: null, estado: 'vacia' }
+}
+
+export const FilaSemanaSchema = z.preprocess(
+  (raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return raw
+    const r = raw as Record<string, unknown>
+    return {
+      fila:    r['fila']    !== undefined ? (aNumero(r['fila']) ?? null) : null,
+      sector:  r['sector']  !== undefined ? (typeof r['sector'] === 'string' ? r['sector'] : null) : null,
+      lote_id: r['lote_id'] !== undefined ? (typeof r['lote_id'] === 'string' ? r['lote_id'] : null) : null,
+      ht:      elevaCelda(r['ht']),
+      hVle:    elevaCelda(r['hVle']),
+      q5menos: elevaCelda(r['q5menos']),
+      q5mas:   elevaCelda(r['q5mas']),
+      lc:      elevaCelda(r['lc']),
+    }
+  },
+  z.object({
+    fila:    z.number().int().positive().nullable(),
+    sector:  z.string().nullable(),
+    lote_id: z.string().nullable(),
+    ht:      CeldaMuestraSchema,
+    hVle:    CeldaMuestraSchema,
+    q5menos: CeldaMuestraSchema,
+    q5mas:   CeldaMuestraSchema,
+    lc:      CeldaMuestraSchema,
+  }),
+)
+export type FilaSemana = z.infer<typeof FilaSemanaSchema>
+
+// Totales de pie de tabla (fila T=) y promedios (fila Pr=). Capturados por
+// las pasadas e2a/e2b como campos separados, NUNCA como filas de planta (P1).
+export const TotalesSemanaSchema = z.object({
   ht:      numNullable(),
   hVle:    numNullable(),
   q5menos: numNullable(),
   q5mas:   numNullable(),
   lc:      numNullable(),
 })
+export type TotalesSemana = z.infer<typeof TotalesSemanaSchema>
+
+// Resultado de verificar si las sumas de filas cuadran con el total T= de la ficha.
+// Lo calcula Wasagro (no el LLM). Persiste en datos_evento.sigatoka.
+// null = sin totales legibles (no se pudo verificar).
+export const ColumnaChecksumSchema = z.object({
+  columna:    z.string(),
+  sumaFilas:  z.number(),
+  totalFicha: z.number().nullable(),
+  cuadra:     z.boolean().nullable(), // null = totalFicha es null
+})
+
+export const VerificacionTablaSchema = z.object({
+  columnas:   z.array(ColumnaChecksumSchema),
+  cuadraTodo: z.boolean().nullable(), // true si todas las col con total cuadran
+})
+export type VerificacionTabla = z.infer<typeof VerificacionTablaSchema>
+
+// Planta11SemanaSchema se mantiene como alias backward-compat. El tipo real
+// de plantas11sem/plantas00sem es ahora FilaSemana.
+export const Planta11SemanaSchema = FilaSemanaSchema
 
 export const PlagaFoliarSchema = z.object({
   h: numNullable(),
   p: numNullable(),
   m: numNullable(),
+  // Columna G (adultos) de ceramida/sibine — presente en la ficha LOGBAN SGI F09R902
+  // pero previamente no capturada. Default null para backward compat con datos
+  // persistidos antes de esta migración (campo ausente → null, no undefined).
+  g: numNullable().default(null),
 })
 
 export const PlagasFoliaresSchema = z.object({
@@ -154,13 +225,30 @@ export const SigatokaMuestreoSchema = z.object({
   puntosMuestreo:  z.array(PuntoMuestreoSigatokaSchema),
   plantas:         z.array(PlantaNumeradaSchema),
   resumenColumnas: z.array(ResumenColumnaSchema),
-  plantas11sem:    z.array(Planta11SemanaSchema),
+
+  // Tablas de semanas — ya NO optional (default []).
+  // FilaSemanaSchema tiene backward compat con la forma plana anterior.
+  plantas11sem: z.array(FilaSemanaSchema),
+  plantas00sem: z.array(FilaSemanaSchema).default([]),
+
+  // Totales y promedios de pie de tabla, capturados por pasadas e2a/e2b.
+  totales11sem:   TotalesSemanaSchema.nullable().optional(),
+  promedios11sem: TotalesSemanaSchema.nullable().optional(),
+  totales00sem:   TotalesSemanaSchema.nullable().optional(),
+  promedios00sem: TotalesSemanaSchema.nullable().optional(),
+
+  // Resultado de verificación de checksum — calculado por Wasagro, no el LLM.
+  // null = sin totales legibles / omitido = no se ejecutó aún.
+  verificacion11sem: VerificacionTablaSchema.nullable().optional(),
+  verificacion00sem: VerificacionTablaSchema.nullable().optional(),
+
   plagasFoliares:  PlagasFoliaresSchema,
 
   // Diferidos (I9/I10/I11): se capturan si el modelo los ve, pero sin lógica por
   // ahora. Opcionales para no perder la foto ni cargar el extractor.
-  plantas00sem:   z.array(Planta11SemanaSchema).optional(),
   pEfFinca:       numNullable().optional(),
+  pEfFincaT:      numNullable().optional(), // T= de P-EF-FINCA
+  pEfFincaFrec:   numNullable().optional(), // Frec (días) de P-EF-FINCA
   erradicadasBsv: numNullable().optional(),
 })
 
@@ -168,6 +256,5 @@ export type SigatokaMuestreo       = z.infer<typeof SigatokaMuestreoSchema>
 export type PuntoMuestreoSigatoka  = z.infer<typeof PuntoMuestreoSigatokaSchema>
 export type PlantaNumerada         = z.infer<typeof PlantaNumeradaSchema>
 export type ResumenColumna         = z.infer<typeof ResumenColumnaSchema>
-export type Planta11Semana         = z.infer<typeof Planta11SemanaSchema>
 export type PlagaFoliar            = z.infer<typeof PlagaFoliarSchema>
 export type PlagasFoliares         = z.infer<typeof PlagasFoliaresSchema>

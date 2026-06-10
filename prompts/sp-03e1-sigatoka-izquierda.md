@@ -1,5 +1,5 @@
 # SP-03e1: Extractor — MITAD IZQUIERDA de la ficha de muestreo Sigatoka (LOGBAN/Dole)
-# Modelo: visión multimodal (Gemini ultra). Pasada 1 de 2.
+# Modelo: visión multimodal (Gemini ultra). Pasada 1 de 4.
 
 ---
 

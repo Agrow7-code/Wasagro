@@ -5,6 +5,9 @@ import type {
   PuntoMuestreoSigatoka,
   CeldaMuestra,
   AclaracionCelda,
+  FilaSemana,
+  TotalesSemana,
+  VerificacionTabla,
 } from '../../types/dominio/SigatokaMuestreo.js'
 import { PromptManager } from '../promptManager.js'
 
@@ -62,11 +65,21 @@ export interface ConteoIlegibles {
   ruta: 'completo' | 'preguntar' | 'manual'
 }
 
+// Columnas de la tabla de semanas que participan en el seguimiento de ilegibles.
+const CELDAS_SEMANA = ['ht', 'hVle', 'q5menos', 'q5mas', 'lc'] as const
+
 // Cuenta SOLO celdas con estado 'ilegible' (no 'vacia') y las ubica para poder
-// formular la pregunta. Es la señal que habilita el follow-up "preguntar al
-// tomador" del diseño D29 (umbral ≤5 por P2).
-export function contarCeldasIlegibles(puntos: PuntoMuestreoSigatoka[]): ConteoIlegibles {
+// formular la pregunta. Cubre puntos de muestra + filas de 11 y 00 semanas.
+// Las filas semana usan identificador "11sem-{fila}" / "00sem-{fila}" (índice+1
+// si fila es null) para el round-trip de aclaración.
+// Es la señal que habilita el follow-up "preguntar al tomador" (umbral ≤5, P2).
+export function contarCeldasIlegibles(
+  puntos:   PuntoMuestreoSigatoka[],
+  filas11:  FilaSemana[] = [],
+  filas00:  FilaSemana[] = [],
+): ConteoIlegibles {
   const ubicaciones: ConteoIlegibles['ubicaciones'] = []
+
   for (const p of puntos) {
     for (const campo of CELDAS_MUESTRA) {
       if ((p as unknown as Record<string, CeldaMuestra>)[campo]?.estado === 'ilegible') {
@@ -74,17 +87,35 @@ export function contarCeldasIlegibles(puntos: PuntoMuestreoSigatoka[]): ConteoIl
       }
     }
   }
+
+  const escanearFilas = (filas: FilaSemana[], prefijo: '11sem' | '00sem') => {
+    filas.forEach((f, idx) => {
+      const etiqueta = `${prefijo}-${f.fila ?? idx + 1}`
+      for (const campo of CELDAS_SEMANA) {
+        const celda = (f as unknown as Record<string, CeldaMuestra>)[campo]
+        if (celda?.estado === 'ilegible') {
+          ubicaciones.push({ punto: etiqueta, sector: f.sector, campo })
+        }
+      }
+    })
+  }
+  escanearFilas(filas11, '11sem')
+  escanearFilas(filas00, '00sem')
+
   const total = ubicaciones.length
   const ruta: ConteoIlegibles['ruta'] = total === 0 ? 'completo' : total <= 5 ? 'preguntar' : 'manual'
   return { total, ubicaciones, ruta }
 }
 
 // Etiqueta legible de cada celda de muestra para el mensaje al tomador.
+// Cubre tanto las celdas de puntos como las columnas de filas semana.
 const LABEL_CELDA: Record<string, string> = {
   planta1_estadio: 'planta 1 estadio', planta1_piscas: 'planta 1 piscas',
   planta2_estadio: 'planta 2 estadio', planta2_piscas: 'planta 2 piscas',
   planta3_estadio: 'planta 3 estadio', planta3_piscas: 'planta 3 piscas',
   hVle: 'H+VLE', hVlq: 'H+VLQ', func: 'func',
+  // Columnas de tablas semana
+  ht: 'H.T', q5menos: 'Q<5%', q5mas: 'Q>5%', lc: 'LC',
 }
 
 // Pregunta al tomador por las celdas ilegibles (ruta 'preguntar', ≤5 por P2).
@@ -97,23 +128,58 @@ export function buildPreguntaAclaracion(ubicaciones: ConteoIlegibles['ubicacione
 }
 
 // Aplica las respuestas del tomador a las celdas ILEGIBLES (nunca pisa una celda
-// ya leída ni inventa: ignora valor null). Recalcula requiereValidacion: queda
-// true si persisten ilegibles, discrepancias previas o confianza baja.
+// ya leída ni inventa: ignora valor null). Cubre puntos, filas 11sem y filas 00sem.
+// Identificadores: "P3" → punto, "11sem-14" → fila de 11 semanas, "00sem-3" → 00 sem.
+// Recalcula requiereValidacion: true si persisten ilegibles, discrepancias o baja confianza.
 export function aplicarAclaraciones(sigatoka: SigatokaMuestreo, respuestas: AclaracionCelda[]): SigatokaMuestreo {
   const puntos: PuntoMuestreoSigatoka[] = sigatoka.puntosMuestreo.map(p => ({ ...p }))
+  const filas11: FilaSemana[] = (sigatoka.plantas11sem ?? []).map(f => ({ ...f }))
+  const filas00: FilaSemana[] = (sigatoka.plantas00sem ?? []).map(f => ({ ...f }))
+
+  const resolverEnFilas = (filas: FilaSemana[], punto: string, prefijo: '11sem' | '00sem', campo: string, valor: number) => {
+    // Extraer el número de fila del identificador "11sem-14" → 14
+    const m = punto.match(new RegExp(`^${prefijo}-(\\d+)$`))
+    if (!m) return
+    const numFila = parseInt(m[1]!, 10)
+    // Buscar la fila por fila o por posición (idx+1 si fila es null)
+    const fila = filas.find((f, idx) => (f.fila ?? idx + 1) === numFila)
+    if (!fila) return
+    const celdaActual = (fila as unknown as Record<string, CeldaMuestra>)[campo]
+    if (celdaActual?.estado !== 'ilegible') return
+    ;(fila as unknown as Record<string, CeldaMuestra>)[campo] = { valor, estado: 'leida' }
+  }
+
   for (const r of respuestas) {
     if (r.valor == null || !Number.isFinite(r.valor)) continue
     if (!(r.campo in LABEL_CELDA)) continue
-    const p = puntos.find(pt => pt.punto === r.punto)
-    if (!p) continue
-    const celdaActual = (p as unknown as Record<string, CeldaMuestra>)[r.campo]
-    if (celdaActual?.estado !== 'ilegible') continue // solo resolvemos ilegibles
-    ;(p as unknown as Record<string, CeldaMuestra>)[r.campo] = { valor: r.valor, estado: 'leida' }
+
+    if (r.punto.startsWith('11sem-')) {
+      resolverEnFilas(filas11, r.punto, '11sem', r.campo, r.valor)
+    } else if (r.punto.startsWith('00sem-')) {
+      resolverEnFilas(filas00, r.punto, '00sem', r.campo, r.valor)
+    } else {
+      const p = puntos.find(pt => pt.punto === r.punto)
+      if (!p) continue
+      const celdaActual = (p as unknown as Record<string, CeldaMuestra>)[r.campo]
+      if (celdaActual?.estado !== 'ilegible') continue
+      ;(p as unknown as Record<string, CeldaMuestra>)[r.campo] = { valor: r.valor, estado: 'leida' }
+    }
   }
-  const restantes = contarCeldasIlegibles(puntos).total
+
+  const restantes = contarCeldasIlegibles(puntos, filas11, filas00).total
+
+  // Una celda corregida cambia la suma de su columna: el checksum persistido se
+  // recalcula para que un muestreo ya corregido no quede marcado "no cuadra".
+  const ver11 = sigatoka.totales11sem ? verificarChecksumTabla(filas11, sigatoka.totales11sem) : sigatoka.verificacion11sem ?? null
+  const ver00 = sigatoka.totales00sem ? verificarChecksumTabla(filas00, sigatoka.totales00sem) : sigatoka.verificacion00sem ?? null
+
   return {
     ...sigatoka,
     puntosMuestreo: puntos,
+    plantas11sem: filas11,
+    plantas00sem: filas00,
+    verificacion11sem: ver11,
+    verificacion00sem: ver00,
     requiereValidacion: sigatoka.camposDudosos.length > 0 || sigatoka.confidenceScore < 0.75 || restantes > 0,
   }
 }
@@ -188,6 +254,92 @@ export function mapearSectoresALotes(
     if (!p.sector) return p
     return { ...p, lote_id: indice.get(normalizar(p.sector)) ?? null }
   })
+}
+
+// Igual que mapearSectoresALotes pero para FilaSemana (filas de tablas 11/00 sem).
+export function mapearSectoresALotesFilas(
+  filas: FilaSemana[],
+  lotes: LoteRef[],
+): FilaSemana[] {
+  const indice = new Map(lotes.map(l => [normalizar(l.nombre), l.lote_id]))
+  return filas.map(f => {
+    if (!f.sector) return f
+    return { ...f, lote_id: indice.get(normalizar(f.sector)) ?? null }
+  })
+}
+
+// ─── Normalización de fila semana (para uso externo / presave) ────────────────
+// Eleva un objeto crudo con columnas numéricas planas a FilaSemana con CeldaMuestra.
+// Útil cuando se recibe un array de la pasada e2a/e2b sin aplicar el preprocess Zod.
+
+const aNum2 = (v: unknown): number | null => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string') {
+    const t = v.trim().replace(',', '.')
+    if (t === '' || t === '-') return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+export function normalizarFilaSemana(raw: Record<string, unknown>): FilaSemana {
+  const elevaCelda = (v: unknown): CeldaMuestra => {
+    if (v === null || v === undefined) return { valor: null, estado: 'vacia' }
+    if (typeof v === 'object' && 'estado' in (v as object)) {
+      const obj = v as { valor?: unknown; estado?: unknown }
+      const valor = aNum2(obj.valor)
+      if (valor !== null) return { valor, estado: 'leida' }
+      return { valor: null, estado: obj.estado === 'ilegible' ? 'ilegible' : 'vacia' }
+    }
+    const n = aNum2(v)
+    return n !== null ? { valor: n, estado: 'leida' } : { valor: null, estado: 'vacia' }
+  }
+  return {
+    fila:    typeof raw['fila'] !== 'undefined' ? (aNum2(raw['fila']) ?? null) : null,
+    sector:  typeof raw['sector'] === 'string' ? raw['sector'] : null,
+    lote_id: typeof raw['lote_id'] === 'string' ? raw['lote_id'] : null,
+    ht:      elevaCelda(raw['ht']),
+    hVle:    elevaCelda(raw['hVle']),
+    q5menos: elevaCelda(raw['q5menos']),
+    q5mas:   elevaCelda(raw['q5mas']),
+    lc:      elevaCelda(raw['lc']),
+  }
+}
+
+// ─── Checksum de tabla (T= vs suma de filas) ───────────────────────────────────
+// Verifica si las sumas de las filas de una tabla cuadran con los totales T=
+// que el supervisor calculó a mano en la ficha. Tolerancia ±1 (redondeo).
+// Resultado determinista, null-safe. Nunca lanza.
+export function verificarChecksumTabla(
+  filas: FilaSemana[],
+  totales: TotalesSemana,
+): VerificacionTabla {
+  type ColKey = 'ht' | 'hVle' | 'q5menos' | 'q5mas' | 'lc'
+  const columnas: ColKey[] = ['ht', 'hVle', 'q5menos', 'q5mas', 'lc']
+
+  const resultado = columnas.map(col => {
+    let suma = 0
+    for (const f of filas) {
+      const celda = (f as unknown as Record<string, CeldaMuestra>)[col]
+      const v = celda?.valor
+      if (typeof v === 'number' && Number.isFinite(v)) suma += v
+    }
+    const totalFicha = totales[col]
+    const cuadra = totalFicha !== null && totalFicha !== undefined
+      ? Math.abs(suma - totalFicha) <= 1
+      : null
+    return { columna: col, sumaFilas: suma, totalFicha: totalFicha ?? null, cuadra }
+  })
+
+  // cuadraTodo: true si todas las col con total cuadran; false si alguna no cuadra;
+  // null si ninguna tiene total legible (no se pudo verificar nada).
+  const conTotal = resultado.filter(c => c.cuadra !== null)
+  const cuadraTodo = conTotal.length === 0
+    ? null
+    : conTotal.every(c => c.cuadra === true)
+
+  return { columnas: resultado, cuadraTodo }
 }
 
 // ─── Sub-clasificador: ¿es un formulario de Sigatoka? ────────────────────────
@@ -277,7 +429,7 @@ function sanColumna(c: any): ResumenColumna {
 export function construirFallbackSigatoka(rawJson: any, zodErrors: string | null): SigatokaMuestreo {
   const j = rawJson ?? {}
   const arr = (v: unknown): any[] => (Array.isArray(v) ? v : [])
-  const sanPlaga = (p: any) => ({ h: num(p?.h), p: num(p?.p), m: num(p?.m) })
+  const sanPlaga = (p: any) => ({ h: num(p?.h), p: num(p?.p), m: num(p?.m), g: num(p?.g) ?? null })
 
   return SigatokaMuestreoSchema.parse({
     confidenceScore: 0,
@@ -294,9 +446,9 @@ export function construirFallbackSigatoka(rawJson: any, zodErrors: string | null
       marcaEspecial: str(p?.marcaEspecial),
     })),
     resumenColumnas: arr(j.resumenColumnas).map(sanColumna),
-    plantas11sem: arr(j.plantas11sem).map((p: any) => ({
-      ht: num(p?.ht), hVle: num(p?.hVle), q5menos: num(p?.q5menos), q5mas: num(p?.q5mas), lc: num(p?.lc),
-    })),
+    // FilaSemanaSchema tiene preprocess que eleva números planos → backward compat OK
+    plantas11sem: arr(j.plantas11sem),
+    plantas00sem: arr(j.plantas00sem),
     plagasFoliares: {
       ceramida: sanPlaga(j?.plagasFoliares?.ceramida),
       sibine: sanPlaga(j?.plagasFoliares?.sibine),
@@ -365,7 +517,6 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
   const ee2LevePorPlanta = cols.length
     ? cols.map(c => (c.H_calculado == null ? '-' : `${c.H_calculado}%`)).join(' / ')
     : '-'
-  const n11sem = data.plantas11sem.length
 
   const porPlanta = (sel: (c: ResumenColumna) => number | null): string =>
     cols.length ? cols.map(c => { const v = sel(c); return v == null ? '-' : `${v}%` }).join(' / ') : '-'
@@ -393,14 +544,43 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
   const supLine = [data.supervisor ? `👤 ${data.supervisor}` : null, data.zona ? `📍 ${data.zona}` : null].filter(Boolean).join(' · ')
 
   const pl = data.plagasFoliares
-  const plagaLine = (n: string, p: { h: number | null; p: number | null; m: number | null }) =>
-    `• ${n} — huevos:${p.h ?? '-'} pupas:${p.p ?? '-'} muertos:${p.m ?? '-'}`
+  // Incluye G (adultos) cuando tiene valor — se omite si null para no mostrar ruido.
+  const plagaLine = (n: string, p: { h: number | null; p: number | null; m: number | null; g?: number | null }) => {
+    const base = `• ${n} — huevos:${p.h ?? '-'} pupas:${p.p ?? '-'} muertos:${p.m ?? '-'}`
+    return p.g != null ? `${base} g:${p.g}` : base
+  }
 
-  // Seguimiento: solo lo que la pasada haya leído (null = pasada falló o celda
-  // ausente → se omite, nunca se inventa). sp-03e3 ya targetea estas celdas:
-  // erradicadas = el nº junto a "POR BSV" (no la fila de totales de 11-sem).
+  // Seguimiento: solo lo que las pasadas hayan leído (null = no disponible → se omite).
+  // Tablas 11/00 semanas: preferir Pr= de la ficha cuando está disponible (calculado
+  // por el supervisor); si no, omitir los promedios (null-safe, P1).
   const seguimiento: string[] = []
-  if (n11sem > 0) seguimiento.push(`• Plantas 11 sem evaluadas: ${n11sem}`)
+
+  const n11sem = (data.plantas11sem ?? []).length
+  const n00sem = (data.plantas00sem ?? []).length
+
+  if (n11sem > 0) {
+    const pr = data.promedios11sem
+    const resumen11 = pr
+      ? [
+          pr.ht   != null ? `H.T ${pr.ht}`   : null,
+          pr.hVle != null ? `H+VLE ${pr.hVle}` : null,
+          pr.lc   != null ? `LC ${pr.lc}`     : null,
+        ].filter(Boolean).join(' · ')
+      : null
+    seguimiento.push(`• 11 semanas (${n11sem})${resumen11 ? `: ${resumen11}` : ''}`)
+  }
+  if (n00sem > 0) {
+    const pr = data.promedios00sem
+    const resumen00 = pr
+      ? [
+          pr.ht   != null ? `H.T ${pr.ht}`   : null,
+          pr.hVle != null ? `H+VLE ${pr.hVle}` : null,
+          pr.lc   != null ? `LC ${pr.lc}`     : null,
+        ].filter(Boolean).join(' · ')
+      : null
+    seguimiento.push(`• 00 semanas (${n00sem})${resumen00 ? `: ${resumen00}` : ''}`)
+  }
+
   if (data.erradicadasBsv != null) seguimiento.push(`• Erradicadas por BSV: ${data.erradicadasBsv}`)
   if (data.pEfFinca != null) seguimiento.push(`• Índice EF finca: ${data.pEfFinca}`)
 
@@ -421,9 +601,22 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
 
   // Plagas foliares: solo si hay algún valor real (no mostrar 0/null — esa zona
   // de la ficha aún se lee mal y unos ceros falsos confunden al cliente).
-  const algunaPlaga = [pl.ceramida, pl.sibine].some(p => [p.h, p.p, p.m].some(v => v != null && v !== 0))
+  const algunaPlaga = [pl.ceramida, pl.sibine].some(p => [p.h, p.p, p.m, p.g].some(v => v != null && v !== 0))
   if (algunaPlaga) {
     msg += `\n\n🐛 *Plagas foliares*\n${plagaLine('Ceramida', pl.ceramida)}\n${plagaLine('Sibine', pl.sibine)}`
+  }
+
+  // Veredicto de checksum: si la tabla 11sem fue verificada, mostrar el resultado.
+  // Solo se muestra si hay verificacion (null o ausente = no se pudo verificar, silencio).
+  const ver11 = data.verificacion11sem
+  if (ver11 != null) {
+    if (ver11.cuadraTodo === true) {
+      msg += '\n\n✅ Cuadra con los totales de la ficha'
+    } else if (ver11.cuadraTodo === false) {
+      const noOK = ver11.columnas.filter(c => c.cuadra === false).map(c => c.columna)
+      const n = noOK.length
+      msg += `\n\n⚠️ ${n} columna${n > 1 ? 's' : ''} no cuadran con la ficha (revisar): ${noOK.join(', ')}`
+    }
   }
 
   if (alertas.length > 0) msg += '\n\n' + alertas.join('\n')

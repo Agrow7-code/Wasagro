@@ -24,9 +24,9 @@ vi.mock('../../../src/integrations/supabase.js', () => ({ supabase: {}, createSu
 
 const lfStub = { trace: () => ({ generation: () => ({ end: vi.fn() }), event: vi.fn() }) } as any
 
-// El adapter se llama 1× por pasada. La extracción corre DOS pasadas en paralelo
-// (izquierda, derecha) vía Promise.all → la 1ª respuesta va a la izquierda, la 2ª
-// a la derecha. Un Error simula falla de red/timeout (429, timeout del router).
+// El adapter se llama 1× por pasada. La extracción corre CUATRO pasadas en paralelo
+// (e1-izquierda, e2a-11sem, e2b-00sem, e3-plagas) vía Promise.all.
+// Un Error simula falla de red/timeout (429, timeout del router).
 function adapterConRespuestas(...respuestas: Array<string | Error>): ILLMAdapter {
   const fn = vi.fn()
   for (const r of respuestas) {
@@ -36,7 +36,7 @@ function adapterConRespuestas(...respuestas: Array<string | Error>): ILLMAdapter
   return { generarTexto: fn } as unknown as ILLMAdapter
 }
 
-// Pasada IZQUIERDA: identidad + matriz + DATOS. A=40 → recálculo limpio:
+// Pasada e1 IZQUIERDA: identidad + matriz + DATOS. A=40 → recálculo limpio:
 // H=10 I=5 J=2.5 K=2 L=9 M=9.5.
 function izq(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -53,38 +53,44 @@ function izq(overrides: Record<string, unknown> = {}): string {
   })
 }
 
-// Pasada 2 (TABLAS): 11 y 00 semanas.
-function tab(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({ confidenceScore: 0.9, plantas11sem: [], plantas00sem: [], ...overrides })
+// Pasada e2a (tabla 11 semanas): filas + totales + promedios.
+function tab11(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({ confidenceScore: 0.9, filas: [], totales: null, promedios: null, ...overrides })
 }
 
-// Pasada 3 (PLAGAS): EF + plagas foliares + diferidos.
+// Pasada e2b (tabla 00 semanas): filas + totales + promedios.
+function tab00(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({ confidenceScore: 0.9, filas: [], totales: null, promedios: null, ...overrides })
+}
+
+// Pasada e3 (PLAGAS): EF + plagas foliares + diferidos.
 function plg(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     confidenceScore: 0.9,
     plantas: [],
-    plagasFoliares: { ceramida: { h: null, p: null, m: null }, sibine: { h: null, p: null, m: null } },
-    pEfFinca: null, erradicadasBsv: null,
+    plagasFoliares: { ceramida: { h: null, p: null, m: null, g: null }, sibine: { h: null, p: null, m: null, g: null } },
+    pEfFinca: null, pEfFincaT: null, pEfFincaFrec: null, erradicadasBsv: null,
     ...overrides,
   })
 }
 
 const generarTextoDe = (a: ILLMAdapter) => a.generarTexto as ReturnType<typeof vi.fn>
 
-describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + merge', () => {
+describe('WasagroAIAgent.extraerMuestreoSigatoka — cuatro pasadas paralelas + merge', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('corre 3 pasadas (tier ultra, json_object, imagen) y mergea las tres zonas', async () => {
+  it('corre 4 pasadas (tier ultra, json_object, imagen) y mergea las cuatro zonas', async () => {
     const adapter = adapterConRespuestas(
       izq(),
-      tab({ plantas11sem: [{ ht: 8, hVle: 0, q5menos: 3, q5mas: 8, lc: 7 }] }),
-      plg({ plagasFoliares: { ceramida: { h: 13, p: 7, m: 12 }, sibine: { h: 13, p: 6, m: 10 } }, erradicadasBsv: 264 }),
+      tab11({ filas: [{ fila: 1, sector: null, lote_id: null, ht: { valor: 8, estado: 'leida' }, hVle: { valor: 0, estado: 'leida' }, q5menos: { valor: 3, estado: 'leida' }, q5mas: { valor: 8, estado: 'leida' }, lc: { valor: 7, estado: 'leida' } }] }),
+      tab00(),
+      plg({ plagasFoliares: { ceramida: { h: 13, p: 7, m: 12, g: null }, sibine: { h: 13, p: 6, m: 10, g: null } }, erradicadasBsv: 264 }),
     )
     const agent = new WasagroAIAgent(adapter, lfStub)
 
     const data = await agent.extraerMuestreoSigatoka('base64img', 'image/jpeg', 'trace-sig-ok')
 
-    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(3)
+    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(4)
     const opts = generarTextoDe(adapter).mock.calls[0][1] as LLMGeneracionOpciones
     expect(opts.modelClass).toBe('ultra')
     expect(opts.responseFormat).toBe('json_object')
@@ -94,7 +100,7 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
     // Recálculo (pasada izquierda)
     expect(data.resumenColumnas[0]!.H_calculado).toBe(10)
     expect(data.resumenColumnas[0]!.M_calculado).toBe(9.5)
-    // Merge: tablas (pasada 2) + plagas/erradicadas (pasada 3)
+    // Merge: tablas (pasadas 2a/2b) + plagas/erradicadas (pasada 4)
     expect(data.plantas11sem).toHaveLength(1)
     expect(data.plagasFoliares.ceramida.h).toBe(13)
     expect(data.erradicadasBsv).toBe(264)
@@ -112,7 +118,7 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
           K_formulario: null, L_formulario: null, M_formulario: null,
         }],
       }),
-      tab(), plg(),
+      tab11(), tab00(), plg(),
     )
     const agent = new WasagroAIAgent(adapter, lfStub)
 
@@ -122,23 +128,24 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
     expect(data.camposDudosos.some(c => c.includes('H'))).toBe(true)
   })
 
-  it('si una pasada complementaria falla, conserva la izquierda (puntos/resumen) sin tirar', async () => {
-    const adapter = adapterConRespuestas(izq(), 'no es json', plg())
+  it('si la pasada tab11 falla, conserva la izquierda (puntos/resumen) sin tirar', async () => {
+    const adapter = adapterConRespuestas(izq(), 'no es json', tab00(), plg())
     const agent = new WasagroAIAgent(adapter, lfStub)
 
     const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-tab-fail')
 
     expect(data.nombreFinca).toBe('Finca Test')
     expect(data.resumenColumnas[0]!.H_calculado).toBe(10)
-    expect(data.plantas11sem).toEqual([])     // tablas fallaron → default
+    expect(data.plantas11sem).toEqual([])     // tab11 falló → default
     expect(data.requiereValidacion).toBe(true) // pasada incompleta → revisar
   })
 
   it('si la pasada IZQUIERDA falla, conserva plagas/tablas sin tirar', async () => {
     const adapter = adapterConRespuestas(
       new Error('timeout'),
-      tab({ plantas11sem: [{ ht: 8, hVle: 0, q5menos: 3, q5mas: 8, lc: 7 }] }),
-      plg({ plagasFoliares: { ceramida: { h: 5, p: 1, m: 0 }, sibine: { h: 0, p: 0, m: 0 } } }),
+      tab11({ filas: [{ fila: 1, sector: null, lote_id: null, ht: { valor: 8, estado: 'leida' }, hVle: { valor: 0, estado: 'leida' }, q5menos: { valor: 3, estado: 'leida' }, q5mas: { valor: 8, estado: 'leida' }, lc: { valor: 7, estado: 'leida' } }] }),
+      tab00(),
+      plg({ plagasFoliares: { ceramida: { h: 5, p: 1, m: 0, g: null }, sibine: { h: 0, p: 0, m: 0, g: null } } }),
     )
     const agent = new WasagroAIAgent(adapter, lfStub)
 
@@ -151,14 +158,16 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
     expect(data.requiereValidacion).toBe(true)
   })
 
-  it('las 3 pasadas tiran (timeout/429) → muestreo vacío requires_review, nunca propaga', async () => {
-    const adapter = adapterConRespuestas(new Error('timeout'), new Error('429'), new Error('500'))
+  it('las 4 pasadas tiran (timeout/429) → muestreo vacío requires_review, nunca propaga', async () => {
+    const adapter = adapterConRespuestas(
+      new Error('timeout'), new Error('429'), new Error('500'), new Error('503'),
+    )
     const agent = new WasagroAIAgent(adapter, lfStub)
 
     const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-throw')
 
-    // 3 pasadas + 1 reintento de cada una que falló = 6 llamadas.
-    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(6)
+    // 4 pasadas + 1 reintento de cada una que falló = 8 llamadas.
+    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(8)
     expect(data.confidenceScore).toBe(0)
     expect(data.requiereValidacion).toBe(true)
     expect(data.puntosMuestreo).toEqual([])
@@ -167,12 +176,13 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
 
   it('reintenta la pasada izquierda que falló y recupera la severidad (data crítica)', async () => {
     // 1ª izquierda = JSON inválido → null; el reintento la recupera.
-    const adapter = adapterConRespuestas('no es json', tab(), plg(), izq())
+    // Orden de llamadas: izq(falla), tab11, tab00, plg, izq(reintento)
+    const adapter = adapterConRespuestas('no es json', tab11(), tab00(), plg(), izq())
     const agent = new WasagroAIAgent(adapter, lfStub)
 
     const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-retry')
 
-    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(4) // 3 + 1 reintento (solo la nula)
+    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(5) // 4 + 1 reintento (solo la nula)
     expect(data.nombreFinca).toBe('Finca Test')
     expect(data.resumenColumnas[0]!.H_calculado).toBe(10)
   })
@@ -214,7 +224,7 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — tres pasadas paralelas + me
       planta2_piscas: null, planta3_estadio: null, planta3_piscas: null,
       hVle: null, hVlq: null, func: null,
     }]
-    const adapter = adapterConRespuestas(JSON.stringify(izqObj), tab(), plg())
+    const adapter = adapterConRespuestas(JSON.stringify(izqObj), tab11(), tab00(), plg())
     const agent = new WasagroAIAgent(adapter, lfStub)
 
     const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-celdas')

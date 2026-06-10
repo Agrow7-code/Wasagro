@@ -26,7 +26,7 @@ import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
-import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones } from './SigatokaHandler.js'
+import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones } from './SigatokaHandler.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
@@ -236,6 +236,8 @@ export async function handleEvento(
 
         const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
         sigatoka.puntosMuestreo = mapearSectoresALotes(sigatoka.puntosMuestreo, lotesRef)
+        sigatoka.plantas11sem = mapearSectoresALotesFilas(sigatoka.plantas11sem, lotesRef)
+        sigatoka.plantas00sem = mapearSectoresALotesFilas(sigatoka.plantas00sem ?? [], lotesRef)
         await finalizarMuestreoSigatoka(sigatoka, {
           from: msg.from, fincaId: usuario.finca_id!, usuarioId: usuario.id, mensajeId,
           imagenPath, caption: msg.texto ?? null,
@@ -260,6 +262,8 @@ export async function handleEvento(
 
           const sigatoka = await _llm!.extraerMuestreoSigatoka(media.base64, media.mimeType, traceId, costCtx)
           sigatoka.puntosMuestreo = mapearSectoresALotes(sigatoka.puntosMuestreo, lotesRef)
+          sigatoka.plantas11sem = mapearSectoresALotesFilas(sigatoka.plantas11sem, lotesRef)
+          sigatoka.plantas00sem = mapearSectoresALotesFilas(sigatoka.plantas00sem ?? [], lotesRef)
           await finalizarMuestreoSigatoka(sigatoka, {
             from: msg.from, fincaId: usuario.finca_id!, usuarioId: usuario.id, mensajeId,
             imagenPath, caption: msg.texto ?? null,
@@ -472,7 +476,7 @@ export async function handleEvento(
     const nuevoStatus = actualizado.requiereValidacion ? 'requires_review' : 'complete'
     await actualizarEventoDatos(eventoId, datos, nuevoStatus, actualizado.requiereValidacion)
 
-    const ileg = contarCeldasIlegibles(actualizado.puntosMuestreo)
+    const ileg = contarCeldasIlegibles(actualizado.puntosMuestreo, actualizado.plantas11sem, actualizado.plantas00sem ?? [])
 
     // P2: una sola repregunta. Si tras la primera respuesta aún quedan celdas
     // ilegibles y no agotamos la cuota, repreguntamos por las que faltan.
@@ -830,7 +834,7 @@ async function finalizarMuestreoSigatoka(
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
   await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka, camposAclarar))
 
-  const ileg = contarCeldasIlegibles(sigatoka.puntosMuestreo)
+  const ileg = contarCeldasIlegibles(sigatoka.puntosMuestreo, sigatoka.plantas11sem, sigatoka.plantas00sem ?? [])
   if (ileg.ruta === 'preguntar' && eventoId) {
     const session = await getOrCreateSession(ctx.from, 'reporte')
     await updateSession(session.session_id, {

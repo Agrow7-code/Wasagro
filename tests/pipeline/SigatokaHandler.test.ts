@@ -12,14 +12,17 @@ import {
   detectarCamposDudosos,
   detectarFormularioSigatoka,
   mapearSectoresALotes,
+  mapearSectoresALotesFilas,
   construirFallbackSigatoka,
   buildDescripcionRaw,
   buildWhatsappSummary,
   extractSigatokaMuestreo,
   normalizarCelda,
+  normalizarFilaSemana,
   contarCeldasIlegibles,
   buildPreguntaAclaracion,
   aplicarAclaraciones,
+  verificarChecksumTabla,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -30,6 +33,8 @@ import {
   type PuntoMuestreoSigatoka,
   type CeldaMuestra,
   type EstadoCelda,
+  type FilaSemana,
+  type TotalesSemana,
 } from '../../src/types/dominio/SigatokaMuestreo.js'
 import { PromptManager } from '../../src/pipeline/promptManager.js'
 
@@ -55,10 +60,26 @@ function muestreo(columnas: ResumenColumna[], camposDudosos: string[] = [], top:
     camposDudosos,
     zona: 'Manabi', codigoFinca: '360', nombreFinca: 'A-Michell',
     semana: 23, periodo: 6, fecha: '2026-06-05', supervisor: 'Marios',
-    puntosMuestreo: [], plantas: [], resumenColumnas: columnas, plantas11sem: [],
+    puntosMuestreo: [], plantas: [], resumenColumnas: columnas, plantas11sem: [], plantas00sem: [],
     plagasFoliares: { ceramida: { h: 2, p: 1, m: 0 }, sibine: { h: 0, p: 0, m: 0 } },
     ...top,
   }
+}
+
+function fila11(overrides: Partial<FilaSemana> = {}): FilaSemana {
+  return {
+    fila: 1, sector: null, lote_id: null,
+    ht:      { valor: 12, estado: 'leida' },
+    hVle:    { valor: 5,  estado: 'leida' },
+    q5menos: { valor: 8,  estado: 'leida' },
+    q5mas:   { valor: 12, estado: 'leida' },
+    lc:      { valor: 11, estado: 'leida' },
+    ...overrides,
+  }
+}
+
+function totales11(overrides: Partial<TotalesSemana> = {}): TotalesSemana {
+  return { ht: 264, hVle: 128, q5menos: 230, q5mas: 264, lc: 258, ...overrides }
 }
 
 function celda(valor: number | null = null, estado: EstadoCelda = valor != null ? 'leida' : 'vacia'): CeldaMuestra {
@@ -528,5 +549,371 @@ describe('extractSigatokaMuestreo', () => {
     PromptManager.clearCache()
     const vision: SigatokaVisionFn = vi.fn().mockResolvedValue('not json')
     await expect(extractSigatokaMuestreo('b64', 'image/jpeg', vision, 'trace-3')).rejects.toThrow(/JSON inválido/)
+  })
+})
+
+// ─── FilaSemanaSchema — backward compat con forma vieja (números planos) ───────
+
+describe('FilaSemanaSchema — backward compat', () => {
+  it('número plano se eleva a {valor, estado:"leida"}', () => {
+    const raw = { fila: 1, sector: null, lote_id: null, ht: 12, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 }
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()], [], { plantas11sem: [raw as any] }))
+    expect(parsed.plantas11sem[0]!.ht).toEqual({ valor: 12, estado: 'leida' })
+  })
+
+  it('null se eleva a {valor:null, estado:"vacia"}', () => {
+    const raw = { fila: 2, sector: null, lote_id: null, ht: null, hVle: null, q5menos: null, q5mas: null, lc: null }
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()], [], { plantas11sem: [raw as any] }))
+    expect(parsed.plantas11sem[0]!.ht).toEqual({ valor: null, estado: 'vacia' })
+  })
+
+  it('objeto {valor,estado} pasa sin modificación', () => {
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()], [], { plantas11sem: [fila11()] }))
+    expect(parsed.plantas11sem[0]!.ht).toEqual({ valor: 12, estado: 'leida' })
+  })
+
+  it('filas sin fila/sector/lote_id (forma vieja) → null en esos campos', () => {
+    const raw = { ht: 10, hVle: 3, q5menos: 7, q5mas: 10, lc: 9 }
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()], [], { plantas11sem: [raw as any] }))
+    expect(parsed.plantas11sem[0]!.fila).toBeNull()
+    expect(parsed.plantas11sem[0]!.sector).toBeNull()
+    expect(parsed.plantas11sem[0]!.lote_id).toBeNull()
+  })
+
+  it('plantas00sem existe como array vacío por defecto', () => {
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()]))
+    expect(Array.isArray(parsed.plantas00sem)).toBe(true)
+    expect(parsed.plantas00sem).toHaveLength(0)
+  })
+})
+
+// ─── normalizarFilaSemana (helper de normalización) ───────────────────────────
+
+describe('normalizarFilaSemana', () => {
+  it('convierte número plano a CeldaMuestra leida', () => {
+    const r = normalizarFilaSemana({ ht: 12, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 })
+    expect(r.ht).toEqual({ valor: 12, estado: 'leida' })
+  })
+
+  it('convierte null a CeldaMuestra vacia', () => {
+    const r = normalizarFilaSemana({ ht: null, hVle: null, q5menos: null, q5mas: null, lc: null })
+    expect(r.ht).toEqual({ valor: null, estado: 'vacia' })
+  })
+
+  it('objeto con estado ilegible y valor null → ilegible (mismo contrato que normalizarCelda)', () => {
+    const r = normalizarFilaSemana({ ht: { valor: null, estado: 'ilegible' }, hVle: null, q5menos: null, q5mas: null, lc: null })
+    expect(r.ht).toEqual({ valor: null, estado: 'ilegible' })
+  })
+
+  it('objeto con valor presente fuerza estado leida aunque venga como ilegible', () => {
+    const r = normalizarFilaSemana({ ht: { valor: 7, estado: 'ilegible' }, hVle: null, q5menos: null, q5mas: null, lc: null })
+    expect(r.ht).toEqual({ valor: 7, estado: 'leida' })
+  })
+
+  it('preserva fila, sector y lote_id si los tiene', () => {
+    const r = normalizarFilaSemana({ fila: 5, sector: 'Torrijal', lote_id: 'F360-L01', ht: 10, hVle: 3, q5menos: 5, q5mas: 10, lc: 9 })
+    expect(r.fila).toBe(5)
+    expect(r.sector).toBe('Torrijal')
+    expect(r.lote_id).toBe('F360-L01')
+  })
+})
+
+// ─── verificarChecksumTabla ────────────────────────────────────────────────────
+
+describe('verificarChecksumTabla', () => {
+  it('columna cuadra cuando sumaFilas === totalFicha (con tolerancia ±1)', () => {
+    // fila11() tiene: ht=12, hVle=5, q5menos=8, q5mas=12, lc=11
+    // 2 filas → sumas: ht=24, hVle=10, q5menos=16, q5mas=24, lc=22
+    const filas = [fila11({ fila: 1 }), fila11({ fila: 2 })]
+    const tot: TotalesSemana = { ht: 24, hVle: 10, q5menos: 16, q5mas: 24, lc: 22 }
+    const res = verificarChecksumTabla(filas, tot)
+    expect(res.columnas.find(c => c.columna === 'ht')!.cuadra).toBe(true)
+    expect(res.cuadraTodo).toBe(true)
+  })
+
+  it('columna no cuadra cuando suma difiere del total por más de 1', () => {
+    const filas = Array.from({ length: 5 }, () => fila11({ ht: { valor: 10, estado: 'leida' } }))
+    // suma real = 50, total dice 264
+    const tot = totales11({ ht: 264 })
+    const res = verificarChecksumTabla(filas, tot)
+    expect(res.columnas.find(c => c.columna === 'ht')!.cuadra).toBe(false)
+    expect(res.cuadraTodo).toBe(false)
+  })
+
+  it('cuadra=null cuando el total de la ficha es null (no hay con qué comparar)', () => {
+    const filas = [fila11()]
+    const res = verificarChecksumTabla(filas, { ht: null, hVle: null, q5menos: null, q5mas: null, lc: null })
+    expect(res.columnas.find(c => c.columna === 'ht')!.cuadra).toBeNull()
+    expect(res.cuadraTodo).toBeNull()
+  })
+
+  it('celdas ilegibles/vacías no se suman (solo valores presentes)', () => {
+    // 10 filas: 5 con valor 10, 5 vacías → suma efectiva 50
+    const filas = [
+      ...Array.from({ length: 5 }, () => fila11({ ht: { valor: 10, estado: 'leida' } })),
+      ...Array.from({ length: 5 }, () => fila11({ ht: { valor: null, estado: 'vacia' } })),
+    ]
+    const tot = totales11({ ht: 50 })
+    const res = verificarChecksumTabla(filas, tot)
+    expect(res.columnas.find(c => c.columna === 'ht')!.cuadra).toBe(true)
+  })
+
+  it('cuadraTodo=null cuando ningún total es legible', () => {
+    const filas = [fila11()]
+    const res = verificarChecksumTabla(filas, { ht: null, hVle: null, q5menos: null, q5mas: null, lc: null })
+    expect(res.cuadraTodo).toBeNull()
+  })
+
+  it('cuadraTodo=false cuando al menos una columna no cuadra', () => {
+    // ht cuadra, hVle no cuadra
+    const filas = Array.from({ length: 2 }, () => fila11({ ht: { valor: 12, estado: 'leida' }, hVle: { valor: 5, estado: 'leida' } }))
+    const tot = totales11({ ht: 24, hVle: 999 })
+    const res = verificarChecksumTabla(filas, tot)
+    expect(res.columnas.find(c => c.columna === 'ht')!.cuadra).toBe(true)
+    expect(res.columnas.find(c => c.columna === 'hVle')!.cuadra).toBe(false)
+    expect(res.cuadraTodo).toBe(false)
+  })
+})
+
+// ─── mapearSectoresALotesFilas (sector→lote_id en FilaSemana) ─────────────────
+
+describe('mapearSectoresALotesFilas', () => {
+  const lotes = [{ lote_id: 'F360-L01', nombre: 'Torrijal' }]
+
+  it('asigna lote_id cuando el sector coincide (case/acentos-insensible)', () => {
+    const r = mapearSectoresALotesFilas([fila11({ sector: 'torrijal' })], lotes)
+    expect(r[0]!.lote_id).toBe('F360-L01')
+  })
+
+  it('lote_id null cuando el sector no coincide', () => {
+    const r = mapearSectoresALotesFilas([fila11({ sector: 'otro' })], lotes)
+    expect(r[0]!.lote_id).toBeNull()
+  })
+
+  it('sin sector → lote_id null sin error', () => {
+    const r = mapearSectoresALotesFilas([fila11({ sector: null })], lotes)
+    expect(r[0]!.lote_id).toBeNull()
+  })
+})
+
+// ─── contarCeldasIlegibles — extensión a filas 11/00 sem ─────────────────────
+
+describe('contarCeldasIlegibles — filas semana', () => {
+  it('detecta celda ilegible en fila 11sem y la ubica con punto legible', () => {
+    const filas11 = [fila11({ fila: 14, ht: { valor: null, estado: 'ilegible' } })]
+    const r = contarCeldasIlegibles([], filas11, [])
+    expect(r.total).toBe(1)
+    expect(r.ruta).toBe('preguntar')
+    expect(r.ubicaciones[0]).toMatchObject({ punto: '11sem-14', campo: 'ht' })
+  })
+
+  it('detecta celda ilegible en fila 00sem', () => {
+    const filas00 = [fila11({ fila: 3, lc: { valor: null, estado: 'ilegible' } })]
+    const r = contarCeldasIlegibles([], [], filas00)
+    expect(r.total).toBe(1)
+    expect(r.ubicaciones[0]).toMatchObject({ punto: '00sem-3', campo: 'lc' })
+  })
+
+  it('celda vacía en fila semana NO cuenta como ilegible', () => {
+    const filas11 = [fila11({ ht: { valor: null, estado: 'vacia' } })]
+    expect(contarCeldasIlegibles([], filas11, []).total).toBe(0)
+  })
+
+  it('combina ilegibles de puntos + filas 11sem + filas 00sem', () => {
+    const ptos = [punto({ punto: 'P1', planta1_estadio: celda(null, 'ilegible') })]
+    const filas11 = [fila11({ fila: 5, ht: { valor: null, estado: 'ilegible' } })]
+    const filas00 = [fila11({ fila: 2, lc: { valor: null, estado: 'ilegible' } })]
+    const r = contarCeldasIlegibles(ptos, filas11, filas00)
+    expect(r.total).toBe(3)
+  })
+
+  it('fila sin número de fila usa índice+1 como punto', () => {
+    const filas11 = [fila11({ fila: null, ht: { valor: null, estado: 'ilegible' } })]
+    const r = contarCeldasIlegibles([], filas11, [])
+    expect(r.ubicaciones[0]!.punto).toBe('11sem-1')
+  })
+})
+
+// ─── aplicarAclaraciones — round-trip sobre celda de 11sem ────────────────────
+
+describe('aplicarAclaraciones — celdas de filas semana', () => {
+  it('completa una celda ilegible de 11sem con el valor del tomador', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 14, ht: { valor: null, estado: 'ilegible' } })],
+    })
+    const r = aplicarAclaraciones(base, [{ punto: '11sem-14', campo: 'ht', valor: 13 }])
+    expect(r.plantas11sem[0]!.ht).toEqual({ valor: 13, estado: 'leida' })
+  })
+
+  it('completa una celda ilegible de 00sem con el valor del tomador', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas00sem: [fila11({ fila: 3, lc: { valor: null, estado: 'ilegible' } })],
+    })
+    const r = aplicarAclaraciones(base, [{ punto: '00sem-3', campo: 'lc', valor: 9 }])
+    expect(r.plantas00sem![0]!.lc).toEqual({ valor: 9, estado: 'leida' })
+  })
+
+  it('no toca celdas ya leídas en fila semana', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 1 })], // ht ya leída con valor 12
+    })
+    const r = aplicarAclaraciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 999 }])
+    expect(r.plantas11sem[0]!.ht.valor).toBe(12) // no pisado
+  })
+
+  it('requiereValidacion queda false cuando todas las celdas ilegibles se resuelven', () => {
+    const base = muestreo([fullCol()], [], {
+      confidenceScore: 0.9,
+      plantas11sem: [fila11({ fila: 5, ht: { valor: null, estado: 'ilegible' } })],
+    })
+    const r = aplicarAclaraciones(base, [{ punto: '11sem-5', campo: 'ht', valor: 10 }])
+    expect(r.requiereValidacion).toBe(false)
+  })
+})
+
+// ─── PlagaFoliarSchema con columna G ─────────────────────────────────────────
+
+describe('PlagaFoliarSchema — columna G', () => {
+  it('acepta ceramida con g presente', () => {
+    const m = muestreo([fullCol()], [], {
+      plagasFoliares: { ceramida: { h: 1, p: 0, m: 2, g: 5 }, sibine: { h: null, p: null, m: null, g: null } },
+    })
+    const parsed = SigatokaMuestreoSchema.parse(m)
+    expect(parsed.plagasFoliares.ceramida.g).toBe(5)
+  })
+
+  it('g es null cuando la celda está en blanco (backward compat)', () => {
+    const m = muestreo([fullCol()], [], {
+      plagasFoliares: { ceramida: { h: 1, p: 0, m: 2 }, sibine: { h: null, p: null, m: null } },
+    })
+    const parsed = SigatokaMuestreoSchema.parse(m)
+    expect(parsed.plagasFoliares.ceramida.g).toBeNull()
+  })
+})
+
+// ─── pEfFincaT / pEfFincaFrec ────────────────────────────────────────────────
+
+describe('pEfFincaT / pEfFincaFrec', () => {
+  it('acepta pEfFincaT y pEfFincaFrec cuando están presentes', () => {
+    const m = muestreo([fullCol()], [], { pEfFinca: 0.8, pEfFincaT: 210, pEfFincaFrec: 7 })
+    const parsed = SigatokaMuestreoSchema.parse(m)
+    expect(parsed.pEfFincaT).toBe(210)
+    expect(parsed.pEfFincaFrec).toBe(7)
+  })
+
+  it('omite pEfFincaT y pEfFincaFrec cuando no están (backward compat)', () => {
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()]))
+    expect(parsed.pEfFincaT == null).toBe(true)
+    expect(parsed.pEfFincaFrec == null).toBe(true)
+  })
+})
+
+// ─── verificacion11sem / verificacion00sem en schema ─────────────────────────
+
+describe('SigatokaMuestreoSchema — verificacion fields', () => {
+  it('acepta verificacion11sem con estructura correcta', () => {
+    const ver = {
+      columnas: [
+        { columna: 'ht', sumaFilas: 228, totalFicha: 264, cuadra: false },
+      ],
+      cuadraTodo: false,
+    }
+    const m = muestreo([fullCol()], [], { verificacion11sem: ver })
+    const parsed = SigatokaMuestreoSchema.parse(m)
+    expect(parsed.verificacion11sem!.cuadraTodo).toBe(false)
+    expect(parsed.verificacion11sem!.columnas[0]!.columna).toBe('ht')
+  })
+
+  it('acepta verificacion11sem=null (sin totales legibles)', () => {
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()], [], { verificacion11sem: null }))
+    expect(parsed.verificacion11sem).toBeNull()
+  })
+
+  it('verificacion omitida → undefined (no requerida)', () => {
+    const parsed = SigatokaMuestreoSchema.parse(muestreo([fullCol()]))
+    expect(parsed.verificacion11sem).toBeUndefined()
+  })
+})
+
+// ─── buildWhatsappSummary — extensiones (11sem, 00sem, checksum, G) ───────────
+
+describe('buildWhatsappSummary — extensiones', () => {
+  it('muestra conteo y Pr= de 11 semanas cuando hay totales en la ficha', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: Array.from({ length: 19 }, (_, i) => fila11({ fila: i + 1 })),
+      totales11sem: null,
+      promedios11sem: { ht: 13.9, hVle: 6.7, q5menos: null, q5mas: 13.9, lc: 13.6 },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/11 sem/)
+    expect(msg).toMatch(/\b19\b/)
+    expect(msg).toContain('H.T')
+    expect(msg).toMatch(/13\.9/)
+  })
+
+  it('muestra conteo de 00 semanas cuando hay filas', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas00sem: Array.from({ length: 5 }, (_, i) => fila11({ fila: i + 1 })),
+    })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/00 sem/)
+    expect(msg).toMatch(/\b5\b/)
+  })
+
+  it('omite líneas de semana cuando no hay filas ni promedios', () => {
+    const m = muestreo([fullCol()], [], { plantas11sem: [], plantas00sem: [] })
+    const msg = buildWhatsappSummary(m, [])
+    // el count 0 no aparece
+    expect(msg).not.toMatch(/11 sem.*\(0\)/)
+    expect(msg).not.toMatch(/00 sem.*\(0\)/)
+  })
+
+  it('muestra ✅ cuadra con totales de ficha cuando cuadraTodo=true', () => {
+    const m = muestreo([fullCol()], [], {
+      verificacion11sem: { columnas: [], cuadraTodo: true },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/Cuadra con los totales/)
+  })
+
+  it('muestra ⚠️ columnas no cuadran cuando cuadraTodo=false', () => {
+    const m = muestreo([fullCol()], [], {
+      verificacion11sem: {
+        columnas: [
+          { columna: 'ht', sumaFilas: 228, totalFicha: 264, cuadra: false },
+          { columna: 'lc', sumaFilas: 200, totalFicha: 258, cuadra: false },
+        ],
+        cuadraTodo: false,
+      },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/no cuadran/)
+    expect(msg).toMatch(/ht/)
+    expect(msg).toMatch(/lc/)
+  })
+
+  it('no muestra veredicto de checksum cuando verificacion es null o ausente', () => {
+    const m1 = muestreo([fullCol()], [], { verificacion11sem: null })
+    const m2 = muestreo([fullCol()])
+    expect(buildWhatsappSummary(m1, [])).not.toMatch(/Cuadra/)
+    expect(buildWhatsappSummary(m2, [])).not.toMatch(/Cuadra/)
+  })
+
+  it('muestra G de plagas foliares cuando tiene valor', () => {
+    const m = muestreo([fullCol()], [], {
+      plagasFoliares: { ceramida: { h: 1, p: 0, m: 2, g: 5 }, sibine: { h: null, p: null, m: null, g: null } },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/g:5/)
+  })
+
+  it('omite G de ceramida cuando es null', () => {
+    const m = muestreo([fullCol()], [], {
+      plagasFoliares: { ceramida: { h: 1, p: 0, m: 2, g: null }, sibine: { h: null, p: null, m: null, g: null } },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    // Cuando hay h/p/m, el bloque se muestra, pero g no sale si es null
+    expect(msg).not.toMatch(/g:null/)
+    expect(msg).not.toMatch(/g:-/)
   })
 })

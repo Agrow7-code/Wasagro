@@ -126,7 +126,7 @@ fincaRouter.get('/:finca_id/sigatoka/revision', async (c) => {
   const eventos = await getEventosRevisionSigatoka(finca_id)
   const items = eventos.map(e => {
     const sig = sigatokaDe(e.datos_evento)
-    const ilegibles = sig ? contarCeldasIlegibles(sig.puntosMuestreo) : { total: 0, ubicaciones: [], ruta: 'completo' as const }
+    const ilegibles = sig ? contarCeldasIlegibles(sig.puntosMuestreo, sig.plantas11sem, sig.plantas00sem ?? []) : { total: 0, ubicaciones: [], ruta: 'completo' as const }
     return {
       id: e.id,
       created_at: e.created_at,
@@ -151,7 +151,7 @@ fincaRouter.get('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
 
   const sig = sigatokaDe(evento.datos_evento)
   const imagen_url = await getSignedUrlEvento(evento.imagen_path)
-  const ilegibles = sig ? contarCeldasIlegibles(sig.puntosMuestreo) : { total: 0, ubicaciones: [], ruta: 'completo' as const }
+  const ilegibles = sig ? contarCeldasIlegibles(sig.puntosMuestreo, sig.plantas11sem, sig.plantas00sem ?? []) : { total: 0, ubicaciones: [], ruta: 'completo' as const }
 
   return c.json({
     id: evento.id,
@@ -192,7 +192,7 @@ fincaRouter.patch('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
   const status = requiere ? 'requires_review' : 'complete'
   await actualizarEventoDatos(evento_id, datos, status, requiere)
 
-  return c.json({ ok: true, status, ilegibles: contarCeldasIlegibles(actualizado.puntosMuestreo) })
+  return c.json({ ok: true, status, ilegibles: contarCeldasIlegibles(actualizado.puntosMuestreo, actualizado.plantas11sem, actualizado.plantas00sem ?? []) })
 })
 
 async function loteToFincaId(lote_id: string): Promise<string | null> {
