@@ -117,7 +117,7 @@ fincaRouter.patch('/:finca_id/coordenadas', async (c) => {
   return c.json({ ok: true })
 })
 
-// ── Cola de revisión de muestreos de Sigatoka (D28) ──────────────────────────
+// ── Cola de revisión de muestreos de Sigatoka (D30) ──────────────────────────
 
 // GET /api/finca/:finca_id/sigatoka/revision — lista de muestreos requires_review
 fincaRouter.get('/:finca_id/sigatoka/revision', async (c) => {
