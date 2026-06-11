@@ -32,6 +32,8 @@ Sistema operativo de campo agrícola AI-first. Captura datos en fincas via Whats
 | `FOUNDER_EMAIL` | Email del founder (default: `wasagro@proton.me`) | Se usa el default |
 | `RESEND_API_KEY` | API key de Resend para notificaciones email | No se envía email de booking al founder |
 | `REPORTE_SECRET` | Secret para `POST /reportes/semanal` | Endpoint sin protección |
+| `DLOCALGO_WEBHOOK_SECRET` | Secret para verificar webhooks de dLocal Go (token en `notification_url` o firma HMAC) | **Webhook rechazado (503)** — sin esto el endpoint de pago no procesa nada (anti-forja de suscripciones) |
+| `DEUNA_WEBHOOK_SECRET` | Secret para verificar webhooks de DeUna (firma HMAC sobre body raw, header `x-deuna-signature`, o token `?token=`) | **Webhook rechazado (503)** |
 | `LANGFUSE_SECRET_KEY` | Clave secreta LangFuse | Sin observabilidad de LLM |
 | `LANGFUSE_PUBLIC_KEY` | Clave pública LangFuse | Sin observabilidad de LLM |
 | `LANGFUSE_BASE_URL` | URL de LangFuse (default: cloud) | — |

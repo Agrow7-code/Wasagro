@@ -98,6 +98,7 @@ authRouter.post('/verify-otp', async (c) => {
       phone: usuario.phone,
       rol: usuario.rol,
       finca_id: usuario.finca_id ?? null,
+      org_id: usuario.org_id ?? null,
     })
 
     return c.json({

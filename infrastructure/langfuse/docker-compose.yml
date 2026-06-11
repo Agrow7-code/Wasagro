@@ -12,7 +12,10 @@ services:
     container_name: wasagro-langfuse
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Bind solo a loopback: LangFuse guarda trazas con datos de campo (PII, P5).
+      # NO exponer en 0.0.0.0. El acceso externo debe ir por un reverse-proxy
+      # con TLS y autenticación (Railway private networking / Caddy / nginx).
+      - "127.0.0.1:3000:3000"
     environment:
       # ── Base ──────────────────────────────────────────────────────────────
       NODE_ENV: production

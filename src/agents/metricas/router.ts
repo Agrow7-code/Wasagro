@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../../integrations/supabase.js'
-import { requireFincaAccess, getUserSupabase } from '../../auth/middleware.js'
+import { requireFincaAccessAsync, getUserSupabase } from '../../auth/middleware.js'
 import {
   calcularMetrica,
   calcularMetricaPorLotes,
@@ -45,7 +45,7 @@ const CrearMetricaSchema = z.object({
 // Devuelve los campos numéricos disponibles para esa finca (alimenta el selector de la UI)
 metricasRouter.get('/campos/:finca_id', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const db = getUserSupabase(c) ?? supabase
   const campos = await obtenerCamposDisponibles(finca_id)
   return c.json({ campos })
@@ -59,7 +59,7 @@ metricasRouter.post('/calcular', async (c) => {
   const parsed = CalcularSchema.safeParse(rawBody)
   if (!parsed.success) return c.json({ error: 'Parámetros inválidos', details: parsed.error.issues }, 400)
   const body = parsed.data
-  if (!requireFincaAccess(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   const resultado = await calcularMetrica(
     body.formula as unknown as Formula,
@@ -80,7 +80,7 @@ metricasRouter.post('/calcular/lotes', async (c) => {
   const parsed = CalcularSchema.safeParse(rawBody)
   if (!parsed.success) return c.json({ error: 'Parámetros inválidos', details: parsed.error.issues }, 400)
   const body = parsed.data
-  if (!requireFincaAccess(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   const resultados = await calcularMetricaPorLotes(
     body.formula as unknown as Formula,
@@ -97,7 +97,7 @@ metricasRouter.post('/calcular/lotes', async (c) => {
 // Lista las métricas guardadas de una finca + plantillas públicas de su org.
 metricasRouter.get('/:finca_id', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const db = getUserSupabase(c) ?? supabase
 
   const { data: finca } = await db
@@ -124,7 +124,7 @@ metricasRouter.post('/', async (c) => {
   const parsed = CrearMetricaSchema.safeParse(rawBody)
   if (!parsed.success) return c.json({ error: 'Parámetros inválidos', details: parsed.error.issues }, 400)
   const body = parsed.data
-  if (!requireFincaAccess(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   const user = c.get('authedUser')
   const { data: finca } = await supabase
@@ -194,7 +194,7 @@ metricasRouter.put('/:metrica_id/umbrales', async (c) => {
   const parsed = UmbralesUpdateSchema.safeParse(rawBody)
   if (!parsed.success) return c.json({ error: 'Parámetros inválidos', details: parsed.error.issues }, 400)
   const body = parsed.data
-  if (!requireFincaAccess(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   // Verify metrica belongs to this finca OR is a public template in the same org.
   // Without this, a user with access to finca A could overwrite thresholds on a
@@ -245,7 +245,7 @@ metricasRouter.get('/:metrica_id/resultados', async (c) => {
   })
   if (!parsed.success) return c.json({ error: 'Parámetros inválidos', details: parsed.error.issues }, 400)
   const { finca_id, fecha_inicio, fecha_fin, lote_id } = parsed.data
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const db = getUserSupabase(c) ?? supabase
 
   let query = db
@@ -272,7 +272,7 @@ metricasRouter.post('/:metrica_id/recalcular', async (c) => {
   const parsed = RecalcularSchema.safeParse(rawBody)
   if (!parsed.success) return c.json({ error: 'Parámetros inválidos', details: parsed.error.issues }, 400)
   const body = parsed.data
-  if (!requireFincaAccess(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, body.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const db = getUserSupabase(c) ?? supabase
 
   const { data: metrica } = await db
@@ -319,7 +319,7 @@ metricasRouter.delete('/:metrica_id', async (c) => {
     .single()
 
   if (!metrica) return c.json({ error: 'Métrica no encontrada' }, 404)
-  if (!requireFincaAccess(c, metrica.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, metrica.finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   const { error } = await db
     .from('metricas_finca')
