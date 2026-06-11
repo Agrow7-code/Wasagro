@@ -19,8 +19,8 @@ export default function LoginPage() {
 
   const handleRequestOTP = async (fullPhone: string) => {
     try {
-      console.log(`[Login] Solicitando OTP para ${fullPhone}...`)
-      
+      // No loguear el teléfono (PII, P5).
+
       const res = await fetch(`${API_URL}/auth/request-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -70,7 +70,7 @@ export default function LoginPage() {
         const user = data.user as User
         login(user)
         if (data.token) localStorage.setItem('wasagro_token', data.token)
-        console.log('[Login] Verificación exitosa, redirigiendo...', user.rol)
+        console.log('[Login] Verificación exitosa, redirigiendo...')
 
       // Redirección por rol
       switch (user.rol) {

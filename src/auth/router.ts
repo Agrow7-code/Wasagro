@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
-import { requestOTP, verifyOTP } from './otpService.js'
+import { requestOTP, verifyOTP, dentroDePresupuestoGlobalOTP } from './otpService.js'
 import { sendOTPViaWhatsApp } from './whatsappAuthService.js'
 import { emitirJWT, verificarJWT, requireJwtSecret } from './jwtService.js'
 import { getUserByPhone } from '../pipeline/supabaseQueries.js'
+import { redactPhone } from '../integrations/logRedact.js'
 
 export const authRouter = new Hono()
 
@@ -35,12 +36,20 @@ authRouter.post('/request-otp', async (c) => {
   }
 
   try {
-    console.log(`[auth] Solicitando para ${phone}`);
+    console.log(`[auth] Solicitando para ${redactPhone(phone)}`);
 
     const usuario = await callWithTimeout(getUserByPhone(phone), 4000)
       .catch(err => { if (err.message === 'TIMEOUT_LIMIT') throw new Error('DB_LENTA'); throw err; });
 
     if (!usuario) {
+      await padToTarget();
+      return c.json({ status: 'sent' });
+    }
+
+    // Techo global de envíos: si se excedió, se descarta el envío de forma
+    // silenciosa (respuesta uniforme 'sent' para no revelar nada al cliente).
+    if (!await dentroDePresupuestoGlobalOTP()) {
+      console.warn('[auth] presupuesto global de OTP excedido — envío descartado');
       await padToTarget();
       return c.json({ status: 'sent' });
     }

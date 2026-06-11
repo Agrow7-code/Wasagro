@@ -93,23 +93,56 @@ un set de mejoras de defensa-en-profundidad documentado en el plan.
 
 ## 3. Plan de remediación (priorizado)
 
-**Hecho en esta pasada (P0/P1 más sensibles):** webhooks de pago, cross-tenant
+**Hecho en la 1ª pasada (P0/P1 más sensibles):** webhooks de pago, cross-tenant
 `admin_org`, rate-limit fail-closed, ruta de auth paralela, migración 058 de BD,
 LangFuse/Supabase/CI/headers de infra.
 
-**Pendiente, en orden:**
+**Hecho en la 2ª pasada (pendientes accionables):**
+- ✅ **Frontend auth:** `Authorization` en todas las vistas (`FincaSetupView`,
+  `Calculadora` vía helper `authFetch`); eliminado el `?phone=` de `/api/auth/me`
+  (la identidad sale del token). Helper `landing/src/auth/api.ts`.
+- ✅ **PII en logs:** redacción de teléfonos (`redactPhone`, solo últimos 4) en
+  OTP/auth/SDR/Cal.com; eliminado el `secretPrefix` y el body en los logs de fallo
+  de firma de Cal.com; quitado teléfono/rol del `console.log` del LoginPage; Vite
+  elimina `console.*` en el build de producción.
+- ✅ **OTP budget global:** techo horario de envíos (`OTP_GLOBAL_HOURLY_BUDGET`,
+  default 200/h) además de los límites por-teléfono y por-IP — anti cost-pumping.
+- ✅ **LangFuse TLS:** `Caddyfile.example` (proxy TLS + Basic Auth) listo para usar.
+- ✅ **`storage.objects`:** documentado deny-por-defecto en la migración 058.
+
+**Pendiente — operativo (requiere acción fuera del repo):**
 1. **Antes de cobrar:** configurar `DLOCALGO_WEBHOOK_SECRET` y `DEUNA_WEBHOOK_SECRET`
-   en backend y en el panel del proveedor (si no, webhooks → 503). Probar un cobro
-   real end-to-end.
-2. **Aislamiento real (P1):** hacer `SUPABASE_ANON_KEY` obligatorio y enrutar
-   lecturas/escrituras por el cliente user-scoped para que la RLS sea la barrera.
-3. **Frontend auth (P1):** mover JWT a cookie httpOnly+SameSite (implica CSRF tokens)
-   y enviar `Authorization` en todas las vistas; quitar `?phone=`.
-4. **Infra (P2):** completar `allowed_cidrs` de Supabase; rol `langfuse_app`; proxy
-   TLS para LangFuse.
-5. **Higiene (P2/P3):** redactar PII en logs; `jti`/revocación de JWT; CAPTCHA/budget
-   global de OTP; `change-plan` como propuesta; política `storage.objects`; remover
-   `openai`; no desplegar `wasagro-login.html`.
+   en backend (Railway) y en el panel del proveedor; probar un cobro real e2e.
+2. **Supabase `allowed_cidrs`:** completar con las IPs de egress reales (Railway +
+   admin) en el dashboard del proyecto.
+3. **LangFuse:** desplegar el reverse-proxy (Caddyfile.example) y crear el rol DB
+   `langfuse_app` (SQL en el README) en vez del superusuario `postgres`.
+
+**Pendiente — arquitectónico (no es fix puntual, requiere diseño/decisión):**
+4. **RLS como barrera real:** el backend usa `service_role` (RLS bypass). Enrutar por
+   cliente user-scoped NO funciona tal cual: nuestros JWT se firman con `JWT_SECRET`
+   propio (hono/jwt), no con el secreto de Supabase Auth, así que `auth.uid()` no
+   resuelve y la RLS negaría todo. Requiere emitir JWT compatibles con Supabase Auth
+   (claims `sub`/`role`/`aud`, firma con el secreto de Supabase) o mover la auth a
+   Supabase Auth. Hoy el aislamiento lo garantiza `requireFincaAccessAsync` (app) +
+   las funciones/políticas endurecidas (BD).
+5. **JWT en cookie httpOnly + CSRF:** reduce el riesgo de robo por XSS, pero
+   introduce superficie CSRF (hoy el patrón Bearer en header no es CSRF-vulnerable) y
+   exige tokens anti-CSRF + pruebas en navegador. El CSP ya añadido mitiga el XSS que
+   habilitaría el robo. Decisión de tradeoff — diferida conscientemente.
+6. **Revocación de JWT (logout remoto):** stateless hoy; un denylist/`token_version`
+   cuesta 1 lectura DB por request. Para el dashboard (bajo tráfico) es viable;
+   pendiente de decisión sobre TTL/UX.
+
+**Falsos positivos descartados al verificar:**
+- **Remover `openai`:** la dep SÍ se usa — `EmbeddingService.ts` la usa como cliente
+  OpenAI-compatible para los embeddings de NVIDIA NIM (D12 RAG). No se remueve.
+- **OTP en texto plano:** `otpService.ts` hashea con bcrypt antes de insertar.
+- **`change-plan` sin pago:** no concede acceso activo (`planGuard` gatea por
+  `subscription_status`, que este endpoint no toca; el plan/precio se confirman en el
+  webhook de pago). Se deja como está para no romper el flujo de cotizar→pagar.
+- **`wasagro-login.html`:** es un prototipo de diseño (OTP demo hardcodeado, no
+  autentica) en la raíz; el deploy real es `landing/`. No desplegar a producción.
 
 ---
 
@@ -127,6 +160,8 @@ LangFuse/Supabase/CI/headers de infra.
   filtro de RLS a la consulta (despreciable con índices por `finca_id`). El guard de
   `buscar_eventos_similares` añade 1 SELECT a `usuarios`/`fincas` solo para usuarios
   autenticados (el backend usa service_role y lo saltea, que es el path del RAG).
+- **OTP budget global:** añade 1 RPC `rate_limit_hit` al `request-otp` (ruta ya
+  ligada a DB; fail-open ante error → no bloquea login). Despreciable.
 - **Headers Vercel/CSP:** costo nulo en runtime; servidos como headers estáticos.
 - **Conclusión:** ningún cambio toca el hot-path del pipeline de captura (P3: < 30 s).
   El overhead total por request autenticado es ≤ 1 query indexada y solo para el rol

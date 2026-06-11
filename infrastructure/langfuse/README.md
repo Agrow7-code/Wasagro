@@ -63,6 +63,8 @@ Esperar hasta ver: `Ready on http://0.0.0.0:3000` (dentro del contenedor).
 > así que NUNCA debe quedar expuesto en `0.0.0.0` sobre HTTP plano. Para acceso
 > remoto, ponerlo detrás de un reverse-proxy con TLS y autenticación (Railway
 > private networking / Caddy / nginx) y fijar `LANGFUSE_HOST` al dominio `https://`.
+> Hay un `Caddyfile.example` en esta carpeta con un proxy TLS + Basic Auth listo
+> para copiar y ajustar.
 
 ## Paso 3 — Primer login y configurar proyecto
 
