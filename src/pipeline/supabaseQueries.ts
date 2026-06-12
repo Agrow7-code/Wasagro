@@ -720,6 +720,11 @@ export async function guardarLoteIntenciones(
   if (error) throw error
 }
 
+// Marca una intención (completada o fallida) de forma ATÓMICA vía la RPC
+// `marcar_intencion_estado`, que toma el lock de fila (SELECT ... FOR UPDATE)
+// y muta el ledger JSONB dentro de Postgres. Esto elimina la condición de
+// carrera del read-modify-write previo: con varios workers concurrentes
+// terminando intenciones del mismo mensaje, ya no se pisan los updates.
 export async function marcarIntencionCompletada(
   sessionId: string,
   jobId: string,
@@ -727,47 +732,21 @@ export async function marcarIntencionCompletada(
   eventoId: string,
   client: SupabaseClient = defaultClient,
 ): Promise<{ todas_completas: boolean; intenciones: IntencionPendiente[]; transaccion_original: string }> {
-  const { data, error: fetchError } = await client
-    .from('sesiones_activas')
-    .select('contexto_parcial')
-    .eq('session_id', sessionId)
-    .single()
-  if (fetchError) throw fetchError
+  const { data, error } = await client.rpc('marcar_intencion_estado', {
+    p_session_id: sessionId,
+    p_job_id: jobId,
+    p_status: 'completed',
+    p_evento_extraido: eventoExtraido,
+    p_evento_id: eventoId,
+  })
+  if (error) throw error
 
-  const ctx = (data as { contexto_parcial: Record<string, unknown> }).contexto_parcial
-  const intenciones = (ctx['intenciones_pendientes'] as IntencionPendiente[]) ?? []
-  const transaccionOriginal = (ctx['transaccion_original'] as string) ?? ''
-
-  const actualizadas = intenciones.map(i =>
-    i.job_id === jobId
-      ? { ...i, status: 'completed' as const, evento_extraido: eventoExtraido, evento_id: eventoId }
-      : i
-  )
-
-  const completadas = actualizadas.filter(i => i.status === 'completed').length
-  const fallidas = actualizadas.filter(i => i.status === 'failed').length
-  const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
-
-  const newStatus = todasCompletas ? 'completed' : 'processing_intentions'
-  const { error: updateError } = await client
-    .from('sesiones_activas')
-    .update({
-      contexto_parcial: {
-        ...ctx,
-        intenciones_pendientes: actualizadas,
-        completadas,
-        fallidas,
-        extracted_data: actualizadas
-          .filter(i => i.status === 'completed' && !((i.evento_extraido as Record<string, unknown>)?.['_es_clarificacion']))
-          .map(i => i.evento_extraido),
-        transaccion_original: transaccionOriginal,
-      },
-      status: newStatus,
-    })
-    .eq('session_id', sessionId)
-  if (updateError) throw updateError
-
-  return { todas_completas: todasCompletas, intenciones: actualizadas, transaccion_original: transaccionOriginal }
+  const r = data as { todas_completas: boolean; intenciones: IntencionPendiente[]; transaccion_original: string }
+  return {
+    todas_completas: r.todas_completas,
+    intenciones: r.intenciones ?? [],
+    transaccion_original: r.transaccion_original ?? '',
+  }
 }
 
 export async function marcarIntencionFallida(
@@ -776,42 +755,15 @@ export async function marcarIntencionFallida(
   errorDetail: string,
   client: SupabaseClient = defaultClient,
 ): Promise<{ todas_completas: boolean; intenciones: IntencionPendiente[] }> {
-  const { data, error: fetchError } = await client
-    .from('sesiones_activas')
-    .select('contexto_parcial')
-    .eq('session_id', sessionId)
-    .single()
-  if (fetchError) throw fetchError
+  const { data, error } = await client.rpc('marcar_intencion_estado', {
+    p_session_id: sessionId,
+    p_job_id: jobId,
+    p_status: 'failed',
+    p_evento_extraido: { error: errorDetail },
+    p_evento_id: null,
+  })
+  if (error) throw error
 
-  const ctx = (data as { contexto_parcial: Record<string, unknown> }).contexto_parcial
-  const intenciones = (ctx['intenciones_pendientes'] as IntencionPendiente[]) ?? []
-
-  const actualizadas = intenciones.map(i =>
-    i.job_id === jobId
-      ? { ...i, status: 'failed' as const, evento_extraido: { error: errorDetail } as unknown as Record<string, unknown> }
-      : i
-  )
-
-  const completadas = actualizadas.filter(i => i.status === 'completed').length
-  const fallidas = actualizadas.filter(i => i.status === 'failed').length
-  const todasCompletas = completadas + fallidas === actualizadas.length && completadas > 0
-
-  const newStatus = todasCompletas ? 'completed' : 'processing_intentions'
-  const newCtx = todasCompletas
-    ? {
-        ...ctx,
-        intenciones_pendientes: actualizadas,
-        completadas,
-        fallidas,
-        extracted_data: actualizadas.filter(i => i.status === 'completed').map(i => i.evento_extraido),
-      }
-    : { ...ctx, intenciones_pendientes: actualizadas, completadas, fallidas }
-
-  const { error: updateError } = await client
-    .from('sesiones_activas')
-    .update({ contexto_parcial: newCtx, status: newStatus })
-    .eq('session_id', sessionId)
-  if (updateError) throw updateError
-
-  return { todas_completas: todasCompletas, intenciones: actualizadas }
+  const r = data as { todas_completas: boolean; intenciones: IntencionPendiente[] }
+  return { todas_completas: r.todas_completas, intenciones: r.intenciones ?? [] }
 }

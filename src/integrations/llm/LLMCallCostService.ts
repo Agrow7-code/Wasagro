@@ -14,11 +14,25 @@ interface LLMCallCostRecord {
   latencyMs: number | null
 }
 
+// Precios USD por 1M tokens. Fuente Gemini: precios oficiales Google (estándar,
+// modalidad texto), verificados 2026-06. El registro de costo agrega todos los
+// prompt_tokens sin separar modalidad, así que se usa el precio de texto como
+// aproximación (el audio entra por Deepgram, no como tokens de audio a Gemini).
+//
+// ⚠️ Los precios NVIDIA NIM (qwen/gemma/glm/deepseek/minimax/nemotron) NO están
+// verificados contra una fuente oficial y varios de esos IDs hoy dan 404 en el
+// pool (el primario real es Gemini en todos los tiers). Tratar como estimación
+// hasta confirmar; cualquier modelo ausente acá emite warning (no $0 silencioso).
 const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
-  'gemini-2.5-flash': { inputPer1M: 0.075, outputPer1M: 0.30 },
+  // Gemini — verificados (Google, jun-2026)
+  'gemini-3-flash': { inputPer1M: 1.50, outputPer1M: 9.00 },
+  'gemini-3.1-flash-lite': { inputPer1M: 0.25, outputPer1M: 1.50 },
+  'gemini-2.5-flash': { inputPer1M: 0.30, outputPer1M: 2.50 },
   'gemini-2.5-pro': { inputPer1M: 1.25, outputPer1M: 10.00 },
   'gemini-1.5-pro': { inputPer1M: 1.25, outputPer1M: 5.00 },
+  // Groq — estimación
   'llama-3.3-70b-versatile': { inputPer1M: 0.59, outputPer1M: 0.79 },
+  // NVIDIA NIM — estimación, A VERIFICAR
   'deepseek-ai/deepseek-v4-pro': { inputPer1M: 0.14, outputPer1M: 0.42 },
   'deepseek-ai/deepseek-ocr-v2': { inputPer1M: 0.14, outputPer1M: 0.42 },
   'nvidia/nemotron-ocr-v1': { inputPer1M: 0.16, outputPer1M: 0.16 },
@@ -30,9 +44,20 @@ const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }>
   'google/gemma-4-31b-it': { inputPer1M: 0.12, outputPer1M: 0.36 },
 }
 
+// Modelos ya advertidos, para no spamear el log en cada llamada.
+const modelosDesconocidosAdvertidos = new Set<string>()
+
 function calculateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
   const pricing = MODEL_PRICING[model]
-  if (!pricing) return 0
+  if (!pricing) {
+    // Antes esto devolvía 0 en silencio → el P&L por org subcontaba sin que
+    // nadie lo notara. Ahora se avisa una vez por modelo desconocido.
+    if (!modelosDesconocidosAdvertidos.has(model)) {
+      modelosDesconocidosAdvertidos.add(model)
+      console.warn(`[LLMCallCostService] ⚠️ Modelo sin precio en MODEL_PRICING: "${model}" — su costo se registra como $0. Agregalo a la tabla.`)
+    }
+    return 0
+  }
   const inputCost = (promptTokens / 1_000_000) * pricing.inputPer1M
   const outputCost = (completionTokens / 1_000_000) * pricing.outputPer1M
   return Number((inputCost + outputCost).toFixed(6))
