@@ -14,6 +14,10 @@ export interface GeminiAdapterConfig {
 
 export class GeminiAdapter implements ILLMAdapter {
   readonly #sdk: InstanceType<typeof GoogleGenerativeAI>
+  // Gemini implementa function-calling nativo (ver `toolsConfig` abajo): es el
+  // único adapter tool-capaz del pool. El router enruta las peticiones con tools
+  // solo a adapters con esta capacidad.
+  readonly supportsTools = true
   // Cuando el caller pasa `model` explícito en el constructor, esa elección
   // GANA sobre el mapeo por tier. Permite tener varios GeminiAdapter en el
   // pool con modelos distintos (ej. gemini-3.1-flash-lite primario,

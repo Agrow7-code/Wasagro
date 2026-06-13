@@ -150,7 +150,15 @@ export function crearAdapterLLM(): ILLMAdapter {
     })
   }
 
-  return buildAdapter(provider)
+  const single = buildAdapter(provider)
+  // Modo de un solo proveedor (dev/test): si el adapter no es tool-capaz, el loop
+  // ReAct pasaría tools que el adapter ignoraría en silencio → el modelo extraería
+  // sin poder validar lotes/inventario contra la DB (riesgo P1). Se avisa al
+  // arranque. En producción usar WASAGRO_LLM=auto (el router rutea tools a Gemini).
+  if (!single.supportsTools) {
+    console.warn(`[llm] ⚠️ WASAGRO_LLM='${provider}' no soporta tools/function-calling. La extracción ReAct no podrá consultar lotes/inventario en vivo (D17). Para producción usar WASAGRO_LLM=auto.`)
+  }
+  return single
 }
 
 export function crearLLM(adapter?: ILLMAdapter): IWasagroLLM {

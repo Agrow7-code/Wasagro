@@ -10,10 +10,16 @@ function mockFail(name: string): ILLMAdapter {
   return { generarTexto: vi.fn().mockRejectedValue(new Error(`fallo-${name}`)) }
 }
 
+function mockOkTools(name: string): ILLMAdapter {
+  return { generarTexto: vi.fn().mockResolvedValue(`respuesta-${name}`), supportsTools: true }
+}
+
 const OPTS: LLMGeneracionOpciones = {
   traceId: 'trace-test',
   generationName: 'test-gen',
 }
+
+const TOOLS = [{ name: 'obtener_lotes_finca', description: 'x', parameters: { type: 'object', properties: {} } }]
 
 describe('LLMRouter', () => {
   it('usa el primer adapter si responde correctamente', async () => {
@@ -98,6 +104,53 @@ describe('LLMRouter', () => {
 
   it('lanza error si se construye sin adapters', () => {
     expect(() => new LLMRouter([])).toThrow()
+  })
+
+  it('con tools, rutea SOLO al adapter tool-capaz aunque no sea el primero', async () => {
+    const noTool = mockOk('notool')        // primero, pero NO soporta tools
+    const conTool = mockOkTools('contool') // segundo, tool-capaz
+    const router = new LLMRouter([
+      { name: 'NoTool', adapter: noTool, tier: 'reasoning' },
+      { name: 'ConTool', adapter: conTool, tier: 'reasoning' },
+    ])
+
+    const result = await router.generarTexto('hola', { ...OPTS, tools: TOOLS })
+
+    expect(result).toBe('respuesta-contool')
+    expect(noTool.generarTexto).not.toHaveBeenCalled() // nunca se le pasó la petición con tools
+    expect(conTool.generarTexto).toHaveBeenCalledOnce()
+  })
+
+  it('con tools y SIN adapter tool-capaz, falla explícito (no degrada en silencio)', async () => {
+    const onMetric = vi.fn()
+    const noTool = mockOk('notool')
+    const router = new LLMRouter(
+      [{ name: 'NoTool', adapter: noTool, tier: 'reasoning' }],
+      { onMetric },
+    )
+
+    await expect(router.generarTexto('hola', { ...OPTS, tools: TOOLS })).rejects.toThrow(/tool-capaz/)
+    expect(noTool.generarTexto).not.toHaveBeenCalled()
+    expect(onMetric).toHaveBeenCalledWith(expect.objectContaining({ error: 'no_tool_capable_adapter' }))
+  })
+
+  it('sin tools, NO restringe por capacidad (usa el primero aunque no sea tool-capaz)', async () => {
+    const noTool = mockOk('notool')
+    const conTool = mockOkTools('contool')
+    const router = new LLMRouter([
+      { name: 'NoTool', adapter: noTool, tier: 'reasoning' },
+      { name: 'ConTool', adapter: conTool, tier: 'reasoning' },
+    ])
+
+    const result = await router.generarTexto('hola', OPTS)
+
+    expect(result).toBe('respuesta-notool')
+    expect(noTool.generarTexto).toHaveBeenCalledOnce()
+  })
+
+  it('supportsTools refleja si algún nodo es tool-capaz', () => {
+    expect(new LLMRouter([{ name: 'A', adapter: mockOk('a'), tier: 'reasoning' }]).supportsTools).toBe(false)
+    expect(new LLMRouter([{ name: 'A', adapter: mockOkTools('a'), tier: 'reasoning' }]).supportsTools).toBe(true)
   })
 
   it('rutea a tier ocr cuando modelClass es ocr', async () => {
