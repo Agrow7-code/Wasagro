@@ -127,6 +127,7 @@ export class GeminiAdapter implements ILLMAdapter {
           completionTokens,
           totalTokens,
           traceId: opciones.traceId,
+          generationName: opciones.generationName,
           latencyMs: Date.now() - inicio,
         })
         return toolCallJson
@@ -148,6 +149,7 @@ export class GeminiAdapter implements ILLMAdapter {
         completionTokens: completionTokens2,
         totalTokens: totalTokens2,
         traceId: opciones.traceId,
+        generationName: opciones.generationName,
         latencyMs: Date.now() - inicio,
       })
       return texto

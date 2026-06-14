@@ -12,6 +12,7 @@ interface LLMCallCostRecord {
   totalTokens: number
   traceId: string | null
   latencyMs: number | null
+  generationName?: string | null
 }
 
 // Precios USD por 1M tokens. Fuente Gemini: precios oficiales Google (estándar,
@@ -82,6 +83,7 @@ export function recordLLMCallCost(params: LLMCallCostRecord): void {
 
   if (params.orgId) insert.org_id = params.orgId
   if (params.fincaId) insert.finca_id = params.fincaId
+  if (params.generationName) insert.generation_name = params.generationName
 
   supabase.from('llm_call_costs').insert(insert).then(({ error }) => {
     if (error) console.error('[LLMCallCostService] Error registrando costo LLM:', error.message)
