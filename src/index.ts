@@ -155,12 +155,16 @@ function secureSecretCompare(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf)
 }
 
-// Logger para depuración en Vercel
+// Logger para depuración en Vercel.
+// Solo el pathname: el query string puede llevar secretos (ej. el token del
+// webhook de pago viaja en notification_url) y no debe quedar en stdout.
 app.use('*', async (c, next) => {
   const start = Date.now()
-  console.log(`[Request] ${c.req.method} ${c.req.url}`)
+  let safePath: string
+  try { safePath = new URL(c.req.url).pathname } catch { safePath = c.req.path }
+  console.log(`[Request] ${c.req.method} ${safePath}`)
   await next()
-  console.log(`[Response] ${c.req.method} ${c.req.url} - ${c.res.status} (${Date.now() - start}ms)`)
+  console.log(`[Response] ${c.req.method} ${safePath} - ${c.res.status} (${Date.now() - start}ms)`)
 })
 
 const previewOriginRe = /^https:\/\/wasagro-.*\.vercel\.app$/
