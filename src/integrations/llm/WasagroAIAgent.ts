@@ -1,3 +1,4 @@
+import sharp from 'sharp'
 import { PromptManager } from '../../pipeline/promptManager.js'
 import { z } from 'zod'
 import type { Langfuse } from 'langfuse'
@@ -25,7 +26,7 @@ import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.j
 import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
 import { aplicarFiltroConfianza } from './confidenceFilter.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
-import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla } from '../../pipeline/handlers/SigatokaHandler.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -591,7 +592,24 @@ export class WasagroAIAgent implements IWasagroLLM {
     ]
     const correr = (i: number) => conCap(this.#extraerParteSigatoka(PASADAS[i]![0], PASADAS[i]![1], base64, mimeType, traceId, costCtx))
 
-    let [izqRaw, tab11Raw, tab00Raw, plgRaw] = await Promise.all([correr(0), correr(1), correr(2), correr(3)])
+    // Regiones de recorte (fracciones de la imagen completa). Generosas para tolerar
+    // desencuadres de foto; el full-frame es siempre el respaldo (elegirMejorTabla).
+    // Validado empíricamente: crop+zoom 3× pasa de ~14 a ~18 filas leídas en e2b.
+    const REGION_11SEM = { left: 0.55, top: 0.10, width: 0.45, height: 0.34 }
+    const REGION_00SEM = { left: 0.55, top: 0.46, width: 0.45, height: 0.38 }
+
+    // Recorta, luego corre la pasada i sobre la imagen recortada.
+    // Si el recorte falla (sharp error o imagen no válida) devuelve null directamente
+    // sin consumir una llamada LLM → el full-frame queda como único resultado.
+    const correrCrop = async (i: number, region: typeof REGION_11SEM) => {
+      const cropBase64 = await this.#recortarRegion(base64, region, traceId)
+      if (!cropBase64) return null
+      return conCap(this.#extraerParteSigatoka(PASADAS[i]![0], PASADAS[i]![1], cropBase64, mimeType, traceId, costCtx))
+    }
+
+    let [izqRaw, tab11Raw, tab00Raw, plgRaw] = await Promise.all([
+      correr(0), correr(1), correr(2), correr(3),
+    ])
 
     // Reintento ÚNICO de las pasadas que fallaron (hiccup transitorio del proveedor).
     // Solo re-corre las nulas, en paralelo → no penaliza el caso OK y recupera
@@ -614,20 +632,23 @@ export class WasagroAIAgent implements IWasagroLLM {
 
     // e2a/e2b emiten { filas, totales, promedios }; normalizar cada fila a CeldaMuestra.
     const arr = (v: unknown): any[] => (Array.isArray(v) ? v : [])
-    const filas11 = arr(t11.filas).map(normalizarFilaSemana)
-    const filas00 = arr(t00.filas).map(normalizarFilaSemana)
 
-    // ─── Checksum + re-extracción dirigida (ADR 017) ──────────────────────────
-    // Si una tabla no cuadra con los T= y hay totales legibles, re-extraemos ESA
-    // pasada UNA vez con un hint correctivo. Nos quedamos con el resultado que
-    // tenga MÁS columnas que cuadran.
-    const totales11 = t11.totales ?? null
-    const totales00 = t00.totales ?? null
-
-    // Filas con al menos un dato leído (no todas vacías): mide cobertura real para
-    // desempatar un reintento que no mejora el checksum pero sí recuperó filas.
-    const filasConDato = (fs: any[]): number =>
-      fs.filter(f => ['ht', 'hVle', 'q5menos', 'q5mas', 'lc'].some(k => f?.[k]?.valor != null)).length
+    // ─── Crop perezoso (lazy) + fallback full-frame (ADR 017 §Crop-assisted) ──
+    // Arrancamos SIEMPRE con el full-frame. Solo si el checksum de una tabla NO
+    // cuadra recurrimos al crop+zoom (más resolución → recupera filas tenues) y,
+    // recién si aún no cuadra, al hint. Así el caso común corre 4 pasadas, no 6:
+    // el crop se gasta solo cuando hace falta, sin presionar el rate-limit.
+    const toResultadoTabla = (raw: any | null): ResultadoTabla | null => {
+      if (!raw) return null
+      return {
+        filas: arr(raw.filas).map(normalizarFilaSemana),
+        totales: raw.totales ?? null,
+        promedios: raw.promedios ?? null,
+      }
+    }
+    const TABLA_VACIA: ResultadoTabla = { filas: [], totales: null, promedios: null }
+    const full11 = toResultadoTabla(tab11Raw) ?? TABLA_VACIA
+    const full00 = toResultadoTabla(tab00Raw) ?? TABLA_VACIA
 
     const reExtaerConHint = async (promptIdx: number, totales: any, promedios: any, filas: any[], prefijo: string): Promise<{ filas: any[]; totales: any; promedios: any } | null> => {
       // Construir hint por columna que no cuadra
@@ -670,59 +691,65 @@ export class WasagroAIAgent implements IWasagroLLM {
       return { filas: arr(r.filas).map(normalizarFilaSemana), totales: r.totales ?? null, promedios: r.promedios ?? null }
     }
 
-    // Tablas 11 semanas
-    let filas11Final = filas11
-    let totales11Final = totales11
-    let promedios11Final = t11.promedios ?? null
+    // Recovery perezoso de una tabla cuyo checksum no cuadra. Solo gasta llamadas
+    // extra cuando hace falta: 1) crop+zoom (más resolución → recupera filas
+    // tenues que el full no leyó); 2) si AÚN no cuadra, hint sobre el full
+    // (valores mal leídos). El crop es mejor "retry" que releer el full porque
+    // tiene más resolución, por eso va primero.
+    const recuperarTabla = async (
+      idx: number, region: typeof REGION_11SEM, prefijo: '11 semanas' | '00 semanas',
+      tag: '11sem' | '00sem', full: ResultadoTabla,
+    ): Promise<ResultadoTabla> => {
+      // El T= de la ficha (full-frame) es la referencia autoritativa del checksum.
+      // El crop puede no capturar la fila T= → siempre verificamos contra totalesRef.
+      if (!full.totales) return full
+      const totalesRef = full.totales
+      if (verificarChecksumTabla(full.filas, totalesRef).cuadraTodo !== false) return full
 
-    if (totales11 && tab11Raw) {
-      const ver11 = verificarChecksumTabla(filas11, totales11)
-      if (ver11.cuadraTodo === false) {
-        trace.event({ name: 'sigatoka_checksum_fallo_11sem', level: 'WARNING', input: { noOK: ver11.columnas.filter(c => c.cuadra === false).map(c => c.columna) } })
-        const retry = await reExtaerConHint(1, totales11, t11.promedios ?? null, filas11, '11 semanas')
+      let elegida = full
+      trace.event({ name: `sigatoka_checksum_fallo_${tag}`, level: 'WARNING', input: { filas: full.filas.length } })
+
+      // 1) Crop+zoom de ESTA tabla.
+      const cropR = toResultadoTabla(await correrCrop(idx, region))
+      if (cropR) {
+        const mejor = elegirMejorTabla(elegida, cropR, totalesRef) ?? elegida
+        trace.event({ name: 'sigatoka_crop_elegido', level: 'DEFAULT', input: { tabla: tag, fuente: mejor === cropR ? 'crop' : 'full', filas_full: full.filas.length, filas_crop: cropR.filas.length } })
+        elegida = mejor
+      }
+
+      // 2) Hint sobre el full si todavía no cuadra.
+      const verA = verificarChecksumTabla(elegida.filas, totalesRef)
+      if (verA.cuadraTodo === false) {
+        const retry = await reExtaerConHint(idx, totalesRef, elegida.promedios, elegida.filas, prefijo)
         if (retry) {
-          const verRetry = verificarChecksumTabla(retry.filas, totales11)
-          const original = ver11.columnas.filter(c => c.cuadra === true).length
-          const nuevo = verRetry.columnas.filter(c => c.cuadra === true).length
-          if (nuevo > original || (nuevo === original && filasConDato(retry.filas) > filasConDato(filas11))) {
-            filas11Final = retry.filas
-            totales11Final = retry.totales ?? totales11Final
-            promedios11Final = retry.promedios ?? promedios11Final
-            trace.event({ name: 'sigatoka_checksum_mejoro_11sem', level: 'DEFAULT', input: { original, nuevo } })
+          const verB = verificarChecksumTabla(retry.filas, totalesRef)
+          const original = verA.columnas.filter(c => c.cuadra === true).length
+          const nuevo = verB.columnas.filter(c => c.cuadra === true).length
+          if (nuevo > original || (nuevo === original && filasConDato(retry.filas) > filasConDato(elegida.filas))) {
+            elegida = { filas: retry.filas, totales: totalesRef, promedios: retry.promedios ?? elegida.promedios }
+            trace.event({ name: `sigatoka_checksum_mejoro_${tag}`, level: 'DEFAULT', input: { original, nuevo } })
           } else {
             // P4: el reintento que empeora también queda trazado (se descarta).
-            trace.event({ name: 'sigatoka_checksum_no_mejoro_11sem', level: 'WARNING', input: { original, nuevo } })
+            trace.event({ name: `sigatoka_checksum_no_mejoro_${tag}`, level: 'WARNING', input: { original, nuevo } })
           }
         }
       }
+      // Persistir el T= de la ficha como total de la tabla (no el del crop, que
+      // puede haber quedado null si el recorte no incluyó la fila T=).
+      return { filas: elegida.filas, totales: totalesRef, promedios: elegida.promedios ?? full.promedios }
     }
 
-    // Tablas 00 semanas
-    let filas00Final = filas00
-    let totales00Final = totales00
-    let promedios00Final = t00.promedios ?? null
+    // Secuencial (no paralelo): cuando ambas tablas fallan, evita disparar dos
+    // crops concurrentes y volver a presionar el rate-limit.
+    const elegida11 = await recuperarTabla(1, REGION_11SEM, '11 semanas', '11sem', full11)
+    const elegida00 = await recuperarTabla(2, REGION_00SEM, '00 semanas', '00sem', full00)
 
-    if (totales00 && tab00Raw) {
-      const ver00 = verificarChecksumTabla(filas00, totales00)
-      if (ver00.cuadraTodo === false) {
-        trace.event({ name: 'sigatoka_checksum_fallo_00sem', level: 'WARNING', input: { noOK: ver00.columnas.filter(c => c.cuadra === false).map(c => c.columna) } })
-        const retry = await reExtaerConHint(2, totales00, t00.promedios ?? null, filas00, '00 semanas')
-        if (retry) {
-          const verRetry = verificarChecksumTabla(retry.filas, totales00)
-          const original = ver00.columnas.filter(c => c.cuadra === true).length
-          const nuevo = verRetry.columnas.filter(c => c.cuadra === true).length
-          if (nuevo > original || (nuevo === original && filasConDato(retry.filas) > filasConDato(filas00))) {
-            filas00Final = retry.filas
-            totales00Final = retry.totales ?? totales00Final
-            promedios00Final = retry.promedios ?? promedios00Final
-            trace.event({ name: 'sigatoka_checksum_mejoro_00sem', level: 'DEFAULT', input: { original, nuevo } })
-          } else {
-            // P4: el reintento que empeora también queda trazado (se descarta).
-            trace.event({ name: 'sigatoka_checksum_no_mejoro_00sem', level: 'WARNING', input: { original, nuevo } })
-          }
-        }
-      }
-    }
+    const filas11Final = elegida11.filas
+    const totales11Final = elegida11.totales
+    const promedios11Final = elegida11.promedios
+    const filas00Final = elegida00.filas
+    const totales00Final = elegida00.totales
+    const promedios00Final = elegida00.promedios
 
     // Verificación final para persistir en datos_evento
     const ver11Final = totales11Final ? verificarChecksumTabla(filas11Final, totales11Final) : null
@@ -831,6 +858,44 @@ export class WasagroAIAgent implements IWasagroLLM {
       return JSON.parse(raw.replace(/```json|```/g, '').trim())
     } catch (err) {
       trace.event({ name: 'sigatoka_parte_error', level: 'WARNING', input: { parte: promptName, error: String(err) } })
+      return null
+    }
+  }
+
+  // Recorta una región de la imagen (coordenadas como fracción de la dimensión
+  // original) y la reescala 3× para mejorar resolución antes de enviarla al LLM.
+  // Devuelve la imagen recortada como base64 JPEG, o null ante cualquier error
+  // (degradación graceful: el llamador usa la foto completa como respaldo).
+  async #recortarRegion(
+    base64: string,
+    region: { left: number; top: number; width: number; height: number },
+    traceId?: string,
+  ): Promise<string | null> {
+    try {
+      const buf = Buffer.from(base64, 'base64')
+      const meta = await sharp(buf).metadata()
+      const W = meta.width
+      const H = meta.height
+      if (!W || !H) return null
+
+      const left   = Math.round(region.left   * W)
+      const top    = Math.round(region.top    * H)
+      const width  = Math.min(Math.round(region.width  * W), W - left)
+      const height = Math.min(Math.round(region.height * H), H - top)
+
+      if (width <= 0 || height <= 0) return null
+
+      const outBuf = await sharp(buf)
+        .extract({ left, top, width, height })
+        .resize({ width: width * 3 })
+        .jpeg()
+        .toBuffer()
+      return outBuf.toString('base64')
+    } catch (err) {
+      if (traceId) {
+        const trace = this.#lf.trace({ id: traceId })
+        trace.event({ name: 'sigatoka_crop_error', level: 'WARNING', input: { region, error: String(err) } })
+      }
       return null
     }
   }

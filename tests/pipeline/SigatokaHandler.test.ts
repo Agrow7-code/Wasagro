@@ -24,6 +24,8 @@ import {
   aplicarAclaraciones,
   aplicarCorrecciones,
   verificarChecksumTabla,
+  filasConDato,
+  elegirMejorTabla,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -1225,5 +1227,103 @@ describe('aplicarCorrecciones', () => {
     const r = aplicarCorrecciones(base, [{ punto: '11sem-99', campo: 'ht', valor: 5 }])
     expect(r.ignoradas).toContain('11sem-99.ht')
     expect(r.aplicadas).toHaveLength(0)
+  })
+})
+
+// ─── filasConDato (helper de cobertura) ──────────────────────────────────────
+
+describe('filasConDato', () => {
+  it('cuenta solo filas con al menos un campo no-null', () => {
+    const filas: FilaSemana[] = [
+      fila11({ ht: { valor: 10, estado: 'leida' } }),
+      fila11({ ht: { valor: null, estado: 'vacia' }, hVle: { valor: null, estado: 'vacia' }, q5menos: { valor: null, estado: 'vacia' }, q5mas: { valor: null, estado: 'vacia' }, lc: { valor: null, estado: 'vacia' } }),
+      fila11({ lc: { valor: 5, estado: 'leida' } }),
+    ]
+    expect(filasConDato(filas)).toBe(2)
+  })
+
+  it('array vacío → 0', () => {
+    expect(filasConDato([])).toBe(0)
+  })
+
+  it('todas vacías → 0', () => {
+    const filas: FilaSemana[] = [
+      fila11({ ht: { valor: null, estado: 'vacia' }, hVle: { valor: null, estado: 'vacia' }, q5menos: { valor: null, estado: 'vacia' }, q5mas: { valor: null, estado: 'vacia' }, lc: { valor: null, estado: 'vacia' } }),
+    ]
+    expect(filasConDato(filas)).toBe(0)
+  })
+
+  it('celda ilegible (sin valor) no cuenta como dato', () => {
+    const filas: FilaSemana[] = [
+      fila11({ ht: { valor: null, estado: 'ilegible' }, hVle: { valor: null, estado: 'vacia' }, q5menos: { valor: null, estado: 'vacia' }, q5mas: { valor: null, estado: 'vacia' }, lc: { valor: null, estado: 'vacia' } }),
+    ]
+    expect(filasConDato(filas)).toBe(0)
+  })
+})
+
+// ─── elegirMejorTabla ─────────────────────────────────────────────────────────
+
+// Fixture: tabla con filas de un valor fijo por columna y totales que cuadran exactamente.
+// valor=null en todas las celdas de columnas NO cubiertas (para que el ref total no coincida).
+function tablaFija(nFilas: number, valorHt: number | null, valorLc: number | null): { filas: FilaSemana[]; totales: TotalesSemana | null; promedios: TotalesSemana | null } {
+  const filas: FilaSemana[] = Array.from({ length: nFilas }, (_, i) => fila11({
+    fila: i + 1,
+    ht:  valorHt  != null ? { valor: valorHt,  estado: 'leida' } : { valor: null, estado: 'vacia' },
+    lc:  valorLc  != null ? { valor: valorLc,  estado: 'leida' } : { valor: null, estado: 'vacia' },
+    hVle:    { valor: null, estado: 'vacia' },
+    q5menos: { valor: null, estado: 'vacia' },
+    q5mas:   { valor: null, estado: 'vacia' },
+  }))
+  const totales: TotalesSemana = {
+    ht:       valorHt  != null ? valorHt  * nFilas : null,
+    lc:       valorLc  != null ? valorLc  * nFilas : null,
+    hVle: null, q5menos: null, q5mas: null,
+  }
+  return { filas, totales, promedios: null }
+}
+
+describe('elegirMejorTabla', () => {
+  it('si uno es null → devuelve el otro', () => {
+    const b = tablaFija(10, 12, 11)
+    expect(elegirMejorTabla(null, b, b.totales)).toBe(b)
+    expect(elegirMejorTabla(b, null, b.totales)).toBe(b)
+  })
+
+  it('ambos null → devuelve null (sin romper)', () => {
+    expect(elegirMejorTabla(null, null, null)).toBeNull()
+  })
+
+  it('cuadraTodo=true gana sobre cuadraTodo=false', () => {
+    // perfecto: ht=12×10=120, lc=11×10=110 → cuadra con sus propios totales
+    // imperfecto: ht=5×10=50, lc=7×10=70 → no cuadra contra perfecto.totales
+    const perfecto   = tablaFija(10, 12, 11) // totales: ht=120, lc=110
+    const imperfecto = tablaFija(10, 5,  7)  // suma: ht=50, lc=70 ≠ 120/110
+    const ref = perfecto.totales // ficha dice 120/110
+    expect(elegirMejorTabla(imperfecto, perfecto, ref)).toBe(perfecto)
+    expect(elegirMejorTabla(perfecto, imperfecto, ref)).toBe(perfecto)
+  })
+
+  it('desempate por más columnas cuadran (ambos sin cuadraTodo)', () => {
+    // dos: solo ht cuadra (ht=12×10=120, lc no disponible → null)
+    // tres: ht y lc cuadran (ht=12×10=120, lc=11×10=110)
+    const dos  = tablaFija(10, 12, null) // lc=null → no se puede verificar lc
+    const tres = tablaFija(10, 12, 11)   // ht y lc cuadran
+    const ref: TotalesSemana = { ht: 120, lc: 110, hVle: null, q5menos: null, q5mas: null }
+    expect(elegirMejorTabla(dos, tres, ref)).toBe(tres)
+  })
+
+  it('desempate por más filas con dato cuando checksum es igual', () => {
+    // Ambas no tienen totalesRef → cuadra=null en todo → empate en checksum → más filas gana
+    const pocas  = tablaFija(5,  12, 11)
+    const muchas = tablaFija(14, 12, 11)
+    const sinTotal: TotalesSemana = { ht: null, hVle: null, q5menos: null, q5mas: null, lc: null }
+    expect(elegirMejorTabla(pocas, muchas, sinTotal)).toBe(muchas)
+  })
+
+  it('ambos sin filas → devuelve el primero (no rompe)', () => {
+    const a = tablaFija(0, 12, 11)
+    const b = tablaFija(0, 12, 11)
+    // no lanza, devuelve uno de los dos (el primero, por ser la rama `a` cuando b.filas.length=0)
+    expect(() => elegirMejorTabla(a, b, null)).not.toThrow()
   })
 })

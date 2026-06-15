@@ -78,3 +78,50 @@ P-EF-FINCA, exponiendo más contexto al asesor sin lógica adicional.
 
 **Dependencias:** ADR 016 (pipeline multi-pasada), D29 (sub-pipeline Sigatoka), D30
 (UI de revisión de requires_review).
+
+---
+
+## Crop-assisted extraction (fallback full-frame)
+
+**Fecha de adición:** 2026-06-15
+
+### Problema
+
+Validado empíricamente: en la foto completa de la ficha, el modelo lee ~14 de ~19 filas
+de las tablas de semanas (11sem/00sem). La región es densa y pequeña en proporción a la
+imagen; los dígitos aparecen ilegibles a resolución de foto. Al recortar la región y
+reescalarla 3× antes de enviarla al LLM, la cobertura sube a ~18 filas.
+
+### Decisión
+
+Correr las pasadas e2a (11sem) y e2b (00sem) **en paralelo** sobre dos imágenes:
+1. **Full-frame**: la foto completa (comportamiento original).
+2. **Crop+zoom**: región proporcional recortada con `sharp` + `.resize(3×)`.
+
+Regiones usadas (fracciones, generosas para tolerar desencuadre):
+- 11sem: `{ left: 0.55, top: 0.10, width: 0.45, height: 0.34 }`
+- 00sem: `{ left: 0.55, top: 0.46, width: 0.45, height: 0.38 }`
+
+`elegirMejorTabla(full, crop, totalesRef)` selecciona el ganador por prioridad:
+1. Uno nulo → el otro gana.
+2. `cuadraTodo === true` gana sobre `false`.
+3. Más columnas con `cuadra === true`.
+4. Más filas con dato (cobertura).
+
+El resultado elegido entra al bloque de checksum/reExtaerConHint existente, que sigue
+funcionando igual sobre el ganador.
+
+### Propiedades
+
+- **Sin latencia extra**: las 6 pasadas (4 full + 2 crop) corren en el mismo `Promise.all`.
+- **Sin regresión posible**: si `sharp` falla (imagen inválida, memoria) → `#recortarRegion`
+  devuelve null → `elegirMejorTabla` elige el full-frame sin condición.
+- **Observabilidad**: `sigatoka_crop_elegido` trazado en LangFuse con `{tabla, fuente, filas_full, filas_crop}`.
+- **Testeable**: `filasConDato` y `elegirMejorTabla` son funciones puras exportadas
+  de `SigatokaHandler.ts` con suite de tests unitarios.
+
+### Archivos afectados
+
+- `src/integrations/llm/WasagroAIAgent.ts` — `extraerMuestreoSigatoka`, `#recortarRegion`
+- `src/pipeline/handlers/SigatokaHandler.ts` — `filasConDato`, `elegirMejorTabla`, `ResultadoTabla`
+- `tests/pipeline/SigatokaHandler.test.ts` — tests unitarios de los nuevos helpers
