@@ -459,6 +459,57 @@ export function verificarChecksumTabla(
   return { columnas: resultado, cuadraTodo }
 }
 
+// ─── Helpers de cobertura y selección de tabla ───────────────────────────────
+
+// Cuenta filas con al menos un valor numérico leído. Mide cobertura real
+// para desempatar entre dos lecturas con el mismo score de checksum.
+export function filasConDato(fs: FilaSemana[]): number {
+  return fs.filter(f =>
+    (['ht', 'hVle', 'q5menos', 'q5mas', 'lc'] as const).some(k => (f as unknown as Record<string, CeldaMuestra>)[k]?.valor != null)
+  ).length
+}
+
+// Tipo interno para representar un resultado de pasada de tabla de semanas.
+export interface ResultadoTabla {
+  filas: FilaSemana[]
+  totales: TotalesSemana | null
+  promedios: TotalesSemana | null
+}
+
+// Elige la mejor de dos lecturas (crop vs full-frame, o retry vs original).
+// Reglas en orden de prioridad:
+//   1. Uno es null/sin filas → el otro gana.
+//   2. Preferir cuadraTodo===true (checksum perfecto).
+//   3. Desempate: más columnas con cuadra===true.
+//   4. Desempate final: más filas con dato.
+// Determinista. Nunca lanza.
+export function elegirMejorTabla(
+  a: ResultadoTabla | null,
+  b: ResultadoTabla | null,
+  totalesRef: TotalesSemana | null,
+): ResultadoTabla | null {
+  if (!a || a.filas.length === 0) return b ?? null
+  if (!b || b.filas.length === 0) return a
+
+  const totRef = totalesRef ?? a.totales ?? b.totales
+  const verA = totRef ? verificarChecksumTabla(a.filas, totRef) : null
+  const verB = totRef ? verificarChecksumTabla(b.filas, totRef) : null
+
+  // Criterio 2: cuadraTodo
+  const cuadraA = verA?.cuadraTodo === true
+  const cuadraB = verB?.cuadraTodo === true
+  if (cuadraA && !cuadraB) return a
+  if (cuadraB && !cuadraA) return b
+
+  // Criterio 3: columnas que cuadran
+  const colsA = verA ? verA.columnas.filter(c => c.cuadra === true).length : 0
+  const colsB = verB ? verB.columnas.filter(c => c.cuadra === true).length : 0
+  if (colsA !== colsB) return colsA > colsB ? a : b
+
+  // Criterio 4: filas con dato
+  return filasConDato(a.filas) >= filasConDato(b.filas) ? a : b
+}
+
 // ─── Sub-clasificador: ¿es un formulario de Sigatoka? ────────────────────────
 
 const MARCADORES_SIGATOKA = ['SIGATOKA', 'H+VLE', 'EF PAS', 'EF ACT', 'FUNC', 'EE2', 'EE3', 'CERAMIDA', 'SIBINE']
