@@ -23,6 +23,16 @@ Editar `.env` con los valores reales:
    - Puerto: **5432** (directo, no pooler 6543)
    - Agregar al final: `?schema=langfuse`
    - Ejemplo: `postgresql://postgres.abcdef:[password]@aws-0-us-east-1.pooler.supabase.com:5432/postgres?schema=langfuse`
+   - **Seguridad (least privilege):** NO usar el rol `postgres` (superusuario) en
+     producción. Crear un rol dedicado con acceso solo al schema `langfuse`:
+     ```sql
+     CREATE ROLE langfuse_app LOGIN PASSWORD '<fuerte>';
+     GRANT USAGE, CREATE ON SCHEMA langfuse TO langfuse_app;
+     GRANT ALL ON ALL TABLES IN SCHEMA langfuse TO langfuse_app;
+     ALTER DEFAULT PRIVILEGES IN SCHEMA langfuse GRANT ALL ON TABLES TO langfuse_app;
+     ```
+     Si LangFuse compromete el contenedor, el atacante NO obtiene acceso a los
+     datos de finca del schema `public`.
 
 2. **`NEXTAUTH_SECRET`** y **`SALT`** — generar valores aleatorios:
    ```bash
@@ -46,7 +56,15 @@ docker-compose ps
 docker-compose logs langfuse-server --tail=50
 ```
 
-Esperar hasta ver: `Ready on http://0.0.0.0:3000`
+Esperar hasta ver: `Ready on http://0.0.0.0:3000` (dentro del contenedor).
+
+> **Seguridad de red:** el compose publica el puerto solo en loopback
+> (`127.0.0.1:3000:3000`). LangFuse guarda trazas con datos de campo (PII, P5),
+> así que NUNCA debe quedar expuesto en `0.0.0.0` sobre HTTP plano. Para acceso
+> remoto, ponerlo detrás de un reverse-proxy con TLS y autenticación (Railway
+> private networking / Caddy / nginx) y fijar `LANGFUSE_HOST` al dominio `https://`.
+> Hay un `Caddyfile.example` en esta carpeta con un proxy TLS + Basic Auth listo
+> para copiar y ajustar.
 
 ## Paso 3 — Primer login y configurar proyecto
 
@@ -118,7 +136,8 @@ Verificar en la UI: **Traces → wasagro_test** debe aparecer.
 
 **Error: `connection refused` a Supabase**
 - Verificar que `DATABASE_URL` usa puerto 5432, no 6543
-- Verificar que el proyecto de Supabase no tiene restricciones de IP
+- Si activaste restricciones de IP en Supabase (recomendado, ver auditoría de
+  seguridad), agregá la IP de egress del host de LangFuse a los `allowed_cidrs`.
 
 **Error: `schema langfuse does not exist`**
 - LangFuse crea el schema automáticamente. Si falla: `CREATE SCHEMA langfuse;` en Supabase SQL editor.

@@ -22,6 +22,7 @@ export interface WasagroJWTPayload {
   phone: string
   rol: string
   finca_id: string | null
+  org_id: string | null
   iss: string
   aud: string
   iat: number
@@ -30,7 +31,7 @@ export interface WasagroJWTPayload {
 
 const JWT_EXPIRY_SECONDS = 7 * 24 * 60 * 60
 
-export async function emitirJWT(payload: { id: string; phone: string; rol: string; finca_id: string | null }): Promise<string> {
+export async function emitirJWT(payload: { id: string; phone: string; rol: string; finca_id: string | null; org_id?: string | null }): Promise<string> {
   if (!JWT_SECRET) throw new Error('JWT_SECRET no configurado')
   const now = Math.floor(Date.now() / 1000)
   return sign(
@@ -39,6 +40,7 @@ export async function emitirJWT(payload: { id: string; phone: string; rol: strin
       phone: payload.phone,
       rol: payload.rol,
       finca_id: payload.finca_id,
+      org_id: payload.org_id ?? null,
       iss: JWT_ISSUER,
       aud: JWT_AUDIENCE,
       iat: now,

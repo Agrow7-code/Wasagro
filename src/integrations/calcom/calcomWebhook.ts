@@ -25,25 +25,20 @@ export function verifyCalcomSignature(
   const cleanSig = signature.startsWith('sha256=') ? signature.slice(7) : signature
   const sigBuf = Buffer.from(cleanSig)
   const expBuf = Buffer.from(expected)
+  // No loguear el secreto (ni su prefijo) ni el body (PII de asistentes): solo
+  // metadatos no sensibles que sirven para diagnosticar sin debilitar el secreto.
   if (sigBuf.length !== expBuf.length) {
     console.warn('[calcom-sig] length mismatch', {
       sigLen: sigBuf.length,
       expLen: expBuf.length,
-      sigPrefix: cleanSig.slice(0, 16),
-      expPrefix: expected.slice(0, 16),
       bodyLen: body.length,
-      secretPrefix: secret.slice(0, 12),
     })
     return false
   }
   const matches = timingSafeEqual(sigBuf, expBuf)
   if (!matches) {
     console.warn('[calcom-sig] HMAC mismatch (same length)', {
-      sigPrefix: cleanSig.slice(0, 16),
-      expPrefix: expected.slice(0, 16),
       bodyLen: body.length,
-      bodyStart: body.slice(0, 100),
-      secretPrefix: secret.slice(0, 12),
     })
   }
   return matches
@@ -345,7 +340,7 @@ async function notifyFounderBooking(
   bookingId: string,
 ): Promise<void> {
   const founderPhone = process.env['FOUNDER_PHONE']
-  console.log('[calcom-notify] start', { hasPhone: !!founderPhone, phonePrefix: founderPhone?.slice(0, 6), bookingId })
+  console.log('[calcom-notify] start', { hasPhone: !!founderPhone, bookingId })
   if (!founderPhone) {
     console.warn('[calcom-notify] FOUNDER_PHONE not set — skipping WhatsApp notification')
     return
@@ -368,7 +363,7 @@ async function notifyFounderBooking(
 
   try {
     const sender = crearSenderWhatsApp()
-    console.log('[calcom-notify] sending WhatsApp', { to: founderPhone, msgLen: msg.length })
+    console.log('[calcom-notify] sending WhatsApp', { msgLen: msg.length })
     await sender.enviarTexto(founderPhone, msg)
     console.log('[calcom-notify] WhatsApp sent OK')
   } catch (err) {

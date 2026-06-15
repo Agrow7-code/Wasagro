@@ -2,14 +2,30 @@ import { requestOTP } from '../../src/auth/otpService.js'
 import { sendOTPViaWhatsApp } from '../../src/auth/whatsappAuthService.js'
 import { getUserByPhone } from '../../src/pipeline/supabaseQueries.js'
 
+// Orígenes permitidos. NUNCA usar '*' junto con Allow-Credentials (combinación
+// insegura e ignorada por los navegadores). Mantener en sync con el CORS de
+// src/index.ts (origen canónico del backend Hono en Railway).
+const ALLOWED_ORIGINS = [
+  'https://wasagro.vercel.app',
+  'https://wasagro.co',
+  'http://localhost:5173',
+]
+const PREVIEW_ORIGIN_RE = /^https:\/\/wasagro-.*\.vercel\.app$/
+
+function applyCors(req: any, res: any): void {
+  const origin = req.headers?.origin as string | undefined
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || PREVIEW_ORIGIN_RE.test(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+}
+
 export default async function handler(req: any, res: any) {
-  // CORS 
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
-  
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  applyCors(req, res)
+
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   const body = req.body || {};
@@ -18,21 +34,20 @@ export default async function handler(req: any, res: any) {
   if (!phone) return res.status(400).json({ error: 'Número de teléfono requerido' });
 
   try {
-    console.log(`[Vercel Native] Buscando a ${phone}`);
     const usuario = await getUserByPhone(phone);
-    if (!usuario) return res.status(404).json({ error: 'Número no registrado en Wasagro. Contacta a tu administrador.' });
 
-    console.log(`[Vercel Native] Generando OTP`);
-    const code = await requestOTP(phone);
+    // Respuesta uniforme exista o no el usuario: no se filtra si el número
+    // está registrado (anti-enumeración, P5/P6). El rate-limit vive en requestOTP.
+    if (usuario) {
+      const code = await requestOTP(phone);
+      await sendOTPViaWhatsApp(phone, code).catch((e: any) =>
+        console.error('[request-otp] envío WhatsApp falló:', e?.message)
+      );
+    }
 
-    console.log(`[Vercel Native] Enviando WhatsApp a ${phone}`);
-    // Esperamos para que el proceso termine después del envío y cierre el socket de forma segura.
-    await sendOTPViaWhatsApp(phone, code);
-
-    console.log(`[Vercel Native] Respondiendo 200 OK`);
     return res.status(200).json({ status: 'sent' });
   } catch (err: any) {
-    console.error(`[Vercel Native] Error:`, err.message);
-    return res.status(500).json({ error: err.message || 'Error interno del servidor' });
+    console.error('[request-otp] Error:', err?.message);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 }

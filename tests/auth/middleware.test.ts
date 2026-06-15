@@ -17,12 +17,13 @@ vi.mock('../../src/auth/jwtService.js', () => ({
     phone: '593987654321',
     rol: 'agricultor',
     finca_id: 'F001',
+    org_id: 'ORG-A',
   }),
   firmarJWT: vi.fn().mockReturnValue('mock-jwt-token'),
 }))
 
 import { Hono } from 'hono'
-import { authMiddleware, requireFincaAccess, getUserSupabase } from '../../src/auth/middleware.js'
+import { authMiddleware, requireFincaAccessAsync, getUserSupabase } from '../../src/auth/middleware.js'
 import { createUserScopedClient } from '../../src/integrations/supabase.js'
 
 function crearApp() {
@@ -33,9 +34,9 @@ function crearApp() {
     const db = getUserSupabase(c)
     return c.json({ user, hasScopedClient: db !== null })
   })
-  app.get('/api/test-finca/:finca_id', (c) => {
+  app.get('/api/test-finca/:finca_id', async (c) => {
     const finca_id = c.req.param('finca_id')
-    if (!requireFincaAccess(c, finca_id)) {
+    if (!await requireFincaAccessAsync(c, finca_id)) {
       return c.json({ error: 'Sin acceso' }, 403)
     }
     return c.json({ ok: true, finca_id })
@@ -105,7 +106,7 @@ describe('Auth middleware', () => {
   })
 })
 
-describe('requireFincaAccess', () => {
+describe('requireFincaAccessAsync', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -126,14 +127,16 @@ describe('requireFincaAccess', () => {
     expect(res.status).toBe(403)
   })
 
-  it('allows access to any finca for admin_org', async () => {
+  it('allows admin_org access to a finca within its own organization', async () => {
+    // El mock de supabase.single devuelve org_id 'ORG-A' para la finca consultada.
     const { verificarJWT } = await import('../../src/auth/jwtService.js')
     vi.mocked(verificarJWT).mockResolvedValueOnce({
       sub: 'admin-001',
       phone: '593987654321',
       rol: 'admin_org',
       finca_id: 'F001',
-    })
+      org_id: 'ORG-A',
+    } as any)
 
     const app = crearApp()
     const res = await app.request('/api/test-finca/F999', {
@@ -142,14 +145,33 @@ describe('requireFincaAccess', () => {
     expect(res.status).toBe(200)
   })
 
-  it('allows access to any finca for director', async () => {
+  it('denies admin_org access to a finca in a DIFFERENT organization (cross-tenant)', async () => {
+    // Admin de ORG-B intentando acceder a F999, que pertenece a ORG-A.
+    const { verificarJWT } = await import('../../src/auth/jwtService.js')
+    vi.mocked(verificarJWT).mockResolvedValueOnce({
+      sub: 'admin-002',
+      phone: '593900000000',
+      rol: 'admin_org',
+      finca_id: 'F500',
+      org_id: 'ORG-B',
+    } as any)
+
+    const app = crearApp()
+    const res = await app.request('/api/test-finca/F999', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('allows access to any finca for director (back-office global)', async () => {
     const { verificarJWT } = await import('../../src/auth/jwtService.js')
     vi.mocked(verificarJWT).mockResolvedValueOnce({
       sub: 'dir-001',
       phone: '593987654321',
       rol: 'director',
       finca_id: 'F001',
-    })
+      org_id: null,
+    } as any)
 
     const app = crearApp()
     const res = await app.request('/api/test-finca/F999', {

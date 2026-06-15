@@ -3,6 +3,7 @@ import type { Map as LeafletMap } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Topbar } from '../layout/Topbar'
 import { useAuth } from '../../auth/useAuth'
+import { authFetch } from '../../auth/api'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -153,7 +154,8 @@ export function FincaSetupView() {
   // Si el usuario está logueado pero no tiene finca_id (sesión antigua), lo obtiene del servidor
   useEffect(() => {
     if (!user || user.finca_id) return
-    fetch(`/api/auth/me?phone=${encodeURIComponent(user.phone)}`)
+    // La identidad sale del token (server-side), no del teléfono en la URL.
+    authFetch(`/api/auth/me`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.user?.finca_id) login({ ...user, finca_id: data.user.finca_id })
@@ -165,7 +167,7 @@ export function FincaSetupView() {
   // Cargar coordenadas y ubicación de la finca antes de inicializar el mapa
   useEffect(() => {
     if (!finca_id) { setCoordsLoaded(true); return }
-    fetch(`/api/finca/${finca_id}`)
+    authFetch(`/api/finca/${finca_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         const row = Array.isArray(data?.finca) ? data.finca[0] : data?.finca
@@ -288,7 +290,7 @@ export function FincaSetupView() {
     setMapReady(true)
     setFincaCenter(coords)
     if (finca_id) {
-      fetch(`/api/finca/${finca_id}/coordenadas`, {
+      authFetch(`/api/finca/${finca_id}/coordenadas`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lat: coords[0], lng: coords[1] }),
@@ -469,7 +471,7 @@ export function FincaSetupView() {
     setSaveError('')
     try {
       for (const lot of lots) {
-        const res = await fetch(`/api/finca/${finca_id}/lotes`, {
+        const res = await authFetch(`/api/finca/${finca_id}/lotes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nombre: lot.nombre, hectareas: lot.ha, coordenadas: lot.coords }),

@@ -7,6 +7,12 @@ export default defineConfig({
     tailwindcss(),
     react(),
   ],
+  // En producción se eliminan console.* y debugger: evita fuga de PII/tokens a la
+  // consola del navegador (los logs de dev siguen disponibles en `vite dev`).
+  esbuild: {
+    drop: ['debugger'],
+    pure: ['console.log', 'console.info', 'console.debug'],
+  },
   server: {
     proxy: {
       '/api': {

@@ -1,7 +1,7 @@
 import type { Context, Next } from 'hono'
 import { verificarJWT } from '../auth/jwtService.js'
 import type { WasagroJWTPayload } from '../auth/jwtService.js'
-import { createUserScopedClient } from '../integrations/supabase.js'
+import { createUserScopedClient, supabase } from '../integrations/supabase.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export interface AuthedUser {
@@ -9,6 +9,7 @@ export interface AuthedUser {
   phone: string
   rol: string
   finca_id: string | null
+  org_id: string | null
 }
 
 declare module 'hono' {
@@ -34,6 +35,7 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
       phone: payload.phone,
       rol: payload.rol,
       finca_id: payload.finca_id,
+      org_id: payload.org_id ?? null,
     })
 
     try {
@@ -49,11 +51,39 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
   }
 }
 
+// Versión síncrona — solo segura para 'director' (rol interno/back-office global)
+// y para el dueño directo de la finca. NO concede acceso amplio a 'admin_org'
+// porque eso permitiría cruzar organizaciones; usar requireFincaAccessAsync.
 export function requireFincaAccess(c: Context, requestedFincaId: string): boolean {
   const user = c.get('authedUser')
   if (!user) return false
-  if (user.rol === 'admin_org' || user.rol === 'director') return true
+  if (user.rol === 'director') return true
   return user.finca_id === requestedFincaId
+}
+
+// Resuelve el org_id de una finca para validar pertenencia (cache simple por request).
+async function fincaPerteneceAOrg(fincaId: string, orgId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('fincas')
+    .select('org_id')
+    .eq('finca_id', fincaId)
+    .single()
+  return data?.org_id === orgId
+}
+
+// Versión async con aislamiento por organización (cierra el hueco cross-tenant):
+// - 'director': acceso global (back-office interno, P7/D28).
+// - dueño directo de la finca: acceso.
+// - 'admin_org': solo fincas de SU organización (verificado contra la DB).
+export async function requireFincaAccessAsync(c: Context, requestedFincaId: string): Promise<boolean> {
+  const user = c.get('authedUser')
+  if (!user) return false
+  if (user.rol === 'director') return true
+  if (user.finca_id === requestedFincaId) return true
+  if (user.rol === 'admin_org' && user.org_id) {
+    return fincaPerteneceAOrg(requestedFincaId, user.org_id)
+  }
+  return false
 }
 
 export function getUserSupabase(c: Context): SupabaseClient | null {

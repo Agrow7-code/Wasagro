@@ -62,7 +62,11 @@ export async function createPayment(
   const amount = calcularPrecio(fincas, usuarios)
   const segment = inferPlanSegment(fincas, usuarios)
   const orderId = `wasagro-${segment}-${orgId}-${Date.now()}`
-  const notificationUrl = `${process.env['API_URL'] ?? 'https://wasagro-production.up.railway.app'}/api/billing/dlocalgo-webhook`
+  // El token compartido viaja en la URL de notificación que NOSOTROS fijamos:
+  // el webhook lo verifica timing-safe antes de tocar el estado de suscripción.
+  const webhookSecret = process.env['DLOCALGO_WEBHOOK_SECRET'] ?? ''
+  const tokenQuery = webhookSecret ? `?token=${encodeURIComponent(webhookSecret)}` : ''
+  const notificationUrl = `${process.env['API_URL'] ?? 'https://wasagro-production.up.railway.app'}/api/billing/dlocalgo-webhook${tokenQuery}`
   const successUrl = `${process.env['DASHBOARD_URL'] ?? 'https://app.wasagro.ai'}/billing?dlocalgo=success`
 
   const body = {

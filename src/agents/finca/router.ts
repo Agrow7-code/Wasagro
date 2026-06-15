@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../../integrations/supabase.js'
-import { requireFincaAccess, getUserSupabase } from '../../auth/middleware.js'
+import { requireFincaAccessAsync, getUserSupabase } from '../../auth/middleware.js'
 import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos } from '../../pipeline/supabaseQueries.js'
 import { getSignedUrlEvento } from '../../integrations/supabaseStorage.js'
 import { contarCeldasIlegibles, aplicarAclaraciones } from '../../pipeline/handlers/SigatokaHandler.js'
@@ -36,7 +36,7 @@ const RenombrarLoteSchema = z.object({
 // GET /api/finca/:finca_id — datos básicos + centroide como lat/lng numérico
 fincaRouter.get('/:finca_id', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const db = getUserSupabase(c) ?? supabase
   const { data, error } = await db.rpc('get_finca_centroide', { p_finca_id: finca_id })
   if (error) return c.json({ error: error.message }, 500)
@@ -47,7 +47,7 @@ fincaRouter.get('/:finca_id', async (c) => {
 // GET /api/finca/:finca_id/lotes
 fincaRouter.get('/:finca_id/lotes', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const db = getUserSupabase(c) ?? supabase
   const { data, error } = await db
     .from('lotes')
@@ -63,7 +63,7 @@ fincaRouter.get('/:finca_id/lotes', async (c) => {
 // Body: { nombre: string, hectareas: number, coordenadas: [[lat,lng],...] }
 fincaRouter.post('/:finca_id/lotes', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const rawBody = await c.req.json().catch(() => null)
   const parsed = CrearLoteSchema.safeParse(rawBody)
   if (!parsed.success) {
@@ -107,7 +107,7 @@ fincaRouter.post('/:finca_id/lotes', async (c) => {
 // PATCH /api/finca/:finca_id/coordenadas — guardar centro del mapa cuando el admin lo ubica manualmente
 fincaRouter.patch('/:finca_id/coordenadas', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const body = await c.req.json().catch(() => null)
   const lat = typeof body?.lat === 'number' ? body.lat : null
   const lng = typeof body?.lng === 'number' ? body.lng : null
@@ -122,7 +122,7 @@ fincaRouter.patch('/:finca_id/coordenadas', async (c) => {
 // GET /api/finca/:finca_id/sigatoka/revision — lista de muestreos requires_review
 fincaRouter.get('/:finca_id/sigatoka/revision', async (c) => {
   const finca_id = c.req.param('finca_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
   const eventos = await getEventosRevisionSigatoka(finca_id)
   const items = eventos.map(e => {
     const sig = sigatokaDe(e.datos_evento)
@@ -144,7 +144,7 @@ fincaRouter.get('/:finca_id/sigatoka/revision', async (c) => {
 fincaRouter.get('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
   const finca_id = c.req.param('finca_id')
   const evento_id = c.req.param('evento_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   const evento = await getEventoSigatokaById(evento_id)
   if (!evento || evento.finca_id !== finca_id) return c.json({ error: 'Evento no encontrado' }, 404)
@@ -169,7 +169,7 @@ fincaRouter.get('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
 fincaRouter.patch('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
   const finca_id = c.req.param('finca_id')
   const evento_id = c.req.param('evento_id')
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
 
   const parsed = RevisionPatchSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) return c.json({ error: 'Datos inválidos', details: parsed.error.issues }, 400)
@@ -209,7 +209,7 @@ fincaRouter.put('/lotes/:lote_id', async (c) => {
   const lote_id = c.req.param('lote_id')
   const finca_id = await loteToFincaId(lote_id)
   if (!finca_id) return c.json({ error: 'Lote no encontrado' }, 404)
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a este lote' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a este lote' }, 403)
 
   const rawBody = await c.req.json().catch(() => null)
   const parsed = RenombrarLoteSchema.safeParse(rawBody)
@@ -228,7 +228,7 @@ fincaRouter.delete('/lotes/:lote_id', async (c) => {
   const lote_id = c.req.param('lote_id')
   const finca_id = await loteToFincaId(lote_id)
   if (!finca_id) return c.json({ error: 'Lote no encontrado' }, 404)
-  if (!requireFincaAccess(c, finca_id)) return c.json({ error: 'Sin acceso a este lote' }, 403)
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a este lote' }, 403)
 
   const { error } = await supabase.rpc('eliminar_lote', { p_lote_id: lote_id })
   if (error) return c.json({ error: error.message }, 500)

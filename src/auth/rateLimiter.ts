@@ -6,6 +6,10 @@ interface RateLimitOptions {
   maxRequests: number
   prefix?: string
   key?: (c: Context) => string
+  // En rutas sensibles (auth/OTP) la pérdida del backend de rate-limit NO debe
+  // abrir la puerta a fuerza bruta. failClosed=true responde 503 ante un fallo
+  // de la RPC en vez de dejar pasar la petición.
+  failClosed?: boolean
 }
 
 function extractIp(c: Context): string {
@@ -16,7 +20,7 @@ function extractIp(c: Context): string {
 }
 
 export function rateLimiter(options: RateLimitOptions) {
-  const { windowMs, maxRequests, prefix = 'rl', key } = options
+  const { windowMs, maxRequests, prefix = 'rl', key, failClosed = false } = options
 
   return async (c: Context, next: Next) => {
     const id = key ? key(c) : extractIp(c)
@@ -30,6 +34,10 @@ export function rateLimiter(options: RateLimitOptions) {
       })
 
       if (error || !data || !data[0]) {
+        if (failClosed) {
+          console.error('[rateLimiter] RPC error, fail-CLOSED:', error?.message)
+          return c.json({ error: 'Service temporarily unavailable' }, 503)
+        }
         console.error('[rateLimiter] RPC error, fail-open:', error?.message)
         return await next()
       }
@@ -48,6 +56,10 @@ export function rateLimiter(options: RateLimitOptions) {
 
       return await next()
     } catch (err) {
+      if (failClosed) {
+        console.error('[rateLimiter] unexpected error, fail-CLOSED:', err)
+        return c.json({ error: 'Service temporarily unavailable' }, 503)
+      }
       console.error('[rateLimiter] unexpected error, fail-open:', err)
       return await next()
     }

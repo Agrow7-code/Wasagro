@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { authFetch } from '../../auth/api'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ export const Calculadora: React.FC<CalculadoraProps> = ({ finca_id, apiBase }) =
   const [error, setError]               = useState<string | null>(null)
 
   useEffect(() => {
-    fetch(`${apiBase}/api/metricas/campos/${finca_id}`)
+    authFetch(`${apiBase}/api/metricas/campos/${finca_id}`)
       .then(r => r.json())
       .then(d => setCampos(d.campos ?? []))
       .catch(() => {})
@@ -210,7 +211,7 @@ export const Calculadora: React.FC<CalculadoraProps> = ({ finca_id, apiBase }) =
     setResultado(null)
 
     try {
-      const res = await fetch(`${apiBase}/api/metricas/calcular/lotes`, {
+      const res = await authFetch(`${apiBase}/api/metricas/calcular/lotes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ formula, finca_id, fecha_inicio: fechaInicio, fecha_fin: fechaFin }),
@@ -233,7 +234,7 @@ export const Calculadora: React.FC<CalculadoraProps> = ({ finca_id, apiBase }) =
     setError(null)
 
     try {
-      const res = await fetch(`${apiBase}/api/metricas`, {
+      const res = await authFetch(`${apiBase}/api/metricas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

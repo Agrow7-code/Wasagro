@@ -33,4 +33,12 @@ export interface ILLMAdapter {
    * Genera texto o devuelve un Tool Call envuelto en JSON usando el LLM subyacente.
    */
   generarTexto(userContent: string, opciones: LLMGeneracionOpciones): Promise<string>
+
+  /**
+   * Si el adapter soporta function-calling / tools nativas. El router usa esto
+   * para NO enrutar una petición con `tools` a un adapter que las ignoraría en
+   * silencio (lo que haría que el modelo respondiera sin poder consultar la DB,
+   * arriesgando inventar datos — P1). `undefined`/`false` = no soporta tools.
+   */
+  readonly supportsTools?: boolean
 }

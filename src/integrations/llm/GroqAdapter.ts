@@ -67,6 +67,7 @@ export class GroqAdapter implements ILLMAdapter {
         completionTokens,
         totalTokens,
         traceId: opciones.traceId,
+        generationName: opciones.generationName,
         latencyMs: Date.now() - inicio,
       })
       return texto

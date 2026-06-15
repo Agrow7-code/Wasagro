@@ -24,6 +24,7 @@ import { rateLimiter } from './auth/rateLimiter.js'
 import { createPayment, confirmPayment, getSmartFieldsApiKey } from './integrations/dlocal/dlocalClient.js'
 import { handleDLocalGoWebhook } from './integrations/dlocal/dlocalWebhookHandler.js'
 import { handleDeUnaWebhook } from './integrations/deuna/deunaClient.js'
+import { verifyHmacSignature, verifySharedToken } from './integrations/webhookSecurity.js'
 import { calcularPrecio, getBasePrice, getSegmentLabel, inferPlanSegment, isPaidPlan, PRICE_PER_FINCA, PRICE_PER_USER } from './auth/pricingUtils.js'
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
@@ -71,6 +72,8 @@ function validarEnvVars(): void {
     ['SUPABASE_ANON_KEY', 'endpoints autenticados usarán service_role en vez de RLS'],
     ['LANGFUSE_SECRET_KEY', 'sin observabilidad LangFuse'],
     ['LANGFUSE_PUBLIC_KEY', 'sin observabilidad LangFuse'],
+    ['DLOCALGO_WEBHOOK_SECRET', 'el webhook de dLocal Go RECHAZARÁ todas las peticiones (503) hasta configurarlo'],
+    ['DEUNA_WEBHOOK_SECRET', 'el webhook de DeUna RECHAZARÁ todas las peticiones (503) hasta configurarlo'],
   ]
 
   for (const [k, hint] of opcionales) {
@@ -152,12 +155,16 @@ function secureSecretCompare(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf)
 }
 
-// Logger para depuración en Vercel
+// Logger para depuración en Vercel.
+// Solo el pathname: el query string puede llevar secretos (ej. el token del
+// webhook de pago viaja en notification_url) y no debe quedar en stdout.
 app.use('*', async (c, next) => {
   const start = Date.now()
-  console.log(`[Request] ${c.req.method} ${c.req.url}`)
+  let safePath: string
+  try { safePath = new URL(c.req.url).pathname } catch { safePath = c.req.path }
+  console.log(`[Request] ${c.req.method} ${safePath}`)
   await next()
-  console.log(`[Response] ${c.req.method} ${c.req.url} - ${c.res.status} (${Date.now() - start}ms)`)
+  console.log(`[Response] ${c.req.method} ${safePath} - ${c.res.status} (${Date.now() - start}ms)`)
 })
 
 const previewOriginRe = /^https:\/\/wasagro-.*\.vercel\.app$/
@@ -203,8 +210,8 @@ app.get('/health', (c) => c.json({
 }))
 
 app.route('/webhook', webhookRouter)
-app.use('/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10 }))
-app.use('/api/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10 }))
+app.use('/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10, failClosed: true }))
+app.use('/api/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10, failClosed: true }))
 app.route('/auth', authRouter)
 app.route('/api/auth', authRouter)
 app.route('/api/webhook', webhookRouter)
@@ -423,8 +430,25 @@ app.get('/api/billing/status', authMiddleware, async (c) => {
 })
 
 app.post('/api/billing/dlocalgo-webhook', bodyLimit({ maxSize: 65_536 }), async (c) => {
+  // Verificación obligatoria: sin esto cualquiera podría forjar el estado de
+  // suscripción de cualquier organización (activar gratis / cancelar a un cliente).
+  const secret = process.env['DLOCALGO_WEBHOOK_SECRET']
+  if (!secret) {
+    console.error('[dlocalgo-webhook] RECHAZADO: DLOCALGO_WEBHOOK_SECRET no configurado')
+    return c.json({ error: 'Webhook no configurado' }, 503)
+  }
+
+  const rawBody = await c.req.text()
+  const token = c.req.query('token') ?? c.req.header('x-webhook-token')
+  const signature = c.req.header('x-dlocalgo-signature') ?? c.req.header('x-signature')
+  const ok = verifySharedToken(token, secret) || verifyHmacSignature(rawBody, signature, secret)
+  if (!ok) {
+    console.warn('[dlocalgo-webhook] firma/token inválido — rechazado')
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
   try {
-    const payload = await c.req.json()
+    const payload = JSON.parse(rawBody)
     await handleDLocalGoWebhook(payload)
     return c.json({ received: true })
   } catch (err: any) {
@@ -433,10 +457,25 @@ app.post('/api/billing/dlocalgo-webhook', bodyLimit({ maxSize: 65_536 }), async 
   }
 })
 
-// DeUna webhook — no auth (verify via signature header if DeUna provides one)
+// DeUna webhook — verificación obligatoria (HMAC sobre body raw o token compartido)
 app.post('/api/billing/deuna-webhook', bodyLimit({ maxSize: 65_536 }), async (c) => {
+  const secret = process.env['DEUNA_WEBHOOK_SECRET']
+  if (!secret) {
+    console.error('[deuna-webhook] RECHAZADO: DEUNA_WEBHOOK_SECRET no configurado')
+    return c.json({ error: 'Webhook no configurado' }, 503)
+  }
+
+  const rawBody = await c.req.text()
+  const token = c.req.query('token') ?? c.req.header('x-webhook-token')
+  const signature = c.req.header('x-deuna-signature') ?? c.req.header('x-signature')
+  const ok = verifySharedToken(token, secret) || verifyHmacSignature(rawBody, signature, secret)
+  if (!ok) {
+    console.warn('[deuna-webhook] firma/token inválido — rechazado')
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
   try {
-    const payload = await c.req.json()
+    const payload = JSON.parse(rawBody)
     await handleDeUnaWebhook(payload)
     return c.json({ received: true })
   } catch (err: any) {

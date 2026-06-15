@@ -1,11 +1,12 @@
 import { randomInt } from 'node:crypto'
 import { compare, hash } from 'bcryptjs'
 import { supabase } from '../integrations/supabase.js'
+import { redactPhone } from '../integrations/logRedact.js'
 
 const BCRYPT_ROUNDS = 10
 
 export async function requestOTP(phone: string): Promise<string> {
-  console.log(`[otpService] Solicitando OTP para ${phone}`)
+  console.log(`[otpService] Solicitando OTP para ${redactPhone(phone)}`)
 
   // 1. Verificar rate limiting
   const { count, error: countError } = await supabase
@@ -43,6 +44,26 @@ export async function requestOTP(phone: string): Promise<string> {
   }
 
   return code
+}
+
+// Presupuesto GLOBAL de envíos de OTP por hora. Complementa el límite por-teléfono
+// (3/15min) y por-IP (10/15min): un atacante distribuido podría pedir OTPs para
+// muchos números y quemar saldo de WhatsApp. Tope global configurable (default 200/h).
+// Fail-open: si la RPC falla, NO bloquea el login legítimo (el límite por-IP/teléfono
+// sigue activo); solo deja de aplicar el techo global ante un hiccup de DB.
+export async function dentroDePresupuestoGlobalOTP(): Promise<boolean> {
+  const max = Number(process.env['OTP_GLOBAL_HOURLY_BUDGET'] ?? 200)
+  try {
+    const { data, error } = await supabase.rpc('rate_limit_hit', {
+      p_key: 'otp:global:send',
+      p_window_ms: 60 * 60 * 1000,
+      p_max: max,
+    })
+    if (error || !data || !data[0]) return true
+    return (data[0] as { allowed: boolean }).allowed
+  } catch {
+    return true
+  }
 }
 
 export async function verifyOTP(phone: string, code: string): Promise<{ success: boolean; error?: string }> {

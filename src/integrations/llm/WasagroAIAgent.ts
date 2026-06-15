@@ -23,6 +23,7 @@ import { ResumenSemanalSchema, type ResumenSemanal, type EntradaResumenSemanal }
 import { DescripcionVisualSchema, DiagnosticoV2VKSchema, type DiagnosticoV2VK } from '../../types/dominio/Vision.js'
 import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.js'
 import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
+import { aplicarFiltroConfianza } from './confidenceFilter.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
 import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
@@ -212,7 +213,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     if (pc) genOpts['prompt'] = pc
     const generation = trace.generation(genOpts as any)
     try {
-      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', traceId, generationName: 'stt_post_correction', ...this.#costOpts(costCtx) })
+      const corrected = await this.#adapter.generarTexto(`Transcripción: ${raw}`, { systemPrompt: prompt, responseFormat: 'text', temperature: 0, traceId, generationName: 'stt_post_correction', ...this.#costOpts(costCtx) })
       generation.end({ output: corrected })
       return corrected.trim()
     } catch (err) {
@@ -247,6 +248,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         const textoRaw = await this.#adapter.generarTexto('Analiza esta imagen y descríbela objetivamente según tus instrucciones en JSON estricto.' + errorFeedback, {
           systemPrompt: prompt,
           responseFormat: 'json_object',
+          temperature: 0,
           ...imageOpciones,
           traceId,
           generationName: `vision_describe_attempt_${intentos + 1}`,
@@ -309,6 +311,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       const textoRaw = await this.#adapter.generarTexto(descripcionVisual, {
         systemPrompt: prompt,
         responseFormat: 'json_object',
+        temperature: 0,
         traceId,
         generationName: 'v2vk_diagnose',
         modelClass: 'reasoning',
@@ -499,6 +502,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       const raw = await this.#adapter.generarTexto(userContent, {
         systemPrompt: prompt,
         responseFormat: 'json_object',
+        temperature: 0,
         imageBase64: base64,
         imageMimeType: mimeType,
         traceId,
@@ -760,6 +764,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       const raw = await this.#adapter.generarTexto(userContent, {
         systemPrompt: rawPrompt,
         responseFormat: 'json_object',
+        temperature: 0,
         imageBase64: base64,
         imageMimeType: mimeType,
         traceId,
@@ -881,7 +886,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         FORECAST_SEMANAL:   forecastTexto,
         PLAGAS_POR_NIVEL:   plagasTexto,
       })
-      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', traceId, generationName: 'resumen_semanal', ...this.#costOpts(costCtx) })
+      const texto = await this.#adapter.generarTexto(`Finca: ${entrada.finca_nombre}. Genera el resumen de los eventos de la semana.`, { systemPrompt: prompt, responseFormat: 'json_object', temperature: 0, traceId, generationName: 'resumen_semanal', ...this.#costOpts(costCtx) })
       let json: unknown
       try { json = JSON.parse(texto) } catch {
         generation.end({ output: texto, level: 'ERROR' })
@@ -1182,6 +1187,7 @@ Reglas:
       const textoRaw = await this.#adapter.generarTexto(conversationHistory, {
         systemPrompt,
         responseFormat: 'json_object',
+        temperature: 0,
         traceId,
         generationName: `llamar_react_iter_${iterations}`,
         modelClass: 'reasoning',
@@ -1254,9 +1260,20 @@ Reglas:
           continue
         }
 
+        // Filtro de confianza determinista (P1): anula campos de baja confianza
+        // ANTES de devolver, para que ningún valor "adivinado" se persista.
+        const { evento: eventoFiltrado, camposAnulados } = aplicarFiltroConfianza(parsed.data)
+        if (camposAnulados.length > 0) {
+          trace.event({
+            name: 'confidence_filter_nulled_fields',
+            level: 'WARNING',
+            output: { tipo_evento, campos_anulados: camposAnulados, confidence_score: eventoFiltrado.confidence_score },
+          })
+        }
+
         const latencia = Date.now() - inicio
-        generation.end({ output: parsed.data, metadata: { latencia_ms: latencia, react_iterations: iterations + 1 } })
-        return parsed.data
+        generation.end({ output: eventoFiltrado, metadata: { latencia_ms: latencia, react_iterations: iterations + 1, campos_anulados: camposAnulados.length } })
+        return eventoFiltrado
 
       } catch (err) {
         if (err instanceof LLMError) throw err

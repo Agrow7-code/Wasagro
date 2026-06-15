@@ -1,0 +1,30 @@
+# Caddyfile de ejemplo — TLS + auth frente a LangFuse
+# ---------------------------------------------------------------------------
+# LangFuse se publica solo en loopback (127.0.0.1:3000, ver docker-compose.yml).
+# Este reverse-proxy le pone TLS automático (Let's Encrypt) y una capa de Basic
+# Auth opcional como segunda barrera. Copiar a `Caddyfile`, ajustar el dominio y
+# el hash, y levantar Caddy en el mismo host.
+#
+# Generar el hash de la contraseña:
+#   caddy hash-password --plaintext 'TU_PASSWORD_FUERTE'
+#
+# Recordá fijar en el .env de LangFuse:
+#   LANGFUSE_HOST=https://langfuse.tu-dominio.com   (para cookies Secure)
+
+langfuse.tu-dominio.com {
+    encode zstd gzip
+
+    # Segunda barrera opcional (además del login propio de LangFuse).
+    basicauth {
+        admin <HASH_GENERADO_CON_caddy_hash-password>
+    }
+
+    reverse_proxy 127.0.0.1:3000
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}

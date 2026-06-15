@@ -2,6 +2,7 @@ import type { Job } from 'pg-boss'
 import { saveSDRInteraccion } from '../pipeline/supabaseQueries.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
 import { langfuse } from '../integrations/langfuse.js'
+import { redactPhone } from '../integrations/logRedact.js'
 
 type ChaserJobData = {
  prospecto_id: string
@@ -64,7 +65,7 @@ async function sendBookingReminder(prospecto: Record<string, unknown>, traceId: 
  const mensaje = `${saludo}¿Te quedó alguna duda sobre la demo?${linkPart}`
 
  const sender = crearSenderWhatsApp()
- console.log(`[sdr-chaser] Enviando booking reminder a ${phone} (prospecto_id: ${prospecto['id']})`)
+ console.log(`[sdr-chaser] Enviando booking reminder a ${redactPhone(phone)} (prospecto_id: ${prospecto['id']})`)
  await sender.enviarTexto(phone, mensaje)
 
  await saveSDRInteraccion({
@@ -81,7 +82,7 @@ async function sendBookingReminder(prospecto: Record<string, unknown>, traceId: 
 async function sendGenericReengagement(prospecto: Record<string, unknown>, traceId: string): Promise<void> {
  const sender = crearSenderWhatsApp()
 
- console.log(`[sdr-chaser] Enviando HSM de seguimiento a ${prospecto['phone']} (prospecto_id: ${prospecto['id']})`)
+ console.log(`[sdr-chaser] Enviando HSM de seguimiento a ${redactPhone(prospecto['phone'] as string)} (prospecto_id: ${prospecto['id']})`)
 
  await sender.enviarTemplate(prospecto['phone'] as string, 'sdr_reenganche_24h', 'es')
 

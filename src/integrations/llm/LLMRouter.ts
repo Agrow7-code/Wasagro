@@ -44,12 +44,34 @@ export class LLMRouter implements ILLMAdapter {
     this.#onMetric = options.onMetric
   }
 
+  // El router es tool-capaz si ALGÚN nodo lo es (rutea las tools a ese nodo).
+  get supportsTools(): boolean {
+    return this.#nodes.some(n => n.adapter.supportsTools === true)
+  }
+
   async generarTexto(userContent: string, opciones: LLMGeneracionOpciones): Promise<string> {
     const targetTier = opciones.modelClass ?? 'reasoning'
-    const availableNodes = this.#nodes.filter(n => n.tier === targetTier)
+    let availableNodes = this.#nodes.filter(n => n.tier === targetTier)
 
     if (availableNodes.length === 0) {
       throw new Error(`[LLMRouter] No hay adaptadores configurados para el tier: ${targetTier}`)
+    }
+
+    // Routing por capacidad: si la petición pide tools, SOLO se enruta a adapters
+    // tool-capaces. Servir una petición con tools en un adapter que las ignora
+    // haría que el modelo respondiera sin poder consultar la DB → riesgo de
+    // inventar datos (P1). Si no hay nodo tool-capaz disponible, se falla
+    // explícito (el worker reintenta cuando el nodo vuelva) en vez de degradar
+    // en silencio a una respuesta sin herramientas.
+    const requiereTools = !!(opciones.tools && opciones.tools.length > 0)
+    if (requiereTools) {
+      const toolNodes = availableNodes.filter(n => n.adapter.supportsTools === true)
+      if (toolNodes.length === 0) {
+        const msg = `[LLMRouter] Petición con tools en tier '${targetTier}' sin ningún adapter tool-capaz configurado`
+        this.#onMetric?.({ adapterName: 'none', tier: targetTier, success: false, latencyMs: 0, error: 'no_tool_capable_adapter' })
+        throw new Error(msg)
+      }
+      availableNodes = toolNodes
     }
 
     let lastError: unknown
