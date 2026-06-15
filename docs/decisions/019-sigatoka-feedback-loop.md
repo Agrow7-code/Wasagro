@@ -28,7 +28,7 @@ Cada corrección humana persiste una fila: `evento_id` (FK a `eventos_campo` con
 que leyó el modelo), `valor_corregido` (lo que puso el humano), `fuente`
 (`asesor_ui` | `tomador_whatsapp`), `creado_por`. RLS: solo el service role escribe/lee. El
 insert es best-effort: nunca tumba la corrección del evento (P4 — el error se loggea a
-LangFuse). Migración `20260610000058_add-sigatoka-correcciones.sql`.
+LangFuse). Migración `20260610000061_add-sigatoka-correcciones.sql`.
 
 ### `aplicarCorrecciones` vs `aplicarAclaraciones`
 
