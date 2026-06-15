@@ -133,7 +133,11 @@ BEGIN
 END;
 $$;
 
--- ── 4. Pinear search_path en TODA función SECURITY DEFINER del schema public ─
+-- ── 4. Pinear search_path en las funciones SECURITY DEFINER PROPIAS de public ─
+-- Solo las nuestras: las funciones de extensiones (PostGIS, pgvector, etc.) viven
+-- en public pero NO somos owner — un ALTER sobre ellas falla con 42501 y tumbaría
+-- la migración. Se excluyen por dependencia de extensión y, por las dudas, cada
+-- ALTER va envuelto para omitir con gracia cualquier función de otro owner.
 DO $$
 DECLARE
   r RECORD;
@@ -143,8 +147,16 @@ BEGIN
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND p.prosecdef
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_depend d
+        WHERE d.objid = p.oid AND d.deptype = 'e'  -- pertenece a una extensión
+      )
   LOOP
-    EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', r.sig);
+    BEGIN
+      EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', r.sig);
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE NOTICE 'search_path no pineado en % (sin privilegio de owner, se omite)', r.sig;
+    END;
   END LOOP;
 END $$;
 
