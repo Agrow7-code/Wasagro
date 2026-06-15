@@ -727,7 +727,31 @@ export class WasagroAIAgent implements IWasagroLLM {
       ),
     }
 
-    const camposDudosos = detectarCamposDudosos(merged.resumenColumnas)
+    const camposDudososBase = detectarCamposDudosos(merged.resumenColumnas)
+
+    // Tarea 2 — guard de lectura parcial del bloque DATOS: si la pasada e1
+    // no leyó las 3 columnas, afirmar "todo bajo control" sería P1 violado.
+    // Ejemplo real: 1 columna leída con J=0 cuando H3 tenía 47% EE2.
+    const extrasDudosos: string[] = []
+    if ((merged.resumenColumnas as unknown[]).length < 3) {
+      extrasDudosos.push(`bloque DATOS incompleto (${(merged.resumenColumnas as unknown[]).length} de 3 columnas)`)
+    }
+
+    // Tarea 3 — checksum fallido → cola de revisión. Si tras los reintentos
+    // una tabla sigue sin cuadrar, marcamos los campos específicos para que
+    // el asesor pueda corregirlos desde la UI (D28).
+    if (ver11Final?.cuadraTodo === false) {
+      for (const col of ver11Final.columnas.filter(c => c.cuadra === false)) {
+        extrasDudosos.push(`checksum 11 semanas: ${col.columna}`)
+      }
+    }
+    if (ver00Final?.cuadraTodo === false) {
+      for (const col of ver00Final.columnas.filter(c => c.cuadra === false)) {
+        extrasDudosos.push(`checksum 00 semanas: ${col.columna}`)
+      }
+    }
+
+    const camposDudosos = [...new Set([...camposDudososBase, ...extrasDudosos])]
     const parsed = SigatokaMuestreoSchema.safeParse({
       ...merged,
       requiereValidacion: camposDudosos.length > 0 || merged.confidenceScore < 0.75,

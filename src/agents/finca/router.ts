@@ -2,15 +2,24 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../../integrations/supabase.js'
 import { requireFincaAccessAsync, getUserSupabase } from '../../auth/middleware.js'
-import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos } from '../../pipeline/supabaseQueries.js'
+import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos, guardarCorreccionesSigatoka, type CorreccionSigatokaInsert } from '../../pipeline/supabaseQueries.js'
 import { getSignedUrlEvento } from '../../integrations/supabaseStorage.js'
-import { contarCeldasIlegibles, aplicarAclaraciones } from '../../pipeline/handlers/SigatokaHandler.js'
-import { AclaracionCeldaSchema, type SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
+import { contarCeldasIlegibles, aplicarAclaraciones, aplicarCorrecciones } from '../../pipeline/handlers/SigatokaHandler.js'
+import { langfuse } from '../../integrations/langfuse.js'
+import { AclaracionCeldaSchema, type SigatokaMuestreo, type CeldaMuestra } from '../../types/dominio/SigatokaMuestreo.js'
 
 export const fincaRouter = new Hono()
 
+// Schema de una corrección explícita del asesor (pisa celdas ya leídas, P7).
+const CorreccionSchema = z.object({
+  punto: z.string(),
+  campo: z.string(),
+  valor: z.number().nullable(),
+})
+
 const RevisionPatchSchema = z.object({
   aclaraciones: z.array(AclaracionCeldaSchema).optional(),
+  correcciones: z.array(CorreccionSchema).optional(),
   marcar_revisado: z.boolean().optional(),
 })
 
@@ -165,7 +174,11 @@ fincaRouter.get('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
 })
 
 // PATCH /api/finca/:finca_id/sigatoka/revision/:evento_id — corrige celdas y/o cierra
-// Body: { aclaraciones?: [{punto, campo, valor}], marcar_revisado?: boolean }
+// Body: {
+//   aclaraciones?: [{punto, campo, valor}]  — solo celdas ilegibles (no pisa leídas)
+//   correcciones?: [{punto, campo, valor}]  — acción humana explícita, puede pisar leídas (P7)
+//   marcar_revisado?: boolean               — cierra aunque queden discrepancias
+// }
 fincaRouter.patch('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
   const finca_id = c.req.param('finca_id')
   const evento_id = c.req.param('evento_id')
@@ -180,9 +193,95 @@ fincaRouter.patch('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
   const sigatokaPrev = sigatokaDe(evento.datos_evento)
   if (!sigatokaPrev) return c.json({ error: 'El evento no es un muestreo de Sigatoka' }, 422)
 
-  const actualizado = parsed.data.aclaraciones?.length
-    ? aplicarAclaraciones(sigatokaPrev, parsed.data.aclaraciones)
-    : sigatokaPrev
+  // Capturar valores previos ANTES de aplicar cualquier cambio para el flywheel de feedback.
+  // Un helper inline lee la celda actual del sigatoka sin modificarlo.
+  const leerCeldaPrev = (sig: SigatokaMuestreo, punto: string, campo: string): { valor: number | null; estado: string | null } => {
+    if (punto.startsWith('11sem-') || punto.startsWith('00sem-')) {
+      const es11 = punto.startsWith('11sem-')
+      const m = punto.match(/^\d{2}sem-(\d+)$/)
+      const numFila = m ? parseInt(m[1]!, 10) : -1
+      const filas = es11 ? (sig.plantas11sem ?? []) : (sig.plantas00sem ?? [])
+      const fila = filas.find((f, idx) => (f.fila ?? idx + 1) === numFila)
+      if (!fila) return { valor: null, estado: null }
+      const celda = (fila as unknown as Record<string, CeldaMuestra>)[campo]
+      return { valor: celda?.valor ?? null, estado: celda?.estado ?? null }
+    } else {
+      const p = sig.puntosMuestreo.find(pt => pt.punto === punto)
+      if (!p) return { valor: null, estado: null }
+      const celda = (p as unknown as Record<string, CeldaMuestra>)[campo]
+      return { valor: celda?.valor ?? null, estado: celda?.estado ?? null }
+    }
+  }
+
+  // Obtener usuario autenticado para la trazabilidad de quién corrigió (puede ser null).
+  const authHeader = c.req.header('authorization') ?? ''
+  const userSupabase = getUserSupabase(c)
+  let creadoPor: string | null = null
+  if (userSupabase) {
+    const { data: { user } } = await userSupabase.auth.getUser()
+    creadoPor = user?.id ?? null
+  }
+
+  // Construir registros de feedback ANTES de aplicar cambios (captura estado previo).
+  const feedbackRows: CorreccionSigatokaInsert[] = []
+
+  for (const acl of parsed.data.aclaraciones ?? []) {
+    const prev = leerCeldaPrev(sigatokaPrev, acl.punto, acl.campo)
+    feedbackRows.push({
+      evento_id, finca_id,
+      punto: acl.punto, campo: acl.campo,
+      valor_extraido: prev.valor, estado_extraido: prev.estado,
+      valor_corregido: acl.valor,
+      fuente: 'asesor_ui', creado_por: creadoPor,
+    })
+  }
+  for (const cor of parsed.data.correcciones ?? []) {
+    const prev = leerCeldaPrev(sigatokaPrev, cor.punto, cor.campo)
+    feedbackRows.push({
+      evento_id, finca_id,
+      punto: cor.punto, campo: cor.campo,
+      valor_extraido: prev.valor, estado_extraido: prev.estado,
+      valor_corregido: cor.valor,
+      fuente: 'asesor_ui', creado_por: creadoPor,
+    })
+  }
+
+  // Deduplicar feedbackRows por (punto, campo): si el mismo par viene en
+  // aclaraciones y correcciones, conservar el de correcciones (fue el último en
+  // insertarse al array, ya que el loop de correcciones corre después).
+  // Recorremos en orden inverso y usamos el primer hit encontrado por clave.
+  const feedbackDeduped: CorreccionSigatokaInsert[] = []
+  const vistosFC = new Set<string>()
+  for (let i = feedbackRows.length - 1; i >= 0; i--) {
+    const r = feedbackRows[i]!
+    const clave = `${r.punto}||${r.campo}`
+    if (!vistosFC.has(clave)) {
+      vistosFC.add(clave)
+      feedbackDeduped.unshift(r)
+    }
+  }
+
+  // Persistir feedback — nunca debe tumbar el PATCH (P4).
+  if (feedbackDeduped.length > 0) {
+    guardarCorreccionesSigatoka(feedbackDeduped).catch(err => {
+      const trace = langfuse.trace({ id: `feedback-err-${evento_id}` })
+      trace.event({ name: 'sigatoka_feedback_error', level: 'WARNING', input: { error: String(err), evento_id } })
+    })
+  }
+
+  // Aplicar aclaraciones (solo ilegibles) y después correcciones (puede pisar leídas).
+  let actualizado = sigatokaPrev
+  let correcciones_aplicadas: string[] = []
+  let correcciones_ignoradas: string[] = []
+  if (parsed.data.aclaraciones?.length) {
+    actualizado = aplicarAclaraciones(actualizado, parsed.data.aclaraciones)
+  }
+  if (parsed.data.correcciones?.length) {
+    const resultado = aplicarCorrecciones(actualizado, parsed.data.correcciones)
+    actualizado = resultado.sigatoka
+    correcciones_aplicadas = resultado.aplicadas
+    correcciones_ignoradas = resultado.ignoradas
+  }
 
   const datos = { ...evento.datos_evento, sigatoka: actualizado }
 
@@ -192,7 +291,7 @@ fincaRouter.patch('/:finca_id/sigatoka/revision/:evento_id', async (c) => {
   const status = requiere ? 'requires_review' : 'complete'
   await actualizarEventoDatos(evento_id, datos, status, requiere)
 
-  return c.json({ ok: true, status, ilegibles: contarCeldasIlegibles(actualizado.puntosMuestreo, actualizado.plantas11sem, actualizado.plantas00sem ?? []) })
+  return c.json({ ok: true, status, correcciones_aplicadas, correcciones_ignoradas, ilegibles: contarCeldasIlegibles(actualizado.puntosMuestreo, actualizado.plantas11sem, actualizado.plantas00sem ?? []) })
 })
 
 async function loteToFincaId(lote_id: string): Promise<string | null> {

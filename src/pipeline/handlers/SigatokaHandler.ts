@@ -173,6 +173,26 @@ export function aplicarAclaraciones(sigatoka: SigatokaMuestreo, respuestas: Acla
   const ver11 = sigatoka.totales11sem ? verificarChecksumTabla(filas11, sigatoka.totales11sem) : sigatoka.verificacion11sem ?? null
   const ver00 = sigatoka.totales00sem ? verificarChecksumTabla(filas00, sigatoka.totales00sem) : sigatoka.verificacion00sem ?? null
 
+  const checksumFalla = (ver11 != null && ver11.cuadraTodo === false) || (ver00 != null && ver00.cuadraTodo === false)
+
+  // Reconstruir camposDudosos eliminando las entradas de checksum stale y
+  // regenerando solo las que siguen fallando según la verificación recalculada.
+  // Las entradas que NO son de checksum (ej. "bloque DATOS incompleto", discrepancias
+  // de fórmulas) se conservan intactas — no dependen de las celdas corregidas.
+  const noChecksum = sigatoka.camposDudosos.filter(d => !d.startsWith('checksum '))
+  const checksumActualizados: string[] = []
+  if (ver11?.cuadraTodo === false) {
+    for (const col of ver11.columnas.filter(c => c.cuadra === false)) {
+      checksumActualizados.push(`checksum 11 semanas: ${col.columna}`)
+    }
+  }
+  if (ver00?.cuadraTodo === false) {
+    for (const col of ver00.columnas.filter(c => c.cuadra === false)) {
+      checksumActualizados.push(`checksum 00 semanas: ${col.columna}`)
+    }
+  }
+  const camposDudososActualizados = [...noChecksum, ...checksumActualizados]
+
   return {
     ...sigatoka,
     puntosMuestreo: puntos,
@@ -180,8 +200,105 @@ export function aplicarAclaraciones(sigatoka: SigatokaMuestreo, respuestas: Acla
     plantas00sem: filas00,
     verificacion11sem: ver11,
     verificacion00sem: ver00,
-    requiereValidacion: sigatoka.camposDudosos.length > 0 || sigatoka.confidenceScore < 0.75 || restantes > 0,
+    camposDudosos: camposDudososActualizados,
+    requiereValidacion: camposDudososActualizados.length > 0 || sigatoka.confidenceScore < 0.75 || restantes > 0 || checksumFalla,
   }
+}
+
+// Corrección explícita del asesor desde la UI (P7). A diferencia de aplicarAclaraciones,
+// PUEDE pisar celdas ya leídas — es una acción humana deliberada, no una inferencia.
+// Recalcula verificacion* y requiereValidacion igual que aplicarAclaraciones.
+// El capturador de feedback (guardarCorreccionesSigatoka) debe llamarse desde el router
+// ANTES de invocar esta función para no perder los valores previos.
+export interface CorreccionCelda {
+  punto: string
+  campo: string
+  valor: number | null
+}
+
+export interface ResultadoCorrecciones {
+  sigatoka: SigatokaMuestreo
+  /** Claves "punto.campo" de las correcciones que se aplicaron con éxito. */
+  aplicadas: string[]
+  /** Claves "punto.campo" de las correcciones que se ignoraron (punto/fila inexistente,
+   *  campo desconocido, valor null/no-finito, o celda no encontrada). */
+  ignoradas: string[]
+}
+
+export function aplicarCorrecciones(sigatoka: SigatokaMuestreo, correcciones: CorreccionCelda[]): ResultadoCorrecciones {
+  const puntos: PuntoMuestreoSigatoka[] = sigatoka.puntosMuestreo.map(p => ({ ...p }))
+  const filas11: FilaSemana[] = (sigatoka.plantas11sem ?? []).map(f => ({ ...f }))
+  const filas00: FilaSemana[] = (sigatoka.plantas00sem ?? []).map(f => ({ ...f }))
+
+  const aplicadas: string[] = []
+  const ignoradas: string[] = []
+
+  const pisarEnFilas = (filas: FilaSemana[], punto: string, prefijo: '11sem' | '00sem', campo: string, valor: number): boolean => {
+    const m = punto.match(new RegExp(`^${prefijo}-(\\d+)$`))
+    if (!m) return false
+    const numFila = parseInt(m[1]!, 10)
+    const fila = filas.find((f, idx) => (f.fila ?? idx + 1) === numFila)
+    if (!fila) return false
+    if (!(campo in LABEL_CELDA)) return false
+    ;(fila as unknown as Record<string, CeldaMuestra>)[campo] = { valor, estado: 'leida' }
+    return true
+  }
+
+  for (const c of correcciones) {
+    const key = `${c.punto}.${c.campo}`
+    if (c.valor == null || !Number.isFinite(c.valor)) { ignoradas.push(key); continue }
+    if (!(c.campo in LABEL_CELDA)) { ignoradas.push(key); continue }
+
+    if (c.punto.startsWith('11sem-')) {
+      const ok = pisarEnFilas(filas11, c.punto, '11sem', c.campo, c.valor)
+      if (ok) aplicadas.push(key); else ignoradas.push(key)
+    } else if (c.punto.startsWith('00sem-')) {
+      const ok = pisarEnFilas(filas00, c.punto, '00sem', c.campo, c.valor)
+      if (ok) aplicadas.push(key); else ignoradas.push(key)
+    } else {
+      const p = puntos.find(pt => pt.punto === c.punto)
+      if (!p) { ignoradas.push(key); continue }
+      ;(p as unknown as Record<string, CeldaMuestra>)[c.campo] = { valor: c.valor, estado: 'leida' }
+      aplicadas.push(key)
+    }
+  }
+
+  const restantes = contarCeldasIlegibles(puntos, filas11, filas00).total
+
+  const ver11 = sigatoka.totales11sem ? verificarChecksumTabla(filas11, sigatoka.totales11sem) : sigatoka.verificacion11sem ?? null
+  const ver00 = sigatoka.totales00sem ? verificarChecksumTabla(filas00, sigatoka.totales00sem) : sigatoka.verificacion00sem ?? null
+
+  const checksumFalla = (ver11 != null && ver11.cuadraTodo === false) || (ver00 != null && ver00.cuadraTodo === false)
+
+  // Reconstruir camposDudosos eliminando las entradas de checksum stale y
+  // regenerando solo las que siguen fallando según la verificación recalculada.
+  // Las entradas que NO son de checksum se conservan intactas.
+  const noChecksum = sigatoka.camposDudosos.filter(d => !d.startsWith('checksum '))
+  const checksumActualizados: string[] = []
+  if (ver11?.cuadraTodo === false) {
+    for (const col of ver11.columnas.filter(c => c.cuadra === false)) {
+      checksumActualizados.push(`checksum 11 semanas: ${col.columna}`)
+    }
+  }
+  if (ver00?.cuadraTodo === false) {
+    for (const col of ver00.columnas.filter(c => c.cuadra === false)) {
+      checksumActualizados.push(`checksum 00 semanas: ${col.columna}`)
+    }
+  }
+  const camposDudososActualizados = [...noChecksum, ...checksumActualizados]
+
+  const sigatokaActualizado: SigatokaMuestreo = {
+    ...sigatoka,
+    puntosMuestreo: puntos,
+    plantas11sem: filas11,
+    plantas00sem: filas00,
+    verificacion11sem: ver11,
+    verificacion00sem: ver00,
+    camposDudosos: camposDudososActualizados,
+    requiereValidacion: camposDudososActualizados.length > 0 || sigatoka.confidenceScore < 0.75 || restantes > 0 || checksumFalla,
+  }
+
+  return { sigatoka: sigatokaActualizado, aplicadas, ignoradas }
 }
 
 // ─── Fórmulas y validación cruzada (por columna) ──────────────────────────────
@@ -503,6 +620,15 @@ export function buildDescripcionRaw(data: SigatokaMuestreo): string {
 // PLACEHOLDER — confirmar con criterio agronómico de la exportadora.
 export const UMBRAL_EE2_LEVE = 30
 
+// Etiqueta humana de cada columna de tabla semana para el veredicto de checksum.
+const LABEL_COLUMNA_SEMANA: Record<string, string> = {
+  ht:      'H.T',
+  hVle:    'H+VLE',
+  q5menos: 'Q<5%',
+  q5mas:   'Q>5%',
+  lc:      'LC',
+}
+
 export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: string[]): string {
   const cols = data.resumenColumnas
   const A = cols[0]?.A ?? null
@@ -528,12 +654,17 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
   if (peorM != null && peorM < 9)  alertas.push(`⚠️ Promedio hojas funcionales bajo (${peorM}) — evaluar nutrición`)
 
   // Estado general de un vistazo (para decidir rápido). Usa los mismos umbrales.
-  const estado =
+  // Guard (Tarea 2): con < 3 columnas no se puede afirmar "BAJO CONTROL" — la
+  // pasada e1 solo leyó parte del bloque DATOS. Se bloquea ese estado.
+  const estadoCalculado =
     (peorJ != null && peorJ > 10) || (peorI != null && peorI > 5)
       ? '⚠️ *CRÍTICO*'
       : (peorH != null && peorH > UMBRAL_EE2_LEVE) || (peorM != null && peorM < 9)
         ? '⚠️ *ATENCIÓN*'
         : '✅ *BAJO CONTROL*'
+  const estado = cols.length < 3 && estadoCalculado === '✅ *BAJO CONTROL*'
+    ? '⚠️ *LECTURA INCOMPLETA — revisar*'
+    : estadoCalculado
 
   // Cabecera: identidad de la ficha (lo que esté disponible).
   const meta = [
@@ -550,39 +681,48 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
     return p.g != null ? `${base} g:${p.g}` : base
   }
 
-  // Seguimiento: solo lo que las pasadas hayan leído (null = no disponible → se omite).
-  // Tablas 11/00 semanas: preferir Pr= de la ficha cuando está disponible (calculado
-  // por el supervisor); si no, omitir los promedios (null-safe, P1).
-  const seguimiento: string[] = []
+  // ─── Seguimiento reestructurado (Tarea 1) ────────────────────────────────────
+  // Cada tabla tiene su propio sub-bloque: título + veredicto inline + promedios
+  // indentados. Erradicadas/EF van en línea separada como "Finca:".
+  const seguimientoLineas: string[] = []
 
   const n11sem = (data.plantas11sem ?? []).length
   const n00sem = (data.plantas00sem ?? []).length
 
-  if (n11sem > 0) {
-    const pr = data.promedios11sem
-    const resumen11 = pr
-      ? [
-          pr.ht   != null ? `H.T ${pr.ht}`   : null,
-          pr.hVle != null ? `H+VLE ${pr.hVle}` : null,
-          pr.lc   != null ? `LC ${pr.lc}`     : null,
-        ].filter(Boolean).join(' · ')
-      : null
-    seguimiento.push(`• 11 semanas (${n11sem})${resumen11 ? `: ${resumen11}` : ''}`)
-  }
-  if (n00sem > 0) {
-    const pr = data.promedios00sem
-    const resumen00 = pr
-      ? [
-          pr.ht   != null ? `H.T ${pr.ht}`   : null,
-          pr.hVle != null ? `H+VLE ${pr.hVle}` : null,
-          pr.lc   != null ? `LC ${pr.lc}`     : null,
-        ].filter(Boolean).join(' · ')
-      : null
-    seguimiento.push(`• 00 semanas (${n00sem})${resumen00 ? `: ${resumen00}` : ''}`)
+  const promediosSemana = (pr: typeof data.promedios11sem): string | null => {
+    if (!pr) return null
+    return [
+      pr.ht   != null ? `H.T ${pr.ht}`   : null,
+      pr.hVle != null ? `H+VLE ${pr.hVle}` : null,
+      pr.lc   != null ? `LC ${pr.lc}`     : null,
+    ].filter(Boolean).join(' · ') || null
   }
 
-  if (data.erradicadasBsv != null) seguimiento.push(`• Erradicadas por BSV: ${data.erradicadasBsv}`)
-  if (data.pEfFinca != null) seguimiento.push(`• Índice EF finca: ${data.pEfFinca}`)
+  const veredictoInline = (ver: typeof data.verificacion11sem): string => {
+    if (ver == null) return ''
+    if (ver.cuadraTodo === true)  return ' ✅'
+    if (ver.cuadraTodo === false) return ' ⚠️'
+    return ''
+  }
+
+  if (n11sem > 0) {
+    const vi = veredictoInline(data.verificacion11sem)
+    seguimientoLineas.push(`*11 semanas* — ${n11sem} plantas${vi}`)
+    const pr = promediosSemana(data.promedios11sem)
+    if (pr) seguimientoLineas.push(`  ${pr}`)
+  }
+  if (n00sem > 0) {
+    const vi = veredictoInline(data.verificacion00sem)
+    seguimientoLineas.push(`*00 semanas* — ${n00sem} plantas${vi}`)
+    const pr = promediosSemana(data.promedios00sem)
+    if (pr) seguimientoLineas.push(`  ${pr}`)
+  }
+
+  const fincaItems = [
+    data.erradicadasBsv != null ? `Erradicadas BSV ${data.erradicadasBsv}` : null,
+    data.pEfFinca       != null ? `Índice EF ${data.pEfFinca}`             : null,
+  ].filter(Boolean)
+  if (fincaItems.length > 0) seguimientoLineas.push(`*Finca:* ${fincaItems.join(' · ')}`)
 
   let msg =
 `✅ *Muestreo Sigatoka — ${data.nombreFinca ?? 'finca'}*
@@ -597,7 +737,7 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
 • Hoja libre de estría (prom): ${f(K)}
 • Hojas funcionales (mín): ${f(peorM)}`
 
-  if (seguimiento.length > 0) msg += `\n\n🌱 *Seguimiento*\n${seguimiento.join('\n')}`
+  if (seguimientoLineas.length > 0) msg += `\n\n🌱 *Seguimiento*\n${seguimientoLineas.join('\n')}`
 
   // Plagas foliares: solo si hay algún valor real (no mostrar 0/null — esa zona
   // de la ficha aún se lee mal y unos ceros falsos confunden al cliente).
@@ -606,16 +746,29 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
     msg += `\n\n🐛 *Plagas foliares*\n${plagaLine('Ceramida', pl.ceramida)}\n${plagaLine('Sibine', pl.sibine)}`
   }
 
-  // Veredicto de checksum: si la tabla 11sem fue verificada, mostrar el resultado.
-  // Solo se muestra si hay verificacion (null o ausente = no se pudo verificar, silencio).
-  const ver11 = data.verificacion11sem
-  if (ver11 != null) {
-    if (ver11.cuadraTodo === true) {
+  // ─── Veredicto de checksum (Tarea 1 — reemplaza el bloque anterior) ──────────
+  // Una línea de detalle POR TABLA que falla, con nombre legible, etiqueta humana
+  // de columna (LABEL_COLUMNA_SEMANA) y los números accionables (sumaFilas/totalFicha).
+  // Si TODAS las tablas verificadas cuadran → una sola línea ✅ global.
+  type VerEntry = { nombre: string; ver: VerificacionTabla }
+  const verificationes: VerEntry[] = []
+  if (data.verificacion11sem != null) verificationes.push({ nombre: '11 semanas', ver: data.verificacion11sem })
+  if (data.verificacion00sem != null) verificationes.push({ nombre: '00 semanas', ver: data.verificacion00sem })
+
+  if (verificationes.length > 0) {
+    const fallidas = verificationes.filter(x => x.ver.cuadraTodo === false)
+    if (fallidas.length === 0) {
+      // Todas las tablas verificadas cuadran
       msg += '\n\n✅ Cuadra con los totales de la ficha'
-    } else if (ver11.cuadraTodo === false) {
-      const noOK = ver11.columnas.filter(c => c.cuadra === false).map(c => c.columna)
-      const n = noOK.length
-      msg += `\n\n⚠️ ${n} columna${n > 1 ? 's' : ''} no cuadran con la ficha (revisar): ${noOK.join(', ')}`
+    } else {
+      const lineas = fallidas.flatMap(({ nombre, ver }) => {
+        const colsNoOK = ver.columnas.filter(c => c.cuadra === false)
+        return colsNoOK.map(c => {
+          const etiqueta = LABEL_COLUMNA_SEMANA[c.columna] ?? c.columna
+          return `⚠️ ${nombre}: ${etiqueta} no cuadra (suma ${c.sumaFilas} · ficha ${c.totalFicha})`
+        })
+      })
+      msg += '\n\n' + lineas.join('\n')
     }
   }
 

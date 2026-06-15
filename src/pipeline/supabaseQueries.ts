@@ -259,6 +259,31 @@ export async function getEventoSigatokaById(
   return (data ?? null) as EventoSigatokaDetalle | null
 }
 
+// ─── Feedback loop: correcciones de celdas Sigatoka ──────────────────────────
+// Captura el par extraído-vs-corregido para el flywheel de evaluación de prompts (CR5).
+// Nunca debe tumbar el flujo que la invoca (P4) — el caller captura excepciones.
+
+export interface CorreccionSigatokaInsert {
+  evento_id: string
+  finca_id: string
+  punto: string
+  campo: string
+  valor_extraido: number | null
+  estado_extraido: string | null
+  valor_corregido: number | null
+  fuente: 'asesor_ui' | 'tomador_whatsapp'
+  creado_por?: string | null
+}
+
+export async function guardarCorreccionesSigatoka(
+  correcciones: CorreccionSigatokaInsert[],
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  if (correcciones.length === 0) return
+  const { error } = await client.from('sigatoka_correcciones').insert(correcciones)
+  if (error) throw error
+}
+
 export interface ProspectoInsert {
   phone: string
   tipo_contacto: 'trabajador' | 'decision_maker' | 'otro'

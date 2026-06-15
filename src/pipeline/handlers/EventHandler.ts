@@ -18,6 +18,7 @@ import {
   getPendingAgricultoresByFinca,
   approveAgricultor,
   guardarLoteIntenciones,
+  guardarCorreccionesSigatoka,
   type IntencionPendiente,
 } from '../supabaseQueries.js'
 import { transcribirAudio } from '../sttService.js'
@@ -470,6 +471,45 @@ export async function handleEvento(
       costCtx,
     )
     const sigatokaPrev = datos['sigatoka'] as SigatokaMuestreo
+
+    // Feedback loop (CR5): persistir las respuestas del tomador como correcciones
+    // con fuente 'tomador_whatsapp'. valor_extraido=null/estado=ilegible porque solo
+    // el tomador puede clarificar celdas que el modelo no pudo leer. Nunca tumba el flujo (P4).
+    // Usar el finca_id real del usuario autenticado que envía la aclaración.
+    // Si no está disponible, no insertar (mejor ausencia que contaminar el flywheel).
+    const fincaIdReal = usuario.finca_id ?? null
+    const feedbackRows = fincaIdReal
+      ? respuestas
+          .filter(r => r.valor != null)
+          .map(r => ({
+            evento_id: eventoId,
+            finca_id: fincaIdReal,
+            punto: r.punto,
+            campo: r.campo,
+            valor_extraido: null as number | null,
+            estado_extraido: 'ilegible',
+            valor_corregido: r.valor,
+            fuente: 'tomador_whatsapp' as const,
+            creado_por: null,
+          }))
+      : []
+    if (!fincaIdReal) {
+      langfuse.trace({ id: traceId }).event({
+        name: 'sigatoka_feedback_sin_finca',
+        level: 'WARNING',
+        input: { evento_id: eventoId, usuario_id: usuario.id },
+      })
+    }
+    if (feedbackRows.length > 0) {
+      guardarCorreccionesSigatoka(feedbackRows).catch(err => {
+        langfuse.trace({ id: traceId }).event({
+          name: 'sigatoka_feedback_error',
+          level: 'ERROR',
+          input: { error: String(err) },
+        })
+      })
+    }
+
     const actualizado = aplicarAclaraciones(sigatokaPrev, respuestas)
     datos['sigatoka'] = actualizado
 
