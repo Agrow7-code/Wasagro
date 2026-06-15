@@ -624,14 +624,45 @@ export class WasagroAIAgent implements IWasagroLLM {
     const totales11 = t11.totales ?? null
     const totales00 = t00.totales ?? null
 
-    const reExtaerConHint = async (promptIdx: number, totales: any, filas: any[], prefijo: string): Promise<{ filas: any[]; totales: any; promedios: any } | null> => {
+    // Filas con al menos un dato leído (no todas vacías): mide cobertura real para
+    // desempatar un reintento que no mejora el checksum pero sí recuperó filas.
+    const filasConDato = (fs: any[]): number =>
+      fs.filter(f => ['ht', 'hVle', 'q5menos', 'q5mas', 'lc'].some(k => f?.[k]?.valor != null)).length
+
+    const reExtaerConHint = async (promptIdx: number, totales: any, promedios: any, filas: any[], prefijo: string): Promise<{ filas: any[]; totales: any; promedios: any } | null> => {
       // Construir hint por columna que no cuadra
       const ver = verificarChecksumTabla(filas, totales)
       const noOK = ver.columnas.filter(c => c.cuadra === false)
       if (noOK.length === 0) return null // ya cuadra, no re-extraer
 
-      const hints = noOK.map(c => `columna ${c.columna}: tu lectura suma ${c.sumaFilas}, pero la ficha dice T=${c.totalFicha}`).join('; ')
-      const hint = `VERIFICACIÓN: ${hints}. Releé la tabla ${prefijo} fila por fila, sin saltarte ninguna ni duplicar.`
+      // Diagnóstico del error por columna: suma < total ⇒ faltan filas; suma > total
+      // ⇒ se duplicaron/leyeron de más; ≈ ⇒ valores mal leídos. Saber la dirección
+      // hace el reintento mucho más útil que un "no cuadra" genérico.
+      const hints = noOK.map(c => {
+        const t = c.totalFicha ?? 0
+        const dir = c.sumaFilas < t ? 'te FALTAN filas (tu suma es MENOR que el total)'
+                  : c.sumaFilas > t ? 'leíste filas de más o duplicaste (tu suma es MAYOR)'
+                  : 'hay valores mal leídos'
+        return `columna ${c.columna}: tu suma ${c.sumaFilas} vs ficha T=${c.totalFicha} → ${dir}`
+      }).join('; ')
+
+      // Estimar cuántas filas debería tener la tabla: total ÷ promedio (Pr) de la
+      // ficha, tomando el máximo entre columnas. Si leímos menos, son filas tenues
+      // que se saltaron. Solo lo afirmamos en un rango razonable (no si Pr da algo
+      // disparatado por mal-lectura del promedio).
+      const filasLeidas = filas.length
+      let filasEsperadas = 0
+      for (const c of noOK) {
+        const pr = promedios?.[c.columna]
+        if (typeof pr === 'number' && pr > 0 && c.totalFicha != null) {
+          filasEsperadas = Math.max(filasEsperadas, Math.round(c.totalFicha / pr))
+        }
+      }
+      const conteo = filasEsperadas > filasLeidas && filasEsperadas <= filasLeidas + 12
+        ? ` Esta tabla tiene ~${filasEsperadas} filas (total ÷ promedio Pr) pero leíste solo ${filasLeidas}: te faltan ~${filasEsperadas - filasLeidas} filas, probablemente tenues o apretadas. Encontralas y leélas TODAS, de arriba a abajo.`
+        : ''
+
+      const hint = `VERIFICACIÓN: ${hints}.${conteo} Releé la tabla ${prefijo} fila por fila, sin inventar ni duplicar valores.`
       const extra = PASADAS[promptIdx]!
       const reRaw = await conCap(this.#extraerParteSigatoka(extra[0], `${extra[1]}\n\n${hint}`, base64, mimeType, traceId, costCtx))
       if (!reRaw) return null
@@ -648,12 +679,12 @@ export class WasagroAIAgent implements IWasagroLLM {
       const ver11 = verificarChecksumTabla(filas11, totales11)
       if (ver11.cuadraTodo === false) {
         trace.event({ name: 'sigatoka_checksum_fallo_11sem', level: 'WARNING', input: { noOK: ver11.columnas.filter(c => c.cuadra === false).map(c => c.columna) } })
-        const retry = await reExtaerConHint(1, totales11, filas11, '11 semanas')
+        const retry = await reExtaerConHint(1, totales11, t11.promedios ?? null, filas11, '11 semanas')
         if (retry) {
           const verRetry = verificarChecksumTabla(retry.filas, totales11)
           const original = ver11.columnas.filter(c => c.cuadra === true).length
           const nuevo = verRetry.columnas.filter(c => c.cuadra === true).length
-          if (nuevo >= original) {
+          if (nuevo > original || (nuevo === original && filasConDato(retry.filas) > filasConDato(filas11))) {
             filas11Final = retry.filas
             totales11Final = retry.totales ?? totales11Final
             promedios11Final = retry.promedios ?? promedios11Final
@@ -675,12 +706,12 @@ export class WasagroAIAgent implements IWasagroLLM {
       const ver00 = verificarChecksumTabla(filas00, totales00)
       if (ver00.cuadraTodo === false) {
         trace.event({ name: 'sigatoka_checksum_fallo_00sem', level: 'WARNING', input: { noOK: ver00.columnas.filter(c => c.cuadra === false).map(c => c.columna) } })
-        const retry = await reExtaerConHint(2, totales00, filas00, '00 semanas')
+        const retry = await reExtaerConHint(2, totales00, t00.promedios ?? null, filas00, '00 semanas')
         if (retry) {
           const verRetry = verificarChecksumTabla(retry.filas, totales00)
           const original = ver00.columnas.filter(c => c.cuadra === true).length
           const nuevo = verRetry.columnas.filter(c => c.cuadra === true).length
-          if (nuevo >= original) {
+          if (nuevo > original || (nuevo === original && filasConDato(retry.filas) > filasConDato(filas00))) {
             filas00Final = retry.filas
             totales00Final = retry.totales ?? totales00Final
             promedios00Final = retry.promedios ?? promedios00Final
