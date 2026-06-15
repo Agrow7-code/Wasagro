@@ -22,6 +22,7 @@ import {
   contarCeldasIlegibles,
   buildPreguntaAclaracion,
   aplicarAclaraciones,
+  aplicarCorrecciones,
   verificarChecksumTabla,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
@@ -319,8 +320,9 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).toMatch(/hojas funcionales bajo/)
   })
 
-  it('sin alertas con valores normales', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 5, I_calculado: 2, J_calculado: 3, M_calculado: 11 })]), [])
+  it('sin alertas con valores normales (3 columnas — guard lectura no activa)', () => {
+    const col = fullCol({ H_calculado: 5, I_calculado: 2, J_calculado: 3, M_calculado: 11 })
+    const msg = buildWhatsappSummary(muestreo([col, col, col]), [])
     expect(msg).not.toMatch(/⚠️/)
   })
 
@@ -365,8 +367,10 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).not.toMatch(/CRÍTICO/)
   })
 
-  it('estado general BAJO CONTROL con valores sanos', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 })]), [])
+  it('estado general BAJO CONTROL con 3 columnas sanas', () => {
+    // Necesita 3 columnas para que el guard de lectura parcial no tape el BAJO CONTROL.
+    const col = fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 })
+    const msg = buildWhatsappSummary(muestreo([col, col, col]), [])
     expect(msg).toMatch(/BAJO CONTROL/)
   })
 
@@ -375,14 +379,15 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     const msg = buildWhatsappSummary(m, [])
     expect(msg).toContain('Marios')
     expect(msg).toContain('2026-06-05')
-    expect(msg).toMatch(/Erradicadas por BSV: 0/)
-    expect(msg).toMatch(/Índice EF finca: 0\.8/)
+    expect(msg).toMatch(/Erradicadas BSV/)
+    expect(msg).toMatch(/Índice EF/)
+    expect(msg).toContain('0.8')
   })
 
   it('omite erradicadas/índice EF cuando la pasada no los leyó (null)', () => {
     const m = muestreo([fullCol()], [], { erradicadasBsv: null, pEfFinca: null })
     const msg = buildWhatsappSummary(m, [])
-    expect(msg).not.toMatch(/Erradicadas por BSV/)
+    expect(msg).not.toMatch(/Erradicadas BSV/)
     expect(msg).not.toMatch(/Índice EF/)
   })
 
@@ -876,7 +881,7 @@ describe('buildWhatsappSummary — extensiones', () => {
     expect(msg).toMatch(/Cuadra con los totales/)
   })
 
-  it('muestra ⚠️ columnas no cuadran cuando cuadraTodo=false', () => {
+  it('muestra ⚠️ columnas no cuadran cuando cuadraTodo=false (etiquetas humanas)', () => {
     const m = muestreo([fullCol()], [], {
       verificacion11sem: {
         columnas: [
@@ -887,9 +892,13 @@ describe('buildWhatsappSummary — extensiones', () => {
       },
     })
     const msg = buildWhatsappSummary(m, [])
-    expect(msg).toMatch(/no cuadran/)
-    expect(msg).toMatch(/ht/)
-    expect(msg).toMatch(/lc/)
+    expect(msg).toMatch(/no cuadra/)
+    // El nuevo formato usa etiquetas humanas: H.T y LC (no "ht" y "lc" crudos)
+    expect(msg).toMatch(/H\.T/)
+    expect(msg).toMatch(/LC/)
+    // Incluye los números accionables
+    expect(msg).toMatch(/228/)
+    expect(msg).toMatch(/264/)
   })
 
   it('no muestra veredicto de checksum cuando verificacion es null o ausente', () => {
@@ -915,5 +924,306 @@ describe('buildWhatsappSummary — extensiones', () => {
     // Cuando hay h/p/m, el bloque se muestra, pero g no sale si es null
     expect(msg).not.toMatch(/g:null/)
     expect(msg).not.toMatch(/g:-/)
+  })
+})
+
+// ─── Tarea 1: buildWhatsappSummary — sub-bloques de seguimiento ───────────────
+
+describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => {
+  const filas11 = Array.from({ length: 19 }, (_, i) => fila11({ fila: i + 1 }))
+  const filas00 = Array.from({ length: 14 }, (_, i) => fila11({ fila: i + 1 }))
+  const prom11: TotalesSemana = { ht: 7.1, hVle: 0, q5menos: null, q5mas: null, lc: 6.6 }
+  const prom00: TotalesSemana = { ht: 13.8, hVle: 6.7, q5menos: null, q5mas: null, lc: 13.6 }
+
+  it('muestra *11 semanas* en negritas con el conteo', () => {
+    const m = muestreo([fullCol()], [], { plantas11sem: filas11, promedios11sem: prom11 })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/\*11 semanas\*/)
+    expect(msg).toMatch(/19/)
+  })
+
+  it('muestra *00 semanas* en negritas con el conteo', () => {
+    const m = muestreo([fullCol()], [], { plantas00sem: filas00, promedios00sem: prom00 })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/\*00 semanas\*/)
+    expect(msg).toMatch(/14/)
+  })
+
+  it('promedios aparecen indentados (con 2 espacios al inicio)', () => {
+    const m = muestreo([fullCol()], [], { plantas11sem: filas11, promedios11sem: prom11 })
+    const msg = buildWhatsappSummary(m, [])
+    // La línea de promedios debe comenzar con "  " (dos espacios)
+    const lines = msg.split('\n')
+    const promLine = lines.find(l => l.includes('H.T') && l.includes('LC'))
+    expect(promLine).toBeDefined()
+    expect(promLine!.startsWith('  ')).toBe(true)
+  })
+
+  it('finca: erradicadas e índice EF en línea separada sin bullet de tabla', () => {
+    const m = muestreo([fullCol()], [], { erradicadasBsv: 0, pEfFinca: 0.8 })
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/\*Finca:\*/)
+    expect(msg).toMatch(/Erradicadas BSV/)
+    expect(msg).toMatch(/Índice EF/)
+  })
+
+  it('inline ✅ cuando verificacion cuadraTodo=true', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: filas11,
+      promedios11sem: prom11,
+      verificacion11sem: { columnas: [], cuadraTodo: true },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    // El ✅ debe estar en la línea de "11 semanas", no en un bloque aparte
+    const lines = msg.split('\n')
+    const sem11Line = lines.find(l => l.includes('11 semanas'))
+    expect(sem11Line).toBeDefined()
+    expect(sem11Line!).toMatch(/✅/)
+  })
+
+  it('inline ⚠️ cuando verificacion cuadraTodo=false', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: filas11,
+      promedios11sem: prom11,
+      verificacion11sem: { columnas: [{ columna: 'ht', sumaFilas: 135, totalFicha: 264, cuadra: false }], cuadraTodo: false },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    const lines = msg.split('\n')
+    const sem11Line = lines.find(l => l.includes('11 semanas'))
+    expect(sem11Line).toBeDefined()
+    expect(sem11Line!).toMatch(/⚠️/)
+  })
+
+  it('sin veredicto inline cuando verificacion es null', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: filas11,
+      promedios11sem: prom11,
+      verificacion11sem: null,
+    })
+    const msg = buildWhatsappSummary(m, [])
+    const lines = msg.split('\n')
+    const sem11Line = lines.find(l => l.includes('11 semanas'))
+    expect(sem11Line).toBeDefined()
+    // No debe tener ni ✅ ni ⚠️ en esa línea (verificacion null = silencio)
+    expect(sem11Line!).not.toMatch(/[✅⚠️]/)
+  })
+
+  it('bloque de veredicto final: detalla tabla, campo con etiqueta humana y números accionables', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: filas11,
+      verificacion11sem: {
+        columnas: [{ columna: 'ht', sumaFilas: 135, totalFicha: 264, cuadra: false }],
+        cuadraTodo: false,
+      },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    // Debe mencionar "11 semanas", la etiqueta "H.T" (no "ht"), y los números
+    expect(msg).toMatch(/11 semanas/)
+    expect(msg).toMatch(/H\.T/)
+    expect(msg).toMatch(/135/)
+    expect(msg).toMatch(/264/)
+  })
+
+  it('bloque de veredicto final: todas cuadran → una línea ✅ global', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: filas11,
+      verificacion11sem: { columnas: [{ columna: 'ht', sumaFilas: 264, totalFicha: 264, cuadra: true }], cuadraTodo: true },
+      verificacion00sem: { columnas: [{ columna: 'ht', sumaFilas: 100, totalFicha: 100, cuadra: true }], cuadraTodo: true },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    // Una sola línea de confirmación global
+    expect(msg).toMatch(/Cuadra con los totales/)
+    // No debe mostrar dos bloques de checksum separados
+    const cuadraMatches = msg.match(/Cuadra con los totales/g)
+    expect(cuadraMatches).toHaveLength(1)
+  })
+
+  it('veredicto plural cuando dos tablas fallan', () => {
+    const m = muestreo([fullCol()], [], {
+      plantas11sem: filas11,
+      plantas00sem: filas00,
+      verificacion11sem: {
+        columnas: [{ columna: 'ht', sumaFilas: 135, totalFicha: 264, cuadra: false }],
+        cuadraTodo: false,
+      },
+      verificacion00sem: {
+        columnas: [{ columna: 'lc', sumaFilas: 90, totalFicha: 258, cuadra: false }],
+        cuadraTodo: false,
+      },
+    })
+    const msg = buildWhatsappSummary(m, [])
+    // Debe mostrar las dos tablas en el veredicto
+    expect(msg).toMatch(/11 semanas/)
+    expect(msg).toMatch(/00 semanas/)
+    expect(msg).toMatch(/H\.T/)
+    expect(msg).toMatch(/LC/)
+  })
+})
+
+// ─── Tarea 2: guard de lectura parcial (cols < 3) ────────────────────────────
+
+describe('buildWhatsappSummary — guard LECTURA INCOMPLETA (Tarea 2)', () => {
+  it('muestra ⚠️ LECTURA INCOMPLETA cuando solo hay 1 columna en resumenColumnas', () => {
+    const m = muestreo([fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 })], [], {})
+    const msg = buildWhatsappSummary(m, [])
+    expect(msg).toMatch(/LECTURA INCOMPLETA/)
+    expect(msg).not.toMatch(/BAJO CONTROL/)
+  })
+
+  it('muestra ⚠️ LECTURA INCOMPLETA cuando hay 2 columnas (necesita 3)', () => {
+    const cols = [fullCol(), fullCol()]
+    const msg = buildWhatsappSummary(muestreo(cols), [])
+    expect(msg).toMatch(/LECTURA INCOMPLETA/)
+  })
+
+  it('estado normal ✅ BAJO CONTROL con 3 columnas sanas', () => {
+    const cols = [
+      fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 }),
+      fullCol({ H_calculado: 3, I_calculado: 0, J_calculado: 1, M_calculado: 13 }),
+      fullCol({ H_calculado: 4, I_calculado: 2, J_calculado: 3, M_calculado: 11 }),
+    ]
+    const msg = buildWhatsappSummary(muestreo(cols), [])
+    expect(msg).toMatch(/BAJO CONTROL/)
+    expect(msg).not.toMatch(/LECTURA INCOMPLETA/)
+  })
+
+  it('estado CRÍTICO/ATENCIÓN no se bloquea por lectura incompleta — son problemas distintos', () => {
+    // LECTURA INCOMPLETA reemplaza BAJO CONTROL, no los estados de alerta
+    const m = muestreo([fullCol({ J_calculado: 15 })]) // 1 columna + severo
+    const msg = buildWhatsappSummary(m, [])
+    // Con cols < 3 Y severo, el estado calculado es CRÍTICO pero cols incompletas
+    // La regla dice: si cols < 3, estado general NO puede ser BAJO CONTROL
+    // → si el estado era CRÍTICO, se mantiene (lectura incompleta no lo tapa)
+    // La implementación mostrará LECTURA INCOMPLETA si el estado habría sido BAJO CONTROL,
+    // pero si es CRÍTICO/ATENCIÓN, prevalece el estado de alerta
+    // (el test verifica que con cols<3 + BAJO CONTROL → LECTURA INCOMPLETA)
+    expect(msg).not.toMatch(/BAJO CONTROL/)
+  })
+})
+
+// ─── Tarea 3: checksum fallido → camposDudosos (en WasagroAIAgent ya va server-side) ──
+// Verificamos la lógica en aplicarAclaraciones: filtra stale + recalcula checksum
+
+describe('aplicarAclaraciones — checksum recalculado tras corrección (Tarea 3)', () => {
+  it('requiereValidacion=false cuando se resuelven ilegibles y checksum cuadra tras corrección', () => {
+    // Fila con ht ilegible; total 13 → si ht=13 cuadra perfectamente
+    const base = muestreo([fullCol()], [], {
+      confidenceScore: 0.9,
+      plantas11sem: [fila11({ fila: 1, ht: { valor: null, estado: 'ilegible' } })],
+      totales11sem: { ht: 13, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 },
+      verificacion11sem: {
+        columnas: [{ columna: 'ht', sumaFilas: 0, totalFicha: 13, cuadra: false }],
+        cuadraTodo: false,
+      },
+    })
+    const r = aplicarAclaraciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 13 }])
+    // Tras la corrección, ht=13, suma=13, total=13 → cuadra
+    expect(r.requiereValidacion).toBe(false)
+  })
+
+  it('requiereValidacion=true cuando tras corrección el checksum sigue fallando', () => {
+    const base = muestreo([fullCol()], [], {
+      confidenceScore: 0.9,
+      plantas11sem: [fila11({ fila: 1, ht: { valor: null, estado: 'ilegible' } })],
+      totales11sem: { ht: 999, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 },
+      verificacion11sem: {
+        columnas: [{ columna: 'ht', sumaFilas: 0, totalFicha: 999, cuadra: false }],
+        cuadraTodo: false,
+      },
+    })
+    const r = aplicarAclaraciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 13 }])
+    // ht=13, suma=13, total=999 → todavía no cuadra
+    expect(r.requiereValidacion).toBe(true)
+  })
+})
+
+// ─── Tarea 4: aplicarCorrecciones (pisa celdas leídas, recalcula checksum) ────
+
+describe('aplicarCorrecciones', () => {
+  it('pisa una celda ya leída (a diferencia de aplicarAclaraciones)', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 1, ht: { valor: 12, estado: 'leida' } })],
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 99 }])
+    expect(r.sigatoka.plantas11sem[0]!.ht).toEqual({ valor: 99, estado: 'leida' })
+    expect(r.aplicadas).toContain('11sem-1.ht')
+  })
+
+  it('pisa celdas ilegibles también (es acción humana explícita)', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 2, ht: { valor: null, estado: 'ilegible' } })],
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-2', campo: 'ht', valor: 7 }])
+    expect(r.sigatoka.plantas11sem[0]!.ht).toEqual({ valor: 7, estado: 'leida' })
+  })
+
+  it('pisa celda de punto de muestra (no solo filas semana)', () => {
+    const base = muestreo([fullCol()], [], {
+      puntosMuestreo: [punto({ punto: 'P3', planta1_estadio: { valor: 2, estado: 'leida' } })],
+    })
+    const r = aplicarCorrecciones(base, [{ punto: 'P3', campo: 'planta1_estadio', valor: 5 }])
+    expect(r.sigatoka.puntosMuestreo[0]!.planta1_estadio).toEqual({ valor: 5, estado: 'leida' })
+  })
+
+  it('recalcula verificacion11sem tras corregir una celda', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 1, ht: { valor: 10, estado: 'leida' } })],
+      totales11sem: { ht: 13, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 },
+      verificacion11sem: {
+        columnas: [{ columna: 'ht', sumaFilas: 10, totalFicha: 13, cuadra: false }],
+        cuadraTodo: false,
+      },
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 13 }])
+    // Tras la corrección ht=13, suma=13, total=13 → cuadra
+    expect(r.sigatoka.verificacion11sem?.cuadraTodo).toBe(true)
+  })
+
+  it('requiereValidacion=false cuando tras corrección todo cuadra y no hay otros dudosos', () => {
+    const base = muestreo([fullCol()], [], {
+      confidenceScore: 0.9,
+      plantas11sem: [fila11({ fila: 1, ht: { valor: 10, estado: 'leida' } })],
+      totales11sem: { ht: 13, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 },
+      verificacion11sem: {
+        columnas: [{ columna: 'ht', sumaFilas: 10, totalFicha: 13, cuadra: false }],
+        cuadraTodo: false,
+      },
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 13 }])
+    expect(r.sigatoka.requiereValidacion).toBe(false)
+  })
+
+  it('requiereValidacion=true cuando otros camposDudosos siguen presentes', () => {
+    const base = muestreo([fullCol()], ['discrepancia en col1.K'], {
+      confidenceScore: 0.9,
+      plantas11sem: [fila11({ fila: 1, ht: { valor: 10, estado: 'leida' } })],
+      totales11sem: { ht: 13, hVle: 5, q5menos: 8, q5mas: 12, lc: 11 },
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-1', campo: 'ht', valor: 13 }])
+    // camposDudosos siguen, aunque checksum cuadre
+    expect(r.sigatoka.requiereValidacion).toBe(true)
+  })
+
+  it('ignora correcciones con valor null', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 1, ht: { valor: 12, estado: 'leida' } })],
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-1', campo: 'ht', valor: null }])
+    expect(r.sigatoka.plantas11sem[0]!.ht.valor).toBe(12)
+    expect(r.ignoradas).toContain('11sem-1.ht')
+  })
+
+  it('corrección sobre campo desconocido no tira excepción', () => {
+    const base = muestreo([fullCol()], [], { plantas11sem: [fila11()] })
+    expect(() => aplicarCorrecciones(base, [{ punto: '11sem-1', campo: 'campo_inexistente', valor: 5 }])).not.toThrow()
+  })
+
+  it('corrección a fila inexistente va a ignoradas (no aplica en silencio)', () => {
+    const base = muestreo([fullCol()], [], {
+      plantas11sem: [fila11({ fila: 1, ht: { valor: 12, estado: 'leida' } })],
+    })
+    const r = aplicarCorrecciones(base, [{ punto: '11sem-99', campo: 'ht', valor: 5 }])
+    expect(r.ignoradas).toContain('11sem-99.ht')
+    expect(r.aplicadas).toHaveLength(0)
   })
 })

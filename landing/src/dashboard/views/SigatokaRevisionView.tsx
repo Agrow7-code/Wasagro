@@ -6,8 +6,10 @@ import { useAuth } from '../../auth/useAuth'
 // - Lista: cola de eventos requires_review de la finca.
 // - Detalle: ficha completa digitalizada + imagen original en paralelo.
 //   Muestra TODOS los bloques: encabezado, matriz de puntos, tablas 11/00 sem,
-//   DATOS A–M, plagas foliares, seguimiento. Celdas ilegibles resaltadas en
-//   ámbar, editables en línea (extiende el flujo PATCH existente).
+//   DATOS A–M, plagas foliares, seguimiento.
+//   Modo edición: cualquier celda de la matriz y tablas semana es editable.
+//   Celdas ilegibles: ámbar. Celdas corregidas por el usuario: borde azul.
+//   Todo se envía como `correcciones` — no se bifurca en aclaraciones/correcciones.
 
 const API = (import.meta.env.VITE_API_URL ?? '') as string
 
@@ -199,7 +201,58 @@ function getInitials(n: string) {
   return n.trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() ?? '').join('')
 }
 
-// ─── Celda con estilo por estado ──────────────────────────────────────────────
+// ─── Input inline para celda editable ────────────────────────────────────────
+
+function CeldaInput({
+  valorBase,
+  editKey,
+  correcciones,
+  onCorreccion,
+  ilegible,
+}: {
+  valorBase: number | null
+  editKey: string
+  correcciones: Record<string, string>
+  onCorreccion: (k: string, v: string) => void
+  ilegible: boolean
+}) {
+  const dirty = editKey in correcciones
+  const displayVal = dirty ? correcciones[editKey] : (valorBase != null ? String(valorBase) : '')
+
+  const bgStyle: React.CSSProperties = ilegible
+    ? { background: 'rgba(251,191,36,0.18)' }
+    : {}
+  const borderStyle: React.CSSProperties = dirty
+    ? { outline: '2px solid #2563EB' }
+    : ilegible
+      ? { outline: '1.5px solid #D97706' }
+      : { outline: '1.5px solid rgba(13,15,12,0.25)' }
+
+  return (
+    <td style={{ ...tdBase, ...bgStyle, ...borderStyle, padding: '3px 5px' }}>
+      <input
+        type="number"
+        inputMode="decimal"
+        value={displayVal}
+        onChange={e => onCorreccion(editKey, e.target.value)}
+        placeholder={ilegible ? '?' : '—'}
+        style={{
+          width: 46,
+          padding: '2px 4px',
+          border: 'none',
+          outline: 'none',
+          fontSize: 11,
+          fontFamily: 'monospace',
+          background: 'transparent',
+          color: dirty ? '#2563EB' : '#0D0F0C',
+          fontWeight: dirty ? 700 : 400,
+        }}
+      />
+    </td>
+  )
+}
+
+// ─── Celda de solo lectura con estilo por estado ──────────────────────────────
 
 function CeldaTd({
   celda,
@@ -278,11 +331,17 @@ function SeccionMatriz({
   ilegibleKeys,
   valores,
   onInput,
+  modoEdicion,
+  correcciones,
+  onCorreccion,
 }: {
   puntos: PuntoMuestreo[]
   ilegibleKeys: Set<string>
   valores: Record<string, string>
   onInput: (k: string, v: string) => void
+  modoEdicion: boolean
+  correcciones: Record<string, string>
+  onCorreccion: (k: string, v: string) => void
 }) {
   if (!puntos.length) return null
   const cols: Array<{ label: string; campo: keyof PuntoMuestreo }> = [
@@ -318,11 +377,26 @@ function SeccionMatriz({
                 {cols.map(c => {
                   const celda = asCelda((p as unknown as Record<string, unknown>)[c.campo])
                   const k = `${p.punto}.${c.campo}`
+                  const isIleg = ilegibleKeys.has(k)
+
+                  if (modoEdicion) {
+                    return (
+                      <CeldaInput
+                        key={c.campo}
+                        valorBase={celda.valor}
+                        editKey={k}
+                        correcciones={correcciones}
+                        onCorreccion={onCorreccion}
+                        ilegible={isIleg}
+                      />
+                    )
+                  }
+
                   return (
                     <CeldaTd
                       key={c.campo}
                       celda={celda}
-                      ilegibleKey={ilegibleKeys.has(k) ? k : undefined}
+                      ilegibleKey={isIleg ? k : undefined}
                       valores={valores}
                       onInput={onInput}
                     />
@@ -352,6 +426,9 @@ function SeccionTablaSemanas({
   ilegibleKeys,
   valores,
   onInput,
+  modoEdicion,
+  correcciones,
+  onCorreccion,
 }: {
   titulo: string
   filas: FilaSemana[]
@@ -362,10 +439,12 @@ function SeccionTablaSemanas({
   ilegibleKeys: Set<string>
   valores: Record<string, string>
   onInput: (k: string, v: string) => void
+  modoEdicion: boolean
+  correcciones: Record<string, string>
+  onCorreccion: (k: string, v: string) => void
 }) {
   if (!filas.length && !totales && !promedios) return null
 
-  // Índice por nombre de columna → resultado del checksum
   const checksumMap: Record<string, ColumnaChecksum | undefined> = {}
   if (verificacion?.columnas) {
     for (const c of verificacion.columnas) checksumMap[c.columna] = c
@@ -401,8 +480,6 @@ function SeccionTablaSemanas({
   }
 
   function sumaCalc(campo: 'ht' | 'hVle' | 'q5menos' | 'q5mas' | 'lc'): number | null {
-    // Misma regla que el checksum del backend: las celdas sin valor (vacias o
-    // ilegibles) se saltan; null solo cuando ninguna fila aporta valor.
     let sum = 0
     let conValor = false
     for (const f of filas) {
@@ -456,11 +533,26 @@ function SeccionTablaSemanas({
                 {colsDef.map(c => {
                   const celda = asCelda(f[c.campo])
                   const k = `${prefijo}-${f.fila ?? idx + 1}.${c.campo}`
+                  const isIleg = ilegibleKeys.has(k)
+
+                  if (modoEdicion) {
+                    return (
+                      <CeldaInput
+                        key={c.campo}
+                        valorBase={celda.valor}
+                        editKey={k}
+                        correcciones={correcciones}
+                        onCorreccion={onCorreccion}
+                        ilegible={isIleg}
+                      />
+                    )
+                  }
+
                   return (
                     <CeldaTd
                       key={c.campo}
                       celda={celda}
-                      ilegibleKey={ilegibleKeys.has(k) ? k : undefined}
+                      ilegibleKey={isIleg ? k : undefined}
                       valores={valores}
                       onInput={onInput}
                     />
@@ -531,7 +623,6 @@ function SeccionDatos({ columnas }: { columnas: ResumenColumna[] }) {
   const camposAG: CampoAG[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
   const camposHM: CampoHM[] = ['H', 'I', 'J', 'K', 'L', 'M']
 
-  // Umbrales de alerta (peor columna — D29)
   function alertaHIM(campo: CampoHM, val: number | null | undefined): React.CSSProperties {
     if (val == null) return {}
     if (campo === 'J' && val > 10) return { color: '#C43020', fontWeight: 800 }
@@ -688,16 +779,25 @@ export function SigatokaRevisionView() {
   const { user } = useAuth()
   const fincaId = user?.finca_id ?? null
 
-  const [items, setItems]         = useState<ItemLista[]>([])
+  const [items, setItems]             = useState<ItemLista[]>([])
   const [loadingList, setLoadingList] = useState(true)
-  const [error, setError]         = useState<string | null>(null)
+  const [error, setError]             = useState<string | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
 
-  const [detalle, setDetalle]     = useState<Detalle | null>(null)
-  // Mapa de valores para celdas ilegibles editables: key = "punto.campo"
-  const [valores, setValores]     = useState<Record<string, string>>({})
-  const [saving, setSaving]       = useState(false)
-  const [okMsg, setOkMsg]         = useState<string | null>(null)
+  const [detalle, setDetalle]         = useState<Detalle | null>(null)
+
+  // Ilegibles: inputs para el flujo previo (mantenido por compatibilidad, se
+  // envían como parte de correcciones en el PATCH)
+  const [valores, setValores]         = useState<Record<string, string>>({})
+
+  // Modo edición: permite editar CUALQUIER celda de la matriz y tablas semana
+  const [modoEdicion, setModoEdicion] = useState(false)
+  // Mapa de correcciones acumuladas en modo edición: key → valor string
+  const [correcciones, setCorrecciones] = useState<Record<string, string>>({})
+
+  const [saving, setSaving]           = useState(false)
+  const [okMsg, setOkMsg]             = useState<string | null>(null)
+  const [warnMsg, setWarnMsg]         = useState<string | null>(null)
 
   // Set de keys ilegibles para lookup O(1) en las tablas
   const ilegibleKeys: Set<string> = new Set(
@@ -706,6 +806,22 @@ export function SigatokaRevisionView() {
 
   function handleInput(k: string, v: string) {
     setValores(prev => ({ ...prev, [k]: v }))
+  }
+
+  function handleCorreccion(k: string, v: string) {
+    setCorrecciones(prev => ({ ...prev, [k]: v }))
+  }
+
+  function activarEdicion() {
+    // Pre-populate correcciones con los valores actuales de ilegibles ya ingresados
+    setCorrecciones(prev => ({ ...valores, ...prev }))
+    setModoEdicion(true)
+    setOkMsg(null)
+  }
+
+  function cancelarEdicion() {
+    setModoEdicion(false)
+    setCorrecciones({})
   }
 
   const cargarLista = useCallback(async () => {
@@ -731,6 +847,8 @@ export function SigatokaRevisionView() {
     setDetalle(null)
     setValores({})
     setOkMsg(null)
+    setModoEdicion(false)
+    setCorrecciones({})
     setLoadingDetalle(true)
     try {
       const res = await fetch(`${API}/api/finca/${fincaId}/sigatoka/revision/${id}`, { headers: authHeaders() })
@@ -743,26 +861,81 @@ export function SigatokaRevisionView() {
     }
   }
 
-  function aclaracionesDeInputs(): Array<{ punto: string; campo: string; valor: number | null }> {
+  /** Construye el array de correcciones para el PATCH.
+   *  Combina:
+   *  - `correcciones` del modo edición (cualquier celda, incluidas ilegibles)
+   *  - `valores` del panel lateral de ilegibles (si no están ya en correcciones)
+   *  Todo va como `correcciones` — el backend trata aclaraciones y correcciones
+   *  igual en cuanto a persistencia; usar solo `correcciones` simplifica el cliente.
+   *  Acepta coma decimal (ej. "6,6" → 6.6). Filtra items no numéricos y
+   *  actualiza `warnMsg` si alguno fue descartado.
+   */
+  function buildCorrecciones(): Array<{ punto: string; campo: string; valor: number | null }> {
     if (!detalle) return []
-    // Incluye celdas ilegibles de TODOS los bloques (matriz + tablas sem)
-    return detalle.ilegibles.ubicaciones.map(u => {
+
+    const merged: Record<string, string> = {}
+
+    // Prioridad 1: valores del panel de ilegibles
+    for (const u of detalle.ilegibles.ubicaciones) {
       const key = `${u.punto}.${u.campo}`
       const raw = valores[key]?.trim()
-      const num = raw ? Number(raw) : NaN
-      return { punto: u.punto, campo: u.campo, valor: Number.isFinite(num) ? num : null }
-    })
+      if (raw) merged[key] = raw
+    }
+
+    // Prioridad 2 (override): correcciones del modo edición
+    for (const [k, v] of Object.entries(correcciones)) {
+      if (v.trim() !== '') merged[k] = v.trim()
+    }
+
+    let descartados = 0
+    const result: Array<{ punto: string; campo: string; valor: number | null }> = []
+
+    for (const [key, raw] of Object.entries(merged)) {
+      // key formato: "P3.planta1_estadio" o "11sem-14.ht" o "00sem-3.lc"
+      const dotIdx = key.indexOf('.')
+      const punto = key.slice(0, dotIdx)
+      const campo = key.slice(dotIdx + 1)
+      // Normalizar coma decimal antes de convertir
+      const normalizado = raw.replace(',', '.')
+      const num = Number(normalizado)
+      if (!Number.isFinite(num)) {
+        descartados++
+        continue  // filtrar, no enviar null
+      }
+      result.push({ punto, campo, valor: num })
+    }
+
+    if (descartados > 0) {
+      setWarnMsg(`${descartados} valor${descartados !== 1 ? 'es' : ''} no numérico${descartados !== 1 ? 's' : ''} ignorado${descartados !== 1 ? 's' : ''}.`)
+    } else {
+      setWarnMsg(null)
+    }
+
+    return result
   }
 
   async function guardar(marcarRevisado: boolean) {
     if (!detalle || !fincaId) return
+
+    if (marcarRevisado) {
+      const ok = window.confirm(
+        '¿Confirmar aprobación?\n\nEsto cierra el muestreo como revisado. Esta acción no se puede deshacer.'
+      )
+      if (!ok) return
+    }
+
     setSaving(true)
     setOkMsg(null)
     try {
-      const body: { aclaraciones: ReturnType<typeof aclaracionesDeInputs>; marcar_revisado?: boolean } = {
-        aclaraciones: aclaracionesDeInputs(),
-      }
+      const body: {
+        correcciones?: ReturnType<typeof buildCorrecciones>
+        marcar_revisado?: boolean
+      } = {}
+
+      const corrs = buildCorrecciones()
+      if (corrs.length > 0) body.correcciones = corrs
       if (marcarRevisado) body.marcar_revisado = true
+
       const res = await fetch(`${API}/api/finca/${fincaId}/sigatoka/revision/${detalle.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -770,14 +943,21 @@ export function SigatokaRevisionView() {
       })
       if (!res.ok) throw new Error(`Error ${res.status}`)
       const data = await res.json()
-      setOkMsg(
-        marcarRevisado
-          ? 'Muestreo marcado como revisado ✅'
-          : `Guardado. Quedan ${data.ilegibles?.total ?? 0} sin definir.`
-      )
-      await cargarLista()
-      if (data.status === 'complete') setDetalle(null)
-      else await abrirDetalle(detalle.id)
+
+      if (marcarRevisado) {
+        setDetalle(null)
+        setModoEdicion(false)
+        setCorrecciones({})
+        setValores({})
+        await cargarLista()
+      } else {
+        // Re-fetch del detalle para que los checksums se recalculen y se vean
+        setModoEdicion(false)
+        setCorrecciones({})
+        setValores({})
+        await abrirDetalle(detalle.id)
+        setOkMsg(`Correcciones guardadas. Quedan ${data.ilegibles?.total ?? 0} celdas sin definir.`)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar')
     } finally {
@@ -786,6 +966,7 @@ export function SigatokaRevisionView() {
   }
 
   const s = detalle?.sigatoka ?? null
+  const nCorrecciones = Object.keys(correcciones).filter(k => correcciones[k].trim() !== '').length
 
   return (
     <>
@@ -902,7 +1083,7 @@ export function SigatokaRevisionView() {
 
               {!loadingDetalle && s && (
                 <>
-                  {/* Imagen + ficha en paralelo */}
+                  {/* Imagen + panel de acciones en paralelo */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, alignItems: 'start' }}>
 
                     {/* Imagen original */}
@@ -928,87 +1109,136 @@ export function SigatokaRevisionView() {
                       }
                     </div>
 
-                    {/* Encabezado + acciones rápidas */}
+                    {/* Panel derecho: encabezado + acciones */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div style={{ ...card, padding: '14px 16px' }}>
                         <SeccionEncabezado s={s} conf={detalle.confidence_score} />
                       </div>
 
-                      {/* Resumen de celdas ilegibles y controles */}
-                      <div style={{ ...card, padding: '14px 16px' }}>
-                        {detalle.ilegibles.ubicaciones.length === 0 ? (
-                          <div style={{ fontSize: 13, color: '#1F8040' }}>
-                            No quedan celdas ilegibles. Podés marcarlo como revisado.
+                      {/* Panel de celdas ilegibles (solo lectura rápida; se oculta en modo edición) */}
+                      {!modoEdicion && detalle.ilegibles.ubicaciones.length > 0 && (
+                        <div style={{ ...card, padding: '14px 16px' }}>
+                          <div style={{ ...labelStyle, marginBottom: 8 }}>
+                            Celdas ilegibles — completá lo que veas en la foto
                           </div>
-                        ) : (
-                          <>
-                            <div style={{ ...labelStyle, marginBottom: 8 }}>
-                              Celdas pendientes — completá lo que veas en la foto
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto', marginBottom: 10 }}>
-                              {detalle.ilegibles.ubicaciones.map(u => {
-                                const key = `${u.punto}.${u.campo}`
-                                return (
-                                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <div style={{ flex: 1, fontSize: 12, color: '#0D0F0C' }}>
-                                      <strong>{u.punto}</strong>
-                                      {u.sector ? ` (${u.sector})` : ''}
-                                      {' · '}{LABEL_CAMPO[u.campo] ?? u.campo}
-                                    </div>
-                                    <input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={valores[key] ?? ''}
-                                      onChange={e => handleInput(key, e.target.value)}
-                                      placeholder="—"
-                                      style={{
-                                        width: 72, padding: '5px 8px',
-                                        border: '2px solid #0D0F0C',
-                                        fontSize: 13, fontFamily: 'monospace',
-                                      }}
-                                    />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto', marginBottom: 10 }}>
+                            {detalle.ilegibles.ubicaciones.map(u => {
+                              const key = `${u.punto}.${u.campo}`
+                              return (
+                                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <div style={{ flex: 1, fontSize: 12, color: '#0D0F0C' }}>
+                                    <strong>{u.punto}</strong>
+                                    {u.sector ? ` (${u.sector})` : ''}
+                                    {' · '}{LABEL_CAMPO[u.campo] ?? u.campo}
                                   </div>
-                                )
-                              })}
-                            </div>
-                          </>
-                        )}
-
-                        {okMsg && (
-                          <div style={{ fontSize: 12, color: '#1F8040', marginBottom: 10 }}>{okMsg}</div>
-                        )}
-
-                        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-                          <button
-                            onClick={() => guardar(false)}
-                            disabled={saving || detalle.ilegibles.ubicaciones.length === 0}
-                            style={{
-                              flex: 1, padding: '9px',
-                              border: '2px solid #0D0F0C',
-                              background: '#F5F1E8',
-                              fontWeight: 700, fontSize: 13,
-                              cursor: saving ? 'wait' : 'pointer',
-                              opacity: detalle.ilegibles.ubicaciones.length === 0 ? 0.4 : 1,
-                            }}
-                          >
-                            {saving ? 'Guardando…' : 'Guardar correcciones'}
-                          </button>
-                          <button
-                            onClick={() => guardar(true)}
-                            disabled={saving}
-                            style={{
-                              flex: 1, padding: '9px',
-                              border: '2px solid #1B3D24',
-                              background: '#C9F03B',
-                              color: '#0D0F0C',
-                              fontWeight: 800, fontSize: 13,
-                              cursor: saving ? 'wait' : 'pointer',
-                            }}
-                          >
-                            Marcar revisado ✅
-                          </button>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={valores[key] ?? ''}
+                                    onChange={e => handleInput(key, e.target.value)}
+                                    placeholder="—"
+                                    style={{
+                                      width: 72, padding: '5px 8px',
+                                      border: '2px solid #0D0F0C',
+                                      fontSize: 13, fontFamily: 'monospace',
+                                    }}
+                                  />
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              onClick={() => void guardar(false)}
+                              disabled={saving}
+                              style={{
+                                flex: 1, padding: '9px',
+                                border: '2px solid #0D0F0C',
+                                background: '#F5F1E8',
+                                fontWeight: 700, fontSize: 13,
+                                cursor: saving ? 'wait' : 'pointer',
+                              }}
+                            >
+                              {saving ? 'Guardando…' : 'Guardar'}
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
+
+                      {/* Modo edición: barra de estado y acciones */}
+                      {modoEdicion && (
+                        <div style={{
+                          ...card,
+                          padding: '14px 16px',
+                          background: 'rgba(37,99,235,0.05)',
+                          border: '2px solid #2563EB',
+                          boxShadow: '4px 4px 0 0 #2563EB',
+                        }}>
+                          <div style={{ ...labelStyle, color: '#2563EB', marginBottom: 6 }}>
+                            Modo edición activo
+                          </div>
+                          <div style={{ fontSize: 12, color: '#2563EB', marginBottom: 12 }}>
+                            {nCorrecciones > 0
+                              ? `${nCorrecciones} celda${nCorrecciones !== 1 ? 's' : ''} modificada${nCorrecciones !== 1 ? 's' : ''} (borde azul)`
+                              : 'Hacé clic en cualquier celda de la ficha para editarla.'
+                            }
+                          </div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              onClick={() => void guardar(false)}
+                              disabled={saving || nCorrecciones === 0}
+                              style={{
+                                flex: 1, padding: '9px',
+                                border: '2px solid #2563EB',
+                                background: '#2563EB',
+                                color: '#fff',
+                                fontWeight: 700, fontSize: 13,
+                                cursor: (saving || nCorrecciones === 0) ? 'not-allowed' : 'pointer',
+                                opacity: nCorrecciones === 0 ? 0.5 : 1,
+                              }}
+                            >
+                              {saving ? 'Guardando…' : `Guardar ${nCorrecciones > 0 ? `(${nCorrecciones})` : ''}`}
+                            </button>
+                            <button
+                              onClick={cancelarEdicion}
+                              disabled={saving}
+                              style={{
+                                padding: '9px 14px',
+                                border: '2px solid #0D0F0C',
+                                background: '#F5F1E8',
+                                fontWeight: 600, fontSize: 13,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Botón para activar modo edición */}
+                      {!modoEdicion && (
+                        <button
+                          onClick={activarEdicion}
+                          style={{
+                            padding: '10px 16px',
+                            border: '2px solid #2563EB',
+                            background: '#F5F1E8',
+                            color: '#2563EB',
+                            fontWeight: 700, fontSize: 13,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                        >
+                          ✎ Corregir valores leídos por el modelo
+                        </button>
+                      )}
+
+                      {okMsg && (
+                        <div style={{ fontSize: 12, color: '#1F8040', padding: '8px 12px', background: '#EDFBF3', border: '1px solid #1F8040' }}>
+                          {okMsg}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1021,6 +1251,9 @@ export function SigatokaRevisionView() {
                       ilegibleKeys={ilegibleKeys}
                       valores={valores}
                       onInput={handleInput}
+                      modoEdicion={modoEdicion}
+                      correcciones={correcciones}
+                      onCorreccion={handleCorreccion}
                     />
 
                     {/* Tabla 11 semanas */}
@@ -1035,6 +1268,9 @@ export function SigatokaRevisionView() {
                         ilegibleKeys={ilegibleKeys}
                         valores={valores}
                         onInput={handleInput}
+                        modoEdicion={modoEdicion}
+                        correcciones={correcciones}
+                        onCorreccion={handleCorreccion}
                       />
                     )}
 
@@ -1050,6 +1286,9 @@ export function SigatokaRevisionView() {
                         ilegibleKeys={ilegibleKeys}
                         valores={valores}
                         onInput={handleInput}
+                        modoEdicion={modoEdicion}
+                        correcciones={correcciones}
+                        onCorreccion={handleCorreccion}
                       />
                     )}
 
@@ -1062,6 +1301,38 @@ export function SigatokaRevisionView() {
                     {/* Seguimiento */}
                     <SeccionSeguimiento s={s} />
                   </div>
+
+                  {/* ── Botón de aprobación humana (P7) ── */}
+                  <div style={{ ...card, padding: '16px 18px', background: '#F0FBF4', border: '2px solid #1B3D24', boxShadow: '4px 4px 0 0 #1B3D24' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: '#1B3D24' }}>
+                          ¿La ficha está correcta?
+                        </div>
+                        <div style={{ fontSize: 12, color: 'rgba(27,61,36,0.65)', marginTop: 2 }}>
+                          Aprobá el muestreo cuando los datos coincidan con la foto. Esta acción cierra la revisión.
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => void guardar(true)}
+                        disabled={saving || modoEdicion}
+                        title={modoEdicion ? 'Guardá o cancelá las correcciones antes de aprobar' : undefined}
+                        style={{
+                          padding: '12px 24px',
+                          border: '2px solid #1B3D24',
+                          background: saving || modoEdicion ? 'rgba(201,240,59,0.4)' : '#C9F03B',
+                          color: '#0D0F0C',
+                          fontWeight: 800, fontSize: 14,
+                          cursor: (saving || modoEdicion) ? 'not-allowed' : 'pointer',
+                          flexShrink: 0,
+                          opacity: modoEdicion ? 0.5 : 1,
+                        }}
+                      >
+                        {saving ? 'Procesando…' : '✓ Todo correcto — aprobar muestreo'}
+                      </button>
+                    </div>
+                  </div>
+
                 </>
               )}
 

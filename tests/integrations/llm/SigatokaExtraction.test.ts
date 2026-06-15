@@ -80,8 +80,15 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — cuatro pasadas paralelas + 
   beforeEach(() => vi.clearAllMocks())
 
   it('corre 4 pasadas (tier ultra, json_object, imagen) y mergea las cuatro zonas', async () => {
+    // 3 columnas — necesario para que el guard de lectura parcial (Tarea 2)
+    // no active requiereValidacion: una ficha real siempre tiene 3 columnas (H1/H2/H3).
+    const col = {
+      A: 40, B: 80, C: 4, D: 2, E: 1, F: 360, G: 380,
+      H_formulario: null, I_formulario: null, J_formulario: null,
+      K_formulario: null, L_formulario: null, M_formulario: null,
+    }
     const adapter = adapterConRespuestas(
-      izq(),
+      izq({ resumenColumnas: [col, col, col] }),
       tab11({ filas: [{ fila: 1, sector: null, lote_id: null, ht: { valor: 8, estado: 'leida' }, hVle: { valor: 0, estado: 'leida' }, q5menos: { valor: 3, estado: 'leida' }, q5mas: { valor: 8, estado: 'leida' }, lc: { valor: 7, estado: 'leida' } }] }),
       tab00(),
       plg({ plagasFoliares: { ceramida: { h: 13, p: 7, m: 12, g: null }, sibine: { h: 13, p: 6, m: 10, g: null } }, erradicadasBsv: 264 }),

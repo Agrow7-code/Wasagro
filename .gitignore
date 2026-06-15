@@ -32,3 +32,11 @@ Thumbs.db
 .env*.local
 # Local Pi runtime state
 .atl/
+.pi/
+
+# TS incremental build cache
+*.tsbuildinfo
+
+# Imágenes de referencia de fichas (test manual, no van al repo)
+foto*.jpeg
+foto*.jpg
