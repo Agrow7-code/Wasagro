@@ -26,7 +26,7 @@ import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.j
 import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
 import { aplicarFiltroConfianza } from './confidenceFilter.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
-import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, reconciliarCrossField, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -595,8 +595,10 @@ export class WasagroAIAgent implements IWasagroLLM {
     // Regiones de recorte (fracciones de la imagen completa). Generosas para tolerar
     // desencuadres de foto; el full-frame es siempre el respaldo (elegirMejorTabla).
     // Validado empíricamente: crop+zoom 3× pasa de ~14 a ~18 filas leídas en e2b.
-    const REGION_11SEM = { left: 0.55, top: 0.10, width: 0.45, height: 0.34 }
-    const REGION_00SEM = { left: 0.55, top: 0.46, width: 0.45, height: 0.38 }
+    // zoom 4× (validado: más zoom resuelve misreads de dígito); regiones generosas
+    // para que el zoom no corte la fila T= ni filas del borde (se afina con fichas).
+    const REGION_11SEM = { left: 0.53, top: 0.08, width: 0.47, height: 0.40, zoom: 4 }
+    const REGION_00SEM = { left: 0.53, top: 0.44, width: 0.47, height: 0.42, zoom: 4 }
 
     // Recorta, luego corre la pasada i sobre la imagen recortada.
     // Si el recorte falla (sharp error o imagen no válida) devuelve null directamente
@@ -717,7 +719,15 @@ export class WasagroAIAgent implements IWasagroLLM {
         elegida = mejor
       }
 
-      // 2) Hint sobre el full si todavía no cuadra.
+      // 2) Reconciliación cross-field (Etapa A, gratis): corrige celdas donde una
+      // columna contradice a su correlato (H.T vs Q>5%), solo si hace cuadrar el T=.
+      const recon = reconciliarCrossField(elegida.filas, totalesRef)
+      if (recon.corregidas.length > 0) {
+        elegida = { ...elegida, filas: recon.filas }
+        trace.event({ name: `sigatoka_crossfield_${tag}`, level: 'DEFAULT', input: { corregidas: recon.corregidas } })
+      }
+
+      // 3) Hint sobre el full si todavía no cuadra.
       const verA = verificarChecksumTabla(elegida.filas, totalesRef)
       if (verA.cuadraTodo === false) {
         const retry = await reExtaerConHint(idx, totalesRef, elegida.promedios, elegida.filas, prefijo)
@@ -868,7 +878,7 @@ export class WasagroAIAgent implements IWasagroLLM {
   // (degradación graceful: el llamador usa la foto completa como respaldo).
   async #recortarRegion(
     base64: string,
-    region: { left: number; top: number; width: number; height: number },
+    region: { left: number; top: number; width: number; height: number; zoom?: number },
     traceId?: string,
   ): Promise<string | null> {
     try {
@@ -885,10 +895,19 @@ export class WasagroAIAgent implements IWasagroLLM {
 
       if (width <= 0 || height <= 0) return null
 
+      // Recorte + zoom + preprocesado de legibilidad (estándar de IDP/OCR de banca):
+      // escala de grises quita el ruido de color (tinta azul), normalize estira el
+      // contraste a rango completo, sharpen marca los trazos de los dígitos. Sube la
+      // legibilidad del manuscrito sin llamadas extra. El zoom es configurable por
+      // región (validado: más zoom resuelve misreads de dígito en tablas densas).
+      const zoom = region.zoom ?? 3
       const outBuf = await sharp(buf)
         .extract({ left, top, width, height })
-        .resize({ width: width * 3 })
-        .jpeg()
+        .resize({ width: Math.round(width * zoom) })
+        .grayscale()
+        .normalize()
+        .sharpen()
+        .jpeg({ quality: 90 })
         .toBuffer()
       return outBuf.toString('base64')
     } catch (err) {

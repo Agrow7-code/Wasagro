@@ -102,16 +102,33 @@ proveedor (tier ultra) y causaba cascada de fallos de las pasadas full.
 Flujo de `recuperarTabla(idx, region, …, full)` por tabla de semanas:
 1. Si `full.totales` es null o el checksum del full ya cuadra → devolver el full (no se
    gasta crop).
-2. Si no cuadra → recortar con `sharp` + `.resize(3×)` esa región y correr la pasada sobre
-   el crop; `elegirMejorTabla(full, crop, totalesRef)` elige.
-3. Si AÚN no cuadra → `reExtaerConHint` sobre el full (hint correctivo).
+2. Si no cuadra → recortar con `sharp`, **zoom 4× + preprocesado** (ver abajo) esa región y
+   correr la pasada sobre el crop; `elegirMejorTabla(full, crop, totalesRef)` elige.
+3. **Reconciliación cross-field (Etapa A, gratis)**: `reconciliarCrossField` corrige celdas
+   donde una columna contradice a su correlato, gateado por el total (ver abajo).
+4. Si AÚN no cuadra → `reExtaerConHint` sobre el full (hint correctivo).
 
 Las dos tablas se recuperan **secuencialmente** (no concurrente) para no disparar dos
 crops a la vez y volver a presionar el rate-limit.
 
-Regiones usadas (fracciones, generosas para tolerar desencuadre):
-- 11sem: `{ left: 0.55, top: 0.10, width: 0.45, height: 0.34 }`
-- 00sem: `{ left: 0.55, top: 0.46, width: 0.45, height: 0.38 }`
+#### Preprocesado de imagen (estándar IDP/banca)
+`#recortarRegion` aplica, además del zoom, un pipeline de legibilidad: escala de grises
+(quita ruido de tinta azul) → `normalize` (estira contraste a rango completo) → `sharpen`
+(marca trazos de dígitos). Sube la legibilidad del manuscrito sin llamadas LLM extra.
+Zoom configurable por región — validado: 4× resuelve misreads de dígito que 3× no.
+
+#### Reconciliación cross-field (corrector-oráculo, Etapa A)
+En la ficha LOGBAN ciertas columnas son casi idénticas por fila — validado: **H.T ≈ Q>5%**
+(sus `T=` coinciden). Cuando el modelo lee una distinta de la otra, una está mal. Si la
+columna que no cuadra toma el valor de su correlato donde difieren Y eso hace cuadrar el
+`T=` exacto → se adopta (**doble compuerta**: relación estructural + total). Si no cierra
+exacto → no se toca (P1: no adivinar). Solo se usan relaciones VERIFICADAS
+(`CORRELACIONES_SEMANA = [['ht','q5mas']]`); una relación falsa corregiría mal. Costo cero
+(aritmética pura, función testeable en `SigatokaHandler.ts`).
+
+Regiones usadas (fracciones, generosas para que el zoom 4× no corte la fila T=):
+- 11sem: `{ left: 0.53, top: 0.08, width: 0.47, height: 0.40, zoom: 4 }`
+- 00sem: `{ left: 0.53, top: 0.44, width: 0.47, height: 0.42, zoom: 4 }`
 
 `elegirMejorTabla(full, crop, totalesRef)` selecciona el ganador por prioridad:
 1. Uno nulo/sin filas → el otro gana.

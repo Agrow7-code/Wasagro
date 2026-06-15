@@ -510,6 +510,56 @@ export function elegirMejorTabla(
   return filasConDato(a.filas) >= filasConDato(b.filas) ? a : b
 }
 
+// ─── Reconciliación cross-field (corrector-oráculo, Etapa A) ──────────────────
+// En la ficha LOGBAN, ciertas columnas son casi idénticas por fila. Validado: H.T
+// (ht) ≈ Q>5% (q5mas) — sus totales T= coinciden. Cuando el modelo lee una distinta
+// de la otra en una fila, una está mal; el total T= dice cuál confiar.
+// SOLO relaciones VERIFICADAS — una relación falsa corregiría mal (P1). Y SIEMPRE
+// con doble compuerta: adoptar la corrección únicamente si hace cuadrar el total.
+const CORRELACIONES_SEMANA: ReadonlyArray<readonly [keyof Pick<FilaSemana, 'ht' | 'hVle' | 'q5menos' | 'q5mas' | 'lc'>, keyof Pick<FilaSemana, 'ht' | 'hVle' | 'q5menos' | 'q5mas' | 'lc'>]> = [
+  ['ht', 'q5mas'],
+]
+
+const valorCelda = (f: FilaSemana, k: string): number | null =>
+  (f as unknown as Record<string, CeldaMuestra>)[k]?.valor ?? null
+
+const cuadraColumna = (filas: FilaSemana[], totales: TotalesSemana, col: string): boolean | null =>
+  verificarChecksumTabla(filas, totales).columnas.find(c => c.columna === col)?.cuadra ?? null
+
+// Devuelve filas reconciliadas + las celdas corregidas ("ht[3]"). Solo aplica una
+// corrección cuando hace que esa columna cuadre EXACTO con su T= (doble compuerta).
+export function reconciliarCrossField(
+  filas: FilaSemana[],
+  totales: TotalesSemana | null,
+): { filas: FilaSemana[]; corregidas: string[] } {
+  if (!totales) return { filas, corregidas: [] }
+  let out = filas.map(f => ({ ...f }))
+  const corregidas: string[] = []
+
+  for (const [a, b] of CORRELACIONES_SEMANA) {
+    // Probar en ambas direcciones: la columna que no cuadra toma la otra donde difieren.
+    for (const [target, source] of [[a, b], [b, a]] as const) {
+      if (totales[target] == null) continue
+      if (cuadraColumna(out, totales, target) !== false) continue // ya cuadra o sin total
+
+      const cand = out.map(f => {
+        const tv = valorCelda(f, target), sv = valorCelda(f, source)
+        return tv != null && sv != null && tv !== sv
+          ? { ...f, [target]: { valor: sv, estado: 'leida' as const } }
+          : f
+      })
+      // Doble compuerta: adoptar SOLO si ahora la columna cuadra exacto contra el T=.
+      if (cuadraColumna(cand, totales, target) === true) {
+        cand.forEach((f, i) => {
+          if (valorCelda(f, target) !== valorCelda(out[i]!, target)) corregidas.push(`${target}[${i}]`)
+        })
+        out = cand
+      }
+    }
+  }
+  return { filas: out, corregidas }
+}
+
 // ─── Sub-clasificador: ¿es un formulario de Sigatoka? ────────────────────────
 
 const MARCADORES_SIGATOKA = ['SIGATOKA', 'H+VLE', 'EF PAS', 'EF ACT', 'FUNC', 'EE2', 'EE3', 'CERAMIDA', 'SIBINE']

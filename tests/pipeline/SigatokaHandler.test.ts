@@ -26,6 +26,7 @@ import {
   verificarChecksumTabla,
   filasConDato,
   elegirMejorTabla,
+  reconciliarCrossField,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -1330,5 +1331,47 @@ describe('elegirMejorTabla', () => {
     const b = tablaFija(0, 12, 11)
     // no lanza, devuelve uno de los dos (el primero, por ser la rama `a` cuando b.filas.length=0)
     expect(() => elegirMejorTabla(a, b, null)).not.toThrow()
+  })
+})
+
+describe('reconciliarCrossField', () => {
+  // Fila con H.T y Q>5% explícitos (el par correlacionado H.T ≈ Q>5%).
+  const fHQ = (ht: number, q5mas: number): FilaSemana =>
+    fila11({ ht: celda(ht), q5mas: celda(q5mas) })
+
+  it('adopta la corrección cuando hace cuadrar el T= (doble compuerta)', () => {
+    // H.T = [6,6,6]=18 (T=21, falla por 3); Q>5% = [9,6,6]=21 (cuadra).
+    // Reconciliar H.T←Q>5% en la fila 0 (6≠9) → H.T=[9,6,6]=21 → cuadra → adoptar.
+    const filas = [fHQ(6, 9), fHQ(6, 6), fHQ(6, 6)]
+    const totales: TotalesSemana = { ht: 21, q5mas: 21, hVle: null, q5menos: null, lc: null }
+    const r = reconciliarCrossField(filas, totales)
+    expect(r.corregidas).toContain('ht[0]')
+    expect(r.filas[0]!.ht).toEqual({ valor: 9, estado: 'leida' })
+    // las filas que ya coincidían no se tocan
+    expect(r.filas[1]!.ht.valor).toBe(6)
+  })
+
+  it('NO adopta si la corrección no cierra exacto el total (no adivina, P1)', () => {
+    // H.T = [6,6,6]=18 (T=21, falla); Q>5% = [9,9,6]=24 (T=24, cuadra).
+    // Reconciliar H.T←Q>5% → [9,9,6]=24 ≠ 21 → fuera de tolerancia → NO adoptar.
+    const filas = [fHQ(6, 9), fHQ(6, 9), fHQ(6, 6)]
+    const totales: TotalesSemana = { ht: 21, q5mas: 24, hVle: null, q5menos: null, lc: null }
+    const r = reconciliarCrossField(filas, totales)
+    expect(r.corregidas).toHaveLength(0)
+    expect(r.filas[0]!.ht.valor).toBe(6) // intacto
+  })
+
+  it('no hace nada si la columna ya cuadra', () => {
+    const filas = [fHQ(7, 7), fHQ(7, 7), fHQ(7, 7)] // H.T=21 = T=
+    const totales: TotalesSemana = { ht: 21, q5mas: 21, hVle: null, q5menos: null, lc: null }
+    const r = reconciliarCrossField(filas, totales)
+    expect(r.corregidas).toHaveLength(0)
+  })
+
+  it('totales null → no-op (no rompe)', () => {
+    const filas = [fHQ(6, 9)]
+    const r = reconciliarCrossField(filas, null)
+    expect(r.corregidas).toHaveLength(0)
+    expect(r.filas[0]!.ht.valor).toBe(6)
   })
 })
