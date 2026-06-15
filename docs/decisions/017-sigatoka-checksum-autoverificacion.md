@@ -94,28 +94,44 @@ reescalarla 3× antes de enviarla al LLM, la cobertura sube a ~18 filas.
 
 ### Decisión
 
-Correr las pasadas e2a (11sem) y e2b (00sem) **en paralelo** sobre dos imágenes:
-1. **Full-frame**: la foto completa (comportamiento original).
-2. **Crop+zoom**: región proporcional recortada con `sharp` + `.resize(3×)`.
+Recovery **perezoso (lazy)**: el caso común sigue siendo **4 pasadas full en paralelo**.
+El crop NO corre siempre — solo cuando una tabla NO cuadra el checksum. Se descartó el
+diseño "6 pasadas en paralelo" (4 full + 2 crop) porque saturaba el rate-limit del
+proveedor (tier ultra) y causaba cascada de fallos de las pasadas full.
+
+Flujo de `recuperarTabla(idx, region, …, full)` por tabla de semanas:
+1. Si `full.totales` es null o el checksum del full ya cuadra → devolver el full (no se
+   gasta crop).
+2. Si no cuadra → recortar con `sharp` + `.resize(3×)` esa región y correr la pasada sobre
+   el crop; `elegirMejorTabla(full, crop, totalesRef)` elige.
+3. Si AÚN no cuadra → `reExtaerConHint` sobre el full (hint correctivo).
+
+Las dos tablas se recuperan **secuencialmente** (no concurrente) para no disparar dos
+crops a la vez y volver a presionar el rate-limit.
 
 Regiones usadas (fracciones, generosas para tolerar desencuadre):
 - 11sem: `{ left: 0.55, top: 0.10, width: 0.45, height: 0.34 }`
 - 00sem: `{ left: 0.55, top: 0.46, width: 0.45, height: 0.38 }`
 
 `elegirMejorTabla(full, crop, totalesRef)` selecciona el ganador por prioridad:
-1. Uno nulo → el otro gana.
+1. Uno nulo/sin filas → el otro gana.
 2. `cuadraTodo === true` gana sobre `false`.
 3. Más columnas con `cuadra === true`.
-4. Más filas con dato (cobertura).
+4. Más filas con dato (cobertura). El empate favorece el primer argumento (full).
 
-El resultado elegido entra al bloque de checksum/reExtaerConHint existente, que sigue
-funcionando igual sobre el ganador.
+`totalesRef` es siempre el `T=` del full-frame (referencia autoritativa); el crop puede no
+capturar la fila T=, por eso nunca sobreescribe el total persistido.
 
 ### Propiedades
 
-- **Sin latencia extra**: las 6 pasadas (4 full + 2 crop) corren en el mismo `Promise.all`.
+- **Carga acotada**: caso común = 4 pasadas; el crop se gasta solo cuando una tabla no
+  cuadra. No presiona el rate-limit del proveedor (a diferencia del 6-paralelo descartado).
+- **Latencia**: extra solo cuando una tabla falla el checksum (justo cuando conviene gastar
+  más); el caso OK no agrega nada.
 - **Sin regresión posible**: si `sharp` falla (imagen inválida, memoria) → `#recortarRegion`
-  devuelve null → `elegirMejorTabla` elige el full-frame sin condición.
+  devuelve null → se mantiene el full-frame sin condición. El keep-logic del hint adopta el
+  reintento solo si mejora estrictamente el checksum (o, en empate, recupera más filas) —
+  más conservador que el `>= original` previo.
 - **Observabilidad**: `sigatoka_crop_elegido` trazado en LangFuse con `{tabla, fuente, filas_full, filas_crop}`.
 - **Testeable**: `filasConDato` y `elegirMejorTabla` son funciones puras exportadas
   de `SigatokaHandler.ts` con suite de tests unitarios.

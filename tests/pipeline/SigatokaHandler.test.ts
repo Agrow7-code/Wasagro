@@ -348,14 +348,19 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).toMatch(/⚠️.*EE2 \(1-3\)/)
   })
 
-  it('muestra cuántas plantas de 11 semanas se evaluaron', () => {
+  it('cuenta plantas EVALUADAS (con dato), no las filas en blanco', () => {
+    // 2 filas con dato + 2 filas vacías (renglones numerados sin muestrear).
+    // Debe mostrar "2 plantas", no "4".
+    const vacia = { ht: celda(null), hVle: celda(null), q5menos: celda(null), q5mas: celda(null), lc: celda(null) }
     const onceSem = [
-      { ht: 8, hVle: 0, q5menos: 3, q5mas: 8, lc: 7 },
-      { ht: 7, hVle: 0, q5menos: 2, q5mas: 7, lc: 6 },
+      fila11({ fila: 1 }),
+      fila11({ fila: 2 }),
+      fila11({ fila: 3, ...vacia }),
+      fila11({ fila: 4, ...vacia }),
     ]
     const msg = buildWhatsappSummary(muestreo([fullCol()], [], { plantas11sem: onceSem }), [])
-    expect(msg).toMatch(/11 sem/)
-    expect(msg).toMatch(/\b2\b/)
+    expect(msg).toMatch(/11 semanas\* — 2 plantas/)
+    expect(msg).not.toMatch(/4 plantas/)
   })
 
   it('estado general CRÍTICO cuando EE3-6 supera 10', () => {

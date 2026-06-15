@@ -737,8 +737,11 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
   // indentados. Erradicadas/EF van en línea separada como "Finca:".
   const seguimientoLineas: string[] = []
 
-  const n11sem = (data.plantas11sem ?? []).length
-  const n00sem = (data.plantas00sem ?? []).length
+  // Plantas EVALUADAS = filas con algún dato, no el largo del array: la tabla tiene
+  // renglones numerados que pueden quedar en blanco; contarlos infla el número que
+  // ve el tomador (ej. "24 plantas" cuando se evaluaron 19).
+  const n11sem = filasConDato(data.plantas11sem ?? [])
+  const n00sem = filasConDato(data.plantas00sem ?? [])
 
   const promediosSemana = (pr: typeof data.promedios11sem): string | null => {
     if (!pr) return null
