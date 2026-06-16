@@ -9,6 +9,7 @@ import { useAuth } from '../../auth/useAuth'
 //   DATOS A–M, plagas foliares, seguimiento.
 //   Modo edición: cualquier celda de la matriz y tablas semana es editable.
 //   Celdas ilegibles: ámbar. Celdas corregidas por el usuario: borde azul.
+//   Celdas auto-corregidas por el oráculo (origen='cross_field'): azul + "auto" + tooltip.
 //   Todo se envía como `correcciones` — no se bifurca en aclaraciones/correcciones.
 
 const API = (import.meta.env.VITE_API_URL ?? '') as string
@@ -20,7 +21,7 @@ function authHeaders(): Record<string, string> {
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 
-interface CeldaMuestra { valor: number | null; estado: 'leida' | 'vacia' | 'ilegible' }
+interface CeldaMuestra { valor: number | null; estado: 'leida' | 'vacia' | 'ilegible'; origen?: 'modelo' | 'cross_field' }
 
 /** Normaliza el valor crudo de una celda.
  *  Eventos viejos persistidos tienen las celdas como número plano o null.
@@ -290,6 +291,20 @@ function CeldaTd({
             />
           : <span style={{ color: '#D97706', fontWeight: 700 }}>?</span>
         }
+      </td>
+    )
+  }
+  // Celda auto-corregida por el oráculo (reconciliación cross-field): el modelo la
+  // leyó distinta de su columna correlato y el total de la ficha confirmó la corrección.
+  // Se marca en azul (sistema, no alarma) para que el asesor sepa que NO es lectura
+  // directa del modelo y pueda confiarla o revisarla (auditabilidad, P1).
+  if (celda.origen === 'cross_field') {
+    return (
+      <td
+        style={{ ...tdBase, background: 'rgba(37,99,235,0.12)', outline: '1.5px solid #2563EB' }}
+        title="Auto-corregido por el oráculo: cuadra con el total (T=) de la ficha"
+      >
+        {fmtNum(celda.valor)}<sup style={{ color: '#2563EB', fontWeight: 700, fontSize: 8 }}> auto</sup>
       </td>
     )
   }
