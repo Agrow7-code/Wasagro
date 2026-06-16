@@ -356,6 +356,17 @@ export function detectarCamposDudosos(columnas: ResumenColumna[]): string[] {
   return columnas.flatMap((col, idx) => detectarCamposDudososColumna(col, idx))
 }
 
+// Elige la mejor lectura del bloque DATOS entre la foto completa (a) y un recorte
+// ampliado (b). "Mejor" = menos discrepancias entre el % recalculado y el escrito
+// (calc vs formulario): una lectura con decimales y conteos correctos es internamente
+// consistente, así que produce menos dudosos. Empate o lectura sin 3 columnas →
+// conserva la primera (full-frame, el baseline). Pura y testeable.
+export function elegirMejorDatos(a: ResumenColumna[], b: ResumenColumna[]): ResumenColumna[] {
+  if (b.length !== 3) return a
+  if (a.length !== 3) return b
+  return detectarCamposDudosos(b).length < detectarCamposDudosos(a).length ? b : a
+}
+
 // ─── Atribución de puntos a lotes ─────────────────────────────────────────────
 // Cada bloque de puntos lleva un rótulo de sector (ej. "Corrijal"). Si coincide
 // con un lote registrado de la finca, atribuimos esos puntos a ese lote_id. Si

@@ -27,6 +27,7 @@ import {
   filasConDato,
   elegirMejorTabla,
   reconciliarCrossField,
+  elegirMejorDatos,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -1340,6 +1341,26 @@ describe('elegirMejorTabla', () => {
     const b = tablaFija(0, 12, 11)
     // no lanza, devuelve uno de los dos (el primero, por ser la rama `a` cuando b.filas.length=0)
     expect(() => elegirMejorTabla(a, b, null)).not.toThrow()
+  })
+})
+
+describe('elegirMejorDatos', () => {
+  // col con discrepancia calc≠formulario (lectura mala: decimal caído) vs consistente.
+  const malo  = [fullCol({ H_calculado: 37.5, H_formulario: 375 }), fullCol(), fullCol()]
+  const bueno = [fullCol({ H_calculado: 37.5, H_formulario: 37.5 }), fullCol(), fullCol()]
+
+  it('elige la lectura con menos discrepancias (crop más consistente)', () => {
+    expect(elegirMejorDatos(malo, bueno)).toBe(bueno)
+    expect(elegirMejorDatos(bueno, malo)).toBe(bueno) // empate-no: bueno tiene menos dudosos
+  })
+
+  it('conserva el full (a) si el crop (b) no trae 3 columnas', () => {
+    expect(elegirMejorDatos(malo, [fullCol(), fullCol()])).toBe(malo)
+  })
+
+  it('empate en discrepancias → conserva el full (a)', () => {
+    const otroBueno = [fullCol({ H_calculado: 37.5, H_formulario: 37.5 }), fullCol(), fullCol()]
+    expect(elegirMejorDatos(bueno, otroBueno)).toBe(bueno)
   })
 })
 

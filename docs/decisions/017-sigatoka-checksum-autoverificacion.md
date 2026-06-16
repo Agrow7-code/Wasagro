@@ -126,9 +126,21 @@ exacto → no se toca (P1: no adivinar). Solo se usan relaciones VERIFICADAS
 (`CORRELACIONES_SEMANA = [['ht','q5mas']]`); una relación falsa corregiría mal. Costo cero
 (aritmética pura, función testeable en `SigatokaHandler.ts`).
 
+#### Recovery del bloque DATOS (sub-pase enfocado)
+El bloque DATOS (A..M, lo lee `e1` sobre la foto completa) se lee mal en algunas fincas:
+decimales caídos (`37.5`→`375`) y conteos confundidos con el % de la fila de abajo
+(`D=2916` ← el `29.16` de la fila I). Validado en foto 2 (Viva Esperanza): un recorte
+ampliado + preprocesado de la región DATOS, leído por un prompt enfocado
+(`sp-03e1b-sigatoka-datos.md`), lee los decimales y conteos correctos (D=7→I=29.2%, antes
+12150%). Lazy: solo se dispara si `detectarCamposDudosos` encuentra discrepancias
+calc-vs-formulario. `elegirMejorDatos(full, crop)` se queda con la lectura de MENOS
+discrepancias (más internamente consistente). Defensa en profundidad con el guard de
+validez de `pct` (un % de plantas no puede exceder 100% → null si imposible).
+
 Regiones usadas (fracciones, generosas para que el zoom 4× no corte la fila T=):
 - 11sem: `{ left: 0.53, top: 0.08, width: 0.47, height: 0.40, zoom: 4 }`
 - 00sem: `{ left: 0.53, top: 0.44, width: 0.47, height: 0.42, zoom: 4 }`
+- DATOS: `{ left: 0.0, top: 0.50, width: 0.66, height: 0.30, zoom: 4 }`
 
 `elegirMejorTabla(full, crop, totalesRef)` selecciona el ganador por prioridad:
 1. Uno nulo/sin filas → el otro gana.

@@ -26,7 +26,7 @@ import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.j
 import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
 import { aplicarFiltroConfianza } from './confidenceFilter.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
-import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, reconciliarCrossField, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, reconciliarCrossField, elegirMejorDatos, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -599,6 +599,10 @@ export class WasagroAIAgent implements IWasagroLLM {
     // para que el zoom no corte la fila T= ni filas del borde (se afina con fichas).
     const REGION_11SEM = { left: 0.53, top: 0.08, width: 0.47, height: 0.40, zoom: 4 }
     const REGION_00SEM = { left: 0.53, top: 0.44, width: 0.47, height: 0.42, zoom: 4 }
+    // Bloque DATOS (A..M, 3 columnas) abajo-izquierda: el modelo suelta decimales y
+    // confunde conteos en la foto completa (D=2916 ← el "29.16" de la fila I). Recorte
+    // ampliado con las 3 columnas + rótulos A..M.
+    const REGION_DATOS = { left: 0.0, top: 0.50, width: 0.66, height: 0.30, zoom: 4 }
 
     // Recorta, luego corre la pasada i sobre la imagen recortada.
     // Si el recorte falla (sharp error o imagen no válida) devuelve null directamente
@@ -793,6 +797,28 @@ export class WasagroAIAgent implements IWasagroLLM {
         tab00Raw ? (t00.confidenceScore ?? 0.6) : 0,
         plgRaw   ? (plg.confidenceScore ?? 0.6) : 0,
       ),
+    }
+
+    // Recovery DATOS (lazy): el bloque A..M se lee mal en la foto completa en algunas
+    // fincas (decimales caídos: 37.5→375; conteos confundidos con el % de la fila de
+    // abajo: D=2916 ← "29.16"). Si hay discrepancias calc-vs-formulario, re-leemos DATOS
+    // de un recorte ampliado+preprocesado y nos quedamos con la lectura más consistente.
+    // Solo gasta una llamada cuando hace falta (mismo patrón que el crop de tablas).
+    if (detectarCamposDudosos(merged.resumenColumnas).length > 0) {
+      const cropDatos = await this.#recortarRegion(base64, REGION_DATOS, traceId)
+      if (cropDatos) {
+        const reRaw = await conCap(this.#extraerParteSigatoka('sp-03e1b-sigatoka-datos.md', 'Extrae SOLO el bloque DATOS (A..M, 3 columnas) del recorte ampliado.', cropDatos, mimeType, traceId, costCtx))
+        const colsCrop = Array.isArray((reRaw as any)?.resumenColumnas)
+          ? ((reRaw as any).resumenColumnas as any[]).map(calcularColumna)
+          : []
+        if (colsCrop.length === 3) {
+          const mejor = elegirMejorDatos(merged.resumenColumnas, colsCrop)
+          if (mejor !== merged.resumenColumnas) {
+            trace.event({ name: 'sigatoka_datos_crop_elegido', level: 'DEFAULT', input: { dudosos_full: detectarCamposDudosos(merged.resumenColumnas).length, dudosos_crop: detectarCamposDudosos(colsCrop).length } })
+            merged.resumenColumnas = mejor
+          }
+        }
+      }
     }
 
     const camposDudososBase = detectarCamposDudosos(merged.resumenColumnas)
