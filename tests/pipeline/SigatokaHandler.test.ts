@@ -1362,6 +1362,19 @@ describe('elegirMejorDatos', () => {
     const otroBueno = [fullCol({ H_calculado: 37.5, H_formulario: 37.5 }), fullCol(), fullCol()]
     expect(elegirMejorDatos(bueno, otroBueno)).toBe(bueno)
   })
+
+  it('NO elige un crop cuya "consistencia" viene de % no verificables (todo null) (C1, P1)', () => {
+    // full: 1 discrepancia REAL pero verificable (calc y form presentes).
+    const full = [fullCol({ H_calculado: 37.5, H_formulario: 40 }), fullCol(), fullCol()]
+    // cropBasura: conteos imposibles → pct anuló H/I/J_calculado → 0 discrepancias
+    // DETECTADAS (no se compara contra null), pero NO verificable. No debe ganar.
+    const cropBasura = [
+      fullCol({ H_calculado: null, I_calculado: null, J_calculado: null }),
+      fullCol({ H_calculado: null, I_calculado: null, J_calculado: null }),
+      fullCol({ H_calculado: null, I_calculado: null, J_calculado: null }),
+    ]
+    expect(elegirMejorDatos(full, cropBasura)).toBe(full)
+  })
 })
 
 describe('reconciliarCrossField', () => {

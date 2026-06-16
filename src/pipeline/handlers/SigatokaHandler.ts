@@ -356,15 +356,23 @@ export function detectarCamposDudosos(columnas: ResumenColumna[]): string[] {
   return columnas.flatMap((col, idx) => detectarCamposDudososColumna(col, idx))
 }
 
+// Cuenta porcentajes (H/I/J) NO verificables: calc=null porque el conteo era imposible
+// (num>den, pct lo anuló) o faltaba. Un null NO es "sin error" — es "no se pudo verificar".
+// Penalizarlo evita que una lectura basura (conteos imposibles → todo null → 0
+// discrepancias detectadas) gane sobre una verificable con una discrepancia real.
+const pctNoVerificables = (cols: ResumenColumna[]): number =>
+  cols.reduce((n, c) =>
+    n + (c.H_calculado == null ? 1 : 0) + (c.I_calculado == null ? 1 : 0) + (c.J_calculado == null ? 1 : 0), 0)
+
 // Elige la mejor lectura del bloque DATOS entre la foto completa (a) y un recorte
-// ampliado (b). "Mejor" = menos discrepancias entre el % recalculado y el escrito
-// (calc vs formulario): una lectura con decimales y conteos correctos es internamente
-// consistente, así que produce menos dudosos. Empate o lectura sin 3 columnas →
-// conserva la primera (full-frame, el baseline). Pura y testeable.
+// ampliado (b). Score = discrepancias (calc≠formulario) + porcentajes no verificables;
+// MENOR gana. Una lectura con decimales/conteos correctos es consistente Y verificable.
+// Empate o lectura sin 3 columnas → conserva la primera (full-frame, el baseline). Pura.
 export function elegirMejorDatos(a: ResumenColumna[], b: ResumenColumna[]): ResumenColumna[] {
   if (b.length !== 3) return a
   if (a.length !== 3) return b
-  return detectarCamposDudosos(b).length < detectarCamposDudosos(a).length ? b : a
+  const score = (cols: ResumenColumna[]): number => detectarCamposDudosos(cols).length + pctNoVerificables(cols)
+  return score(b) < score(a) ? b : a
 }
 
 // ─── Atribución de puntos a lotes ─────────────────────────────────────────────

@@ -811,13 +811,21 @@ export class WasagroAIAgent implements IWasagroLLM {
         const colsCrop = Array.isArray((reRaw as any)?.resumenColumnas)
           ? ((reRaw as any).resumenColumnas as any[]).map(calcularColumna)
           : []
-        if (colsCrop.length === 3) {
-          const mejor = elegirMejorDatos(merged.resumenColumnas, colsCrop)
-          if (mejor !== merged.resumenColumnas) {
-            trace.event({ name: 'sigatoka_datos_crop_elegido', level: 'DEFAULT', input: { dudosos_full: detectarCamposDudosos(merged.resumenColumnas).length, dudosos_crop: detectarCamposDudosos(colsCrop).length } })
-            merged.resumenColumnas = mejor
-          }
-        }
+        // P4: siempre trazamos el resultado del recovery (ganó full, ganó crop, o el
+        // crop fue inválido) — así el flywheel mide si la región DATOS produce crops
+        // útiles o ruidosos, no solo cuando el crop gana.
+        const ganador = colsCrop.length !== 3
+          ? 'crop_invalido'
+          : elegirMejorDatos(merged.resumenColumnas, colsCrop) === colsCrop ? 'crop' : 'full'
+        trace.event({
+          name: 'sigatoka_datos_recovery', level: 'DEFAULT',
+          input: {
+            ganador,
+            dudosos_full: detectarCamposDudosos(merged.resumenColumnas).length,
+            dudosos_crop: colsCrop.length === 3 ? detectarCamposDudosos(colsCrop).length : null,
+          },
+        })
+        if (ganador === 'crop') merged.resumenColumnas = colsCrop
       }
     }
 
