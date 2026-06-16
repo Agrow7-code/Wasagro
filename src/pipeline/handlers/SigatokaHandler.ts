@@ -526,6 +526,9 @@ const valorCelda = (f: FilaSemana, k: string): number | null =>
 const cuadraColumna = (filas: FilaSemana[], totales: TotalesSemana, col: string): boolean | null =>
   verificarChecksumTabla(filas, totales).columnas.find(c => c.columna === col)?.cuadra ?? null
 
+const sumaColumnaExacta = (filas: FilaSemana[], col: string): number =>
+  filas.reduce((s, f) => s + (valorCelda(f, col) ?? 0), 0)
+
 // Devuelve filas reconciliadas + las celdas corregidas ("ht[3]"). Solo aplica una
 // corrección cuando hace que esa columna cuadre EXACTO con su T= (doble compuerta).
 export function reconciliarCrossField(
@@ -545,11 +548,15 @@ export function reconciliarCrossField(
       const cand = out.map(f => {
         const tv = valorCelda(f, target), sv = valorCelda(f, source)
         return tv != null && sv != null && tv !== sv
-          ? { ...f, [target]: { valor: sv, estado: 'leida' as const } }
+          ? { ...f, [target]: { valor: sv, estado: 'leida' as const, origen: 'cross_field' as const } }
           : f
       })
-      // Doble compuerta: adoptar SOLO si ahora la columna cuadra exacto contra el T=.
-      if (cuadraColumna(cand, totales, target) === true) {
+      // Doble compuerta ESTRICTA: adoptar SOLO si la suma da EXACTO el T= (no ±1).
+      // Con la tolerancia ±1, si el correlato también tiene un error de 1, la copia
+      // podría "cuadrar" falso y meter un valor incorrecto (P1). Exigir exacto cierra
+      // ese hueco: solo adoptamos cuando la corrección reconstruye el total al dígito.
+      const tTotal = totales[target]
+      if (tTotal != null && sumaColumnaExacta(cand, target) === tTotal) {
         cand.forEach((f, i) => {
           if (valorCelda(f, target) !== valorCelda(out[i]!, target)) corregidas.push(`${target}[${i}]`)
         })

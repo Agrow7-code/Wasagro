@@ -24,9 +24,17 @@ const numNullable = () => z.preprocess(aNumero, z.number().nullable())
 export const EstadoCeldaSchema = z.enum(['leida', 'vacia', 'ilegible'])
 export type EstadoCelda = z.infer<typeof EstadoCeldaSchema>
 
+// Procedencia del valor de la celda. Ausente/'modelo' = leído directo por el modelo.
+// 'cross_field' = corregido por el oráculo (reconciliarCrossField) usando el correlato
+// + el total como compuerta. Preserva la auditabilidad en el objeto persistido (P1/P4):
+// el asesor y el flywheel (D32) distinguen una lectura del modelo de una auto-corrección.
+export const OrigenCeldaSchema = z.enum(['modelo', 'cross_field'])
+export type OrigenCelda = z.infer<typeof OrigenCeldaSchema>
+
 export const CeldaMuestraSchema = z.object({
   valor:  numNullable(),
   estado: EstadoCeldaSchema,
+  origen: OrigenCeldaSchema.optional(),
 })
 export type CeldaMuestra = z.infer<typeof CeldaMuestraSchema>
 

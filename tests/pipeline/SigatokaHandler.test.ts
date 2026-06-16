@@ -1346,9 +1346,22 @@ describe('reconciliarCrossField', () => {
     const totales: TotalesSemana = { ht: 21, q5mas: 21, hVle: null, q5menos: null, lc: null }
     const r = reconciliarCrossField(filas, totales)
     expect(r.corregidas).toContain('ht[0]')
-    expect(r.filas[0]!.ht).toEqual({ valor: 9, estado: 'leida' })
+    // celda corregida: marca origen 'cross_field' (auditabilidad / flywheel, P1)
+    expect(r.filas[0]!.ht).toEqual({ valor: 9, estado: 'leida', origen: 'cross_field' })
     // las filas que ya coincidían no se tocan
     expect(r.filas[1]!.ht.valor).toBe(6)
+    expect(r.filas[1]!.ht.origen).toBeUndefined()
+  })
+
+  it('NO adopta si el correlato tambien esta mal y la suma cuadra solo por ±1 (C1, P1)', () => {
+    // Caso peligroso: ambos leen mal la fila 2 (real=5, leido=4). H.T=[7,8,4]=19 (T=21);
+    // Q>5%=[8,8,4]=20. Reconciliar H.T←Q>5% → [8,8,4]=20. Con ±1, 20 "cuadraría" contra 21
+    // y adoptaria un 4 incorrecto. Con compuerta EXACTA, 20≠21 → NO adopta.
+    const filas = [fHQ(7, 8), fHQ(8, 8), fHQ(4, 4)]
+    const totales: TotalesSemana = { ht: 21, q5mas: 21, hVle: null, q5menos: null, lc: null }
+    const r = reconciliarCrossField(filas, totales)
+    expect(r.corregidas).toHaveLength(0)
+    expect(r.filas[2]!.ht.valor).toBe(4) // no se inventó un 5; sigue como lo leyó el modelo
   })
 
   it('NO adopta si la corrección no cierra exacto el total (no adivina, P1)', () => {
