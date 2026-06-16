@@ -310,8 +310,12 @@ export type ResumenColumnaSinCalculo = Omit<
 
 const round1 = (n: number): number => parseFloat(n.toFixed(1))
 
+// % de plantas en una categoría sobre el total muestreado (A). El conteo de la
+// categoría (C/D/E) NUNCA puede exceder A → si num > den es imposible (dígito mal
+// leído, ej. D=2916 con A=24) → null. No fabricamos un % imposible/válido-pero-falso
+// que llegue al cliente (P1). El recálculo lo detecta y el evento va a requires_review.
 const pct = (num: number | null, den: number | null): number | null =>
-  num != null && den != null && den !== 0 ? round1((num / den) * 100) : null
+  num != null && den != null && den > 0 && num <= den ? round1((num / den) * 100) : null
 const ratio = (num: number | null, den: number | null): number | null =>
   num != null && den != null && den !== 0 ? round1(num / den) : null
 

@@ -124,6 +124,15 @@ describe('calcularColumna', () => {
   it('I = (D/A)·100 con A=20, D=1 → 5', () => {
     expect(calcularColumna(colRaw({ A: 20, D: 1 })).I_calculado).toBe(5)
   })
+
+  it('conteo de categoria > A (imposible) → null, no un % >100% (P1)', () => {
+    // D=2916 con A=24 (dígito mal leído): un % de plantas no puede pasar de 100%.
+    // Debe dar null (→ requires_review), nunca 12150% al cliente.
+    expect(calcularColumna(colRaw({ A: 24, D: 2916 })).I_calculado).toBeNull()
+    expect(calcularColumna(colRaw({ A: 24, C: 30 })).H_calculado).toBeNull()
+    // K/L/M (hojas por planta) NO se topan a 100: pueden ser >1 legítimamente.
+    expect(calcularColumna(colRaw({ A: 19, B: 127 })).K_calculado).toBe(6.7)
+  })
 })
 
 // ─── detectarCamposDudosos (multi-columna) ───────────────────────────────────
