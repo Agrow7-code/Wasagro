@@ -849,7 +849,6 @@ async function finalizarMuestreoSigatoka(
     costCtx?: CostContext | undefined
   },
 ): Promise<void> {
-  const camposAclarar = sigatoka.camposDudosos.slice(0, 2)
   const datos_evento: Record<string, unknown> = {
     tipo_documento: 'muestreo_sigatoka_banano',
     sigatoka,
@@ -872,7 +871,7 @@ async function finalizarMuestreoSigatoka(
   })
 
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
-  await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka, camposAclarar))
+  await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka))
 
   const ileg = contarCeldasIlegibles(sigatoka.puntosMuestreo, sigatoka.plantas11sem, sigatoka.plantas00sem ?? [])
   if (ileg.ruta === 'preguntar' && eventoId) {

@@ -318,44 +318,44 @@ describe('aplicarAclaraciones', () => {
 describe('buildWhatsappSummary — alerta multi-columna', () => {
   it('alerta cuando ALGUNA columna tiene J > 10 (no perder el peor caso)', () => {
     const m = muestreo([fullCol({ J_calculado: 0 }), fullCol({ J_calculado: 29 }), fullCol({ J_calculado: 95 })])
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/EE3-6/)
     expect(msg).toMatch(/95%/)
   })
 
   it('alerta I cuando alguna columna supera 5', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol(), fullCol({ I_calculado: 7 })]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol(), fullCol({ I_calculado: 7 })]))
     expect(msg).toMatch(/EE2 avanzado/)
   })
 
   it('alerta M cuando alguna columna baja de 9', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ M_calculado: 7 }), fullCol()]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol({ M_calculado: 7 }), fullCol()]))
     expect(msg).toMatch(/hojas funcionales bajo/)
   })
 
   it('sin alertas con valores normales (3 columnas — guard lectura no activa)', () => {
     const col = fullCol({ H_calculado: 5, I_calculado: 2, J_calculado: 3, M_calculado: 11 })
-    const msg = buildWhatsappSummary(muestreo([col, col, col]), [])
+    const msg = buildWhatsappSummary(muestreo([col, col, col]))
     expect(msg).not.toMatch(/⚠️/)
   })
 
   it('muestra EE2 leve (1-3) por las 3 columnas — no esconde el peor caso', () => {
     const msg = buildWhatsappSummary(muestreo([
       fullCol({ H_calculado: 0 }), fullCol({ H_calculado: 10.5 }), fullCol({ H_calculado: 47.4 }),
-    ]), [])
+    ]))
     expect(msg).toMatch(/1-3/)
     expect(msg).toContain('47.4%')
     expect(msg).toContain('10.5%')
   })
 
   it('distingue EE2 leve (1-3) de EE2 avanzado (4+)', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0 })]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0 })]))
     expect(msg).toMatch(/EE2 avanzado/)
     expect(msg).toMatch(/1-3/)
   })
 
   it('alerta cuando EE2 leve (1-3) supera el umbral', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]))
     expect(msg).toMatch(/⚠️.*EE2 \(1-3\)/)
   })
 
@@ -369,18 +369,18 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
       fila11({ fila: 3, ...vacia }),
       fila11({ fila: 4, ...vacia }),
     ]
-    const msg = buildWhatsappSummary(muestreo([fullCol()], [], { plantas11sem: onceSem }), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol()], [], { plantas11sem: onceSem }))
     expect(msg).toMatch(/11 semanas\* — 2 plantas/)
     expect(msg).not.toMatch(/4 plantas/)
   })
 
   it('estado general CRÍTICO cuando EE3-6 supera 10', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ J_calculado: 15 })]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol({ J_calculado: 15 })]))
     expect(msg).toMatch(/CRÍTICO/)
   })
 
   it('estado general ATENCIÓN cuando EE2 (1-3) alto pero sin severos', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0, J_calculado: 0, M_calculado: 11 })]), [])
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0, J_calculado: 0, M_calculado: 11 })]))
     expect(msg).toMatch(/ATENCIÓN/)
     expect(msg).not.toMatch(/CRÍTICO/)
   })
@@ -388,13 +388,13 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
   it('estado general BAJO CONTROL con 3 columnas sanas', () => {
     // Necesita 3 columnas para que el guard de lectura parcial no tape el BAJO CONTROL.
     const col = fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 })
-    const msg = buildWhatsappSummary(muestreo([col, col, col]), [])
+    const msg = buildWhatsappSummary(muestreo([col, col, col]))
     expect(msg).toMatch(/BAJO CONTROL/)
   })
 
   it('muestra supervisor, fecha, erradicadas e índice EF cuando están presentes', () => {
     const m = muestreo([fullCol()], [], { supervisor: 'Marios', fecha: '2026-06-05', erradicadasBsv: 0, pEfFinca: 0.8 })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toContain('Marios')
     expect(msg).toContain('2026-06-05')
     expect(msg).toMatch(/Erradicadas BSV/)
@@ -404,25 +404,25 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
 
   it('omite erradicadas/índice EF cuando la pasada no los leyó (null)', () => {
     const m = muestreo([fullCol()], [], { erradicadasBsv: null, pEfFinca: null })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).not.toMatch(/Erradicadas BSV/)
     expect(msg).not.toMatch(/Índice EF/)
   })
 
   it('omite plagas foliares cuando vienen en 0/null (no muestra ceros no confiables)', () => {
     const m = muestreo([fullCol()], [], { plagasFoliares: { ceramida: { h: 0, p: 0, m: 0 }, sibine: { h: null, p: null, m: null } } })
-    expect(buildWhatsappSummary(m, [])).not.toMatch(/Plagas foliares/)
+    expect(buildWhatsappSummary(m)).not.toMatch(/Plagas foliares/)
   })
 
   it('muestra plagas foliares cuando hay algún valor real', () => {
     const m = muestreo([fullCol()], [], { plagasFoliares: { ceramida: { h: 13, p: 7, m: 12 }, sibine: { h: 0, p: 0, m: 0 } } })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/Plagas foliares/)
     expect(msg).toContain('13')
   })
 
   it('avisa que el asesor revisa cuando hay camposAclarar — sin prometer un follow-up del bot', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol()]), ['resumen[col1].K (…)'])
+    const msg = buildWhatsappSummary(muestreo([fullCol()], ['resumen[col1].K (…)']))
     // Honesto: derivamos al asesor (el recálculo es la fuente confiable), no
     // prometemos escribirle nosotros (no existe esa máquina de seguimiento).
     expect(msg).toMatch(/asesor/)
@@ -431,11 +431,31 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
   })
 
   it('pluraliza el aviso de revisión y no usa el emoji ❓', () => {
-    const unMsg = buildWhatsappSummary(muestreo([fullCol()]), ['a'])
-    const dosMsg = buildWhatsappSummary(muestreo([fullCol()]), ['a', 'b'])
+    const unMsg = buildWhatsappSummary(muestreo([fullCol()], ['a']))
+    const dosMsg = buildWhatsappSummary(muestreo([fullCol()], ['a', 'b']))
     expect(unMsg).toMatch(/1 valor\b/)
     expect(dosMsg).toMatch(/2 valores\b/)
     expect(unMsg).not.toContain('❓')
+  })
+
+  // #3 — el disclaimer contaba camposAclarar (slice 0..2): con muchos dudosos
+  // decía "2 valores" aunque hubiera 12. Ahora cuenta data.camposDudosos completo.
+  it('cuenta TODOS los campos dudosos en el disclaimer, no los 2 del cap del follow-up (#3)', () => {
+    const dudosos = Array.from({ length: 12 }, (_, i) => `resumen[col1].X${i}`)
+    const msg = buildWhatsappSummary(muestreo([fullCol()], dudosos))
+    expect(msg).toMatch(/12 valores no cuadran/)
+    expect(msg).not.toMatch(/\b2 valores no cuadran/)
+  })
+
+  // #6 — caveat de severidad provisional cuando el bloque DATOS no cuadra.
+  it('marca "Severidad provisional — en revisión" cuando una columna DATOS no cuadra (#6)', () => {
+    const m = muestreo([fullCol({ J_calculado: 5, J_formulario: 12 })])
+    expect(buildWhatsappSummary(m)).toMatch(/Severidad provisional/)
+  })
+
+  it('NO marca severidad provisional cuando las columnas DATOS cuadran (#6)', () => {
+    const m = muestreo([fullCol({ J_calculado: 12, J_formulario: 12 })])
+    expect(buildWhatsappSummary(m)).not.toMatch(/Severidad provisional/)
   })
 })
 
@@ -867,7 +887,7 @@ describe('buildWhatsappSummary — extensiones', () => {
       totales11sem: null,
       promedios11sem: { ht: 13.9, hVle: 6.7, q5menos: null, q5mas: 13.9, lc: 13.6 },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/11 sem/)
     expect(msg).toMatch(/\b19\b/)
     expect(msg).toContain('H.T')
@@ -878,14 +898,14 @@ describe('buildWhatsappSummary — extensiones', () => {
     const m = muestreo([fullCol()], [], {
       plantas00sem: Array.from({ length: 5 }, (_, i) => fila11({ fila: i + 1 })),
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/00 sem/)
     expect(msg).toMatch(/\b5\b/)
   })
 
   it('omite líneas de semana cuando no hay filas ni promedios', () => {
     const m = muestreo([fullCol()], [], { plantas11sem: [], plantas00sem: [] })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // el count 0 no aparece
     expect(msg).not.toMatch(/11 sem.*\(0\)/)
     expect(msg).not.toMatch(/00 sem.*\(0\)/)
@@ -895,7 +915,7 @@ describe('buildWhatsappSummary — extensiones', () => {
     const m = muestreo([fullCol()], [], {
       verificacion11sem: { columnas: [], cuadraTodo: true },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/Cuadra con los totales/)
   })
 
@@ -909,7 +929,7 @@ describe('buildWhatsappSummary — extensiones', () => {
         cuadraTodo: false,
       },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/no cuadra/)
     // El nuevo formato usa etiquetas humanas: H.T y LC (no "ht" y "lc" crudos)
     expect(msg).toMatch(/H\.T/)
@@ -922,15 +942,15 @@ describe('buildWhatsappSummary — extensiones', () => {
   it('no muestra veredicto de checksum cuando verificacion es null o ausente', () => {
     const m1 = muestreo([fullCol()], [], { verificacion11sem: null })
     const m2 = muestreo([fullCol()])
-    expect(buildWhatsappSummary(m1, [])).not.toMatch(/Cuadra/)
-    expect(buildWhatsappSummary(m2, [])).not.toMatch(/Cuadra/)
+    expect(buildWhatsappSummary(m1)).not.toMatch(/Cuadra/)
+    expect(buildWhatsappSummary(m2)).not.toMatch(/Cuadra/)
   })
 
   it('muestra G de plagas foliares cuando tiene valor', () => {
     const m = muestreo([fullCol()], [], {
       plagasFoliares: { ceramida: { h: 1, p: 0, m: 2, g: 5 }, sibine: { h: null, p: null, m: null, g: null } },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/g:5/)
   })
 
@@ -938,7 +958,7 @@ describe('buildWhatsappSummary — extensiones', () => {
     const m = muestreo([fullCol()], [], {
       plagasFoliares: { ceramida: { h: 1, p: 0, m: 2, g: null }, sibine: { h: null, p: null, m: null, g: null } },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // Cuando hay h/p/m, el bloque se muestra, pero g no sale si es null
     expect(msg).not.toMatch(/g:null/)
     expect(msg).not.toMatch(/g:-/)
@@ -955,21 +975,21 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
 
   it('muestra *11 semanas* en negritas con el conteo', () => {
     const m = muestreo([fullCol()], [], { plantas11sem: filas11, promedios11sem: prom11 })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/\*11 semanas\*/)
     expect(msg).toMatch(/19/)
   })
 
   it('muestra *00 semanas* en negritas con el conteo', () => {
     const m = muestreo([fullCol()], [], { plantas00sem: filas00, promedios00sem: prom00 })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/\*00 semanas\*/)
     expect(msg).toMatch(/14/)
   })
 
   it('promedios aparecen indentados (con 2 espacios al inicio)', () => {
     const m = muestreo([fullCol()], [], { plantas11sem: filas11, promedios11sem: prom11 })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // La línea de promedios debe comenzar con "  " (dos espacios)
     const lines = msg.split('\n')
     const promLine = lines.find(l => l.includes('H.T') && l.includes('LC'))
@@ -979,7 +999,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
 
   it('finca: erradicadas e índice EF en línea separada sin bullet de tabla', () => {
     const m = muestreo([fullCol()], [], { erradicadasBsv: 0, pEfFinca: 0.8 })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/\*Finca:\*/)
     expect(msg).toMatch(/Erradicadas BSV/)
     expect(msg).toMatch(/Índice EF/)
@@ -991,7 +1011,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
       promedios11sem: prom11,
       verificacion11sem: { columnas: [], cuadraTodo: true },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // El ✅ debe estar en la línea de "11 semanas", no en un bloque aparte
     const lines = msg.split('\n')
     const sem11Line = lines.find(l => l.includes('11 semanas'))
@@ -1005,7 +1025,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
       promedios11sem: prom11,
       verificacion11sem: { columnas: [{ columna: 'ht', sumaFilas: 135, totalFicha: 264, cuadra: false }], cuadraTodo: false },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     const lines = msg.split('\n')
     const sem11Line = lines.find(l => l.includes('11 semanas'))
     expect(sem11Line).toBeDefined()
@@ -1018,7 +1038,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
       promedios11sem: prom11,
       verificacion11sem: null,
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     const lines = msg.split('\n')
     const sem11Line = lines.find(l => l.includes('11 semanas'))
     expect(sem11Line).toBeDefined()
@@ -1034,7 +1054,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
         cuadraTodo: false,
       },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // Debe mencionar "11 semanas", la etiqueta "H.T" (no "ht"), y los números
     expect(msg).toMatch(/11 semanas/)
     expect(msg).toMatch(/H\.T/)
@@ -1048,7 +1068,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
       verificacion11sem: { columnas: [{ columna: 'ht', sumaFilas: 264, totalFicha: 264, cuadra: true }], cuadraTodo: true },
       verificacion00sem: { columnas: [{ columna: 'ht', sumaFilas: 100, totalFicha: 100, cuadra: true }], cuadraTodo: true },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // Una sola línea de confirmación global
     expect(msg).toMatch(/Cuadra con los totales/)
     // No debe mostrar dos bloques de checksum separados
@@ -1069,7 +1089,7 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
         cuadraTodo: false,
       },
     })
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // Debe mostrar las dos tablas en el veredicto
     expect(msg).toMatch(/11 semanas/)
     expect(msg).toMatch(/00 semanas/)
@@ -1083,14 +1103,14 @@ describe('buildWhatsappSummary — seguimiento reestructurado (Tarea 1)', () => 
 describe('buildWhatsappSummary — guard LECTURA INCOMPLETA (Tarea 2)', () => {
   it('muestra ⚠️ LECTURA INCOMPLETA cuando solo hay 1 columna en resumenColumnas', () => {
     const m = muestreo([fullCol({ H_calculado: 5, I_calculado: 1, J_calculado: 2, M_calculado: 12 })], [], {})
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     expect(msg).toMatch(/LECTURA INCOMPLETA/)
     expect(msg).not.toMatch(/BAJO CONTROL/)
   })
 
   it('muestra ⚠️ LECTURA INCOMPLETA cuando hay 2 columnas (necesita 3)', () => {
     const cols = [fullCol(), fullCol()]
-    const msg = buildWhatsappSummary(muestreo(cols), [])
+    const msg = buildWhatsappSummary(muestreo(cols))
     expect(msg).toMatch(/LECTURA INCOMPLETA/)
   })
 
@@ -1100,7 +1120,7 @@ describe('buildWhatsappSummary — guard LECTURA INCOMPLETA (Tarea 2)', () => {
       fullCol({ H_calculado: 3, I_calculado: 0, J_calculado: 1, M_calculado: 13 }),
       fullCol({ H_calculado: 4, I_calculado: 2, J_calculado: 3, M_calculado: 11 }),
     ]
-    const msg = buildWhatsappSummary(muestreo(cols), [])
+    const msg = buildWhatsappSummary(muestreo(cols))
     expect(msg).toMatch(/BAJO CONTROL/)
     expect(msg).not.toMatch(/LECTURA INCOMPLETA/)
   })
@@ -1108,7 +1128,7 @@ describe('buildWhatsappSummary — guard LECTURA INCOMPLETA (Tarea 2)', () => {
   it('estado CRÍTICO/ATENCIÓN no se bloquea por lectura incompleta — son problemas distintos', () => {
     // LECTURA INCOMPLETA reemplaza BAJO CONTROL, no los estados de alerta
     const m = muestreo([fullCol({ J_calculado: 15 })]) // 1 columna + severo
-    const msg = buildWhatsappSummary(m, [])
+    const msg = buildWhatsappSummary(m)
     // Con cols < 3 Y severo, el estado calculado es CRÍTICO pero cols incompletas
     // La regla dice: si cols < 3, estado general NO puede ser BAJO CONTROL
     // → si el estado era CRÍTICO, se mantiene (lectura incompleta no lo tapa)

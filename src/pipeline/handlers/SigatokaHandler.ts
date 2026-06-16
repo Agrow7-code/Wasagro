@@ -760,8 +760,13 @@ const LABEL_COLUMNA_SEMANA: Record<string, string> = {
   lc:      'LC',
 }
 
-export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: string[]): string {
+export function buildWhatsappSummary(data: SigatokaMuestreo): string {
   const cols = data.resumenColumnas
+  // #6 — Severidad provisional: el bloque DATOS (columnas H/I/J/K/M) es la fuente
+  // de los números de severidad. Si alguna de esas columnas no cuadra (calculado ≠
+  // formulario), la severidad mostrada es incierta y NO debe leerse como alarma
+  // confirmada — se marca provisional para evitar una falsa alarma al cliente (P1).
+  const datosDudosos = detectarCamposDudosos(cols)
   const A = cols[0]?.A ?? null
   const K = cols[0]?.K_calculado ?? null
   const peorH = maximo(cols.map(c => c.H_calculado))
@@ -871,6 +876,9 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
 • Hoja libre de estría (prom): ${f(K)}
 • Hojas funcionales (mín): ${f(peorM)}`
 
+  // #6 — caveat justo bajo la severidad cuando el bloque DATOS no cuadra.
+  if (datosDudosos.length > 0) msg += `\n⚠️ Severidad provisional — en revisión`
+
   if (seguimientoLineas.length > 0) msg += `\n\n🌱 *Seguimiento*\n${seguimientoLineas.join('\n')}`
 
   // Plagas foliares: solo si hay algún valor real (no mostrar 0/null — esa zona
@@ -907,11 +915,13 @@ export function buildWhatsappSummary(data: SigatokaMuestreo, camposAclarar: stri
   }
 
   if (alertas.length > 0) msg += '\n\n' + alertas.join('\n')
-  if (camposAclarar.length > 0) {
+  if (data.camposDudosos.length > 0) {
     // Honesto: una discrepancia es entre el recálculo (fuente confiable, desde
     // los conteos crudos) y el total escrito a mano. No le preguntamos al tomador
     // por esto ni prometemos un follow-up que no existe — lo deriva el asesor.
-    const n = camposAclarar.length
+    // #3 — el conteo sale de la lista COMPLETA (data.camposDudosos), no de un slice
+    // capado a 2: antes el disclaimer decía "2 valores" aunque hubiera 12 (undercount).
+    const n = data.camposDudosos.length
     const plural = n > 1
     msg += `\n\n⚠️ ${n} valor${plural ? 'es' : ''} no ${plural ? 'cuadran' : 'cuadra'} con las cuentas — usé el recálculo y tu asesor lo revisa.`
   }
