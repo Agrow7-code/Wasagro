@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../../integrations/supabase.js'
 import { requireFincaAccessAsync, getUserSupabase } from '../../auth/middleware.js'
-import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos, guardarCorreccionesSigatoka, type CorreccionSigatokaInsert } from '../../pipeline/supabaseQueries.js'
+import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos, guardarCorreccionesSigatoka, getEventosByFincaRango, type CorreccionSigatokaInsert } from '../../pipeline/supabaseQueries.js'
+import { resumirEventos } from './dashboardResumen.js'
 import { getSignedUrlEvento } from '../../integrations/supabaseStorage.js'
 import { contarCeldasIlegibles, aplicarAclaraciones, aplicarCorrecciones } from '../../pipeline/handlers/SigatokaHandler.js'
 import { langfuse } from '../../integrations/langfuse.js'
@@ -66,6 +67,55 @@ fincaRouter.get('/:finca_id/lotes', async (c) => {
     .order('lote_id')
   if (error) return c.json({ error: error.message }, 500)
   return c.json({ lotes: data ?? [] })
+})
+
+// Ventana de N días calendario terminando hoy (UTC), como [desde, hasta) para
+// el filtro `created_at` de getEventosByFincaRango (que usa gte/lt).
+function ventanaDias(dias: number): { desde: Date; hasta: Date; ahora: Date } {
+  const ahora = new Date()
+  const inicioHoy = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate()))
+  const desde = new Date(inicioHoy); desde.setUTCDate(desde.getUTCDate() - (dias - 1))
+  const hasta = new Date(inicioHoy); hasta.setUTCDate(hasta.getUTCDate() + 1) // mañana 00:00 → incluye todo hoy
+  return { desde, hasta, ahora }
+}
+
+// GET /api/finca/:finca_id/resumen — KPIs del dashboard (últimos 7 días)
+fincaRouter.get('/:finca_id/resumen', async (c) => {
+  const finca_id = c.req.param('finca_id')
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  const db = getUserSupabase(c) ?? supabase
+  const { desde, hasta, ahora } = ventanaDias(7)
+  const rows = await getEventosByFincaRango(finca_id, desde, hasta, db)
+  const resumen = resumirEventos(
+    rows.map(r => ({ tipo_evento: r.tipo_evento, created_at: r.created_at, status: r.status, confidence_score: r.confidence_score, lote_id: r.lote_id })),
+    ahora,
+  )
+  return c.json({ resumen })
+})
+
+// GET /api/finca/:finca_id/eventos?tipo=&dias= — feed de eventos de campo (más reciente primero)
+fincaRouter.get('/:finca_id/eventos', async (c) => {
+  const finca_id = c.req.param('finca_id')
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+  const tipo = c.req.query('tipo') || null
+  const dias = Math.min(Math.max(parseInt(c.req.query('dias') ?? '7', 10) || 7, 1), 90)
+  const db = getUserSupabase(c) ?? supabase
+  const { desde, hasta } = ventanaDias(dias)
+  const rows = await getEventosByFincaRango(finca_id, desde, hasta, db)
+  const filtrados = tipo ? rows.filter(r => r.tipo_evento === tipo) : rows
+  const eventos = filtrados
+    .slice()
+    .reverse() // getEventosByFincaRango viene ascendente; el feed muestra lo más nuevo arriba
+    .map(r => ({
+      id: r.id,
+      tipo: r.tipo_evento,
+      created_at: r.created_at,
+      lote_id: r.lote_id,
+      descripcion: r.descripcion_raw,
+      confianza: r.confidence_score,
+      status: r.status,
+    }))
+  return c.json({ eventos })
 })
 
 // POST /api/finca/:finca_id/lotes — crea un lote con polígono

@@ -386,6 +386,8 @@ export async function getFincasConCoordenadas(client: SupabaseClient = defaultCl
 }
 
 export interface EventoResumenRow {
+  id: string
+  created_at: string
   tipo_evento: string
   fecha_evento: string | null
   lote_id: string | null
@@ -403,7 +405,7 @@ export async function getEventosByFincaRango(
 ): Promise<EventoResumenRow[]> {
   const { data, error } = await client
     .from('eventos_campo')
-    .select('tipo_evento, fecha_evento, lote_id, datos_evento, descripcion_raw, confidence_score, status')
+    .select('id, created_at, tipo_evento, fecha_evento, lote_id, datos_evento, descripcion_raw, confidence_score, status')
     .eq('finca_id', fincaId)
     .gte('created_at', desde.toISOString())
     .lt('created_at', hasta.toISOString())
