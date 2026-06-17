@@ -153,6 +153,70 @@ describe('LLMRouter', () => {
     expect(new LLMRouter([{ name: 'A', adapter: mockOkTools('a'), tier: 'reasoning' }]).supportsTools).toBe(true)
   })
 
+  it('reintenta el MISMO nodo ante un fallo transitorio (429) y recupera sin pasar al fallback', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const a: ILLMAdapter = {
+      generarTexto: vi.fn()
+        .mockRejectedValueOnce(Object.assign(new Error('Too Many Requests'), { status: 429 }))
+        .mockResolvedValueOnce('ok-tras-retry'),
+    }
+    const b = mockOk('b')
+    const router = new LLMRouter(
+      [
+        { name: 'A', adapter: a, tier: 'reasoning' },
+        { name: 'B', adapter: b, tier: 'reasoning' },
+      ],
+      { sleep },
+    )
+
+    const result = await router.generarTexto('hola', OPTS)
+
+    expect(result).toBe('ok-tras-retry')
+    expect(a.generarTexto).toHaveBeenCalledTimes(2) // 1 fallo transitorio + 1 retry OK
+    expect(b.generarTexto).not.toHaveBeenCalled()   // no hizo falta el fallback
+    expect(sleep).toHaveBeenCalled()                // hubo backoff antes del retry
+  })
+
+  it('NO reintenta ante un fallo no-transitorio: falla rápido al fallback sin esperar', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const a: ILLMAdapter = { generarTexto: vi.fn().mockRejectedValue(new Error('JSON inválido del modelo')) }
+    const b = mockOk('b')
+    const router = new LLMRouter(
+      [
+        { name: 'A', adapter: a, tier: 'reasoning' },
+        { name: 'B', adapter: b, tier: 'reasoning' },
+      ],
+      { sleep },
+    )
+
+    const result = await router.generarTexto('hola', OPTS)
+
+    expect(result).toBe('respuesta-b')
+    expect(a.generarTexto).toHaveBeenCalledTimes(1) // sin retry: 'otro' falla rápido
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('agota los reintentos transitorios de un nodo y pasa al fallback', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const a: ILLMAdapter = {
+      generarTexto: vi.fn().mockRejectedValue(Object.assign(new Error('rate limit'), { status: 429 })),
+    }
+    const b = mockOk('b')
+    const router = new LLMRouter(
+      [
+        { name: 'A', adapter: a, tier: 'reasoning' },
+        { name: 'B', adapter: b, tier: 'reasoning' },
+      ],
+      { sleep, maxReintentosPorNodo: 2 },
+    )
+
+    const result = await router.generarTexto('hola', OPTS)
+
+    expect(result).toBe('respuesta-b')
+    expect(a.generarTexto).toHaveBeenCalledTimes(3) // intento inicial + 2 reintentos
+    expect(b.generarTexto).toHaveBeenCalledOnce()
+  })
+
   it('rutea a tier ocr cuando modelClass es ocr', async () => {
     const reasoningAdapter = mockOk('reasoning')
     const ocrAdapter = mockOk('ocr')
