@@ -28,6 +28,9 @@ import {
   elegirMejorTabla,
   reconciliarCrossField,
   elegirMejorDatos,
+  resolverUmbralEnv,
+  UMBRALES_SEVERIDAD_DEFAULT,
+  type UmbralesSeveridad,
   type ResumenColumnaSinCalculo,
   type SigatokaVisionFn,
 } from '../../src/pipeline/handlers/SigatokaHandler.js'
@@ -456,6 +459,43 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
   it('NO marca severidad provisional cuando las columnas DATOS cuadran (#6)', () => {
     const m = muestreo([fullCol({ J_calculado: 12, J_formulario: 12 })])
     expect(buildWhatsappSummary(m)).not.toMatch(/Severidad provisional/)
+  })
+})
+
+// ─── #1: umbrales de severidad configurables (placeholder agronómico) ─────────
+
+describe('umbrales de severidad Sigatoka — configurables (#1)', () => {
+  it('resolverUmbralEnv usa el valor del env cuando es un número positivo válido', () => {
+    expect(resolverUmbralEnv('45', 30)).toBe(45)
+    expect(resolverUmbralEnv('12.5', 30)).toBe(12.5)
+  })
+
+  it('resolverUmbralEnv cae al fallback con env ausente, no-numérico o no-positivo', () => {
+    expect(resolverUmbralEnv(undefined, 30)).toBe(30)
+    expect(resolverUmbralEnv('abc', 30)).toBe(30)
+    expect(resolverUmbralEnv('0', 30)).toBe(30)
+    expect(resolverUmbralEnv('-5', 30)).toBe(30)
+  })
+
+  it('el default de EE2 leve sigue siendo 30 (sin env override)', () => {
+    // Mantiene el comportamiento histórico: H>30 dispara la alerta de EE2 (1-3).
+    expect(UMBRALES_SEVERIDAD_DEFAULT.ee2Leve).toBe(30)
+    expect(buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]))).toMatch(/⚠️.*EE2 \(1-3\)/)
+  })
+
+  it('un umbral EE2 leve más alto (override por finca) silencia la alerta que el default dispararía', () => {
+    const umbrales: UmbralesSeveridad = { ...UMBRALES_SEVERIDAD_DEFAULT, ee2Leve: 50 }
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0, J_calculado: 0, M_calculado: 11 })]), umbrales)
+    expect(msg).not.toMatch(/EE2 \(1-3\) — infección/)
+  })
+
+  it('override de los otros umbrales (J/I/M) también aplica a alertas y estado', () => {
+    // Con umbrales más estrictos, valores antes "sanos" ahora alertan.
+    const umbrales: UmbralesSeveridad = { ee3a6Severo: 1, ee2Avanzado: 1, ee2Leve: 1, hojasFuncionalesMin: 20 }
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 5, I_calculado: 2, J_calculado: 3, M_calculado: 11 })]), umbrales)
+    expect(msg).toMatch(/EE3-6/)
+    expect(msg).toMatch(/EE2 avanzado/)
+    expect(msg).toMatch(/hojas funcionales bajo/)
   })
 })
 

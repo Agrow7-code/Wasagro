@@ -747,9 +747,38 @@ export function buildDescripcionRaw(data: SigatokaMuestreo): string {
 // ─── Resumen para WhatsApp ───────────────────────────────────────────────────
 // Alertas si CUALQUIER columna (planta) supera el umbral — no perder el peor caso.
 
-// Umbral de % EE2 leve (1-3) que dispara alerta de infección temprana extendida.
-// PLACEHOLDER — confirmar con criterio agronómico de la exportadora.
-export const UMBRAL_EE2_LEVE = 30
+// ─── Umbrales de severidad (alertas + estado general) ────────────────────────
+// Estos 4 valores deciden qué se le ALERTA al cliente y el estado general del
+// muestreo. Son criterio AGRONÓMICO, no técnico: el valor correcto lo fija el
+// agrónomo de la exportadora. Hasta esa confirmación operan con estos defaults.
+//
+// `ee2Leve` (EE2 1-3) es el de MAYOR incertidumbre — PLACEHOLDER sin respaldo
+// agronómico; overridable sin deploy por env `SIGATOKA_UMBRAL_EE2_LEVE`.
+// Per-finca: pasar `umbrales` a buildWhatsappSummary cuando exista ese dato (D18,
+// umbrales por finca) — cada exportadora puede tener su propio criterio.
+export interface UmbralesSeveridad {
+  ee3a6Severo: number          // J: % plantas EE3-6 (severo) → CRÍTICO + revisar fumigación
+  ee2Avanzado: number          // I: % plantas EE2 avanzado (4+) → CRÍTICO
+  ee2Leve: number              // H: % plantas EE2 (1-3) → ATENCIÓN (PLACEHOLDER)
+  hojasFuncionalesMin: number  // M: mínimo de hojas funcionales → ATENCIÓN si por debajo
+}
+
+// Lee un umbral desde una env var: usa el valor sólo si es un número positivo
+// finito; ante ausencia/no-numérico/no-positivo cae al default (fail-safe). Pura.
+export function resolverUmbralEnv(raw: string | undefined, fallback: number): number {
+  const n = raw != null ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+export const UMBRALES_SEVERIDAD_DEFAULT: UmbralesSeveridad = {
+  ee3a6Severo: 10,
+  ee2Avanzado: 5,
+  ee2Leve: resolverUmbralEnv(process.env['SIGATOKA_UMBRAL_EE2_LEVE'], 30),
+  hojasFuncionalesMin: 9,
+}
+
+// Retrocompat: el umbral suelto que antes era una constante. Apunta al default.
+export const UMBRAL_EE2_LEVE = UMBRALES_SEVERIDAD_DEFAULT.ee2Leve
 
 // Etiqueta humana de cada columna de tabla semana para el veredicto de checksum.
 const LABEL_COLUMNA_SEMANA: Record<string, string> = {
@@ -760,7 +789,10 @@ const LABEL_COLUMNA_SEMANA: Record<string, string> = {
   lc:      'LC',
 }
 
-export function buildWhatsappSummary(data: SigatokaMuestreo): string {
+export function buildWhatsappSummary(
+  data: SigatokaMuestreo,
+  umbrales: UmbralesSeveridad = UMBRALES_SEVERIDAD_DEFAULT,
+): string {
   const cols = data.resumenColumnas
   // #6 — Severidad provisional: el bloque DATOS (columnas H/I/J/K/M) es la fuente
   // de los números de severidad. Si alguna de esas columnas no cuadra (calculado ≠
@@ -784,18 +816,18 @@ export function buildWhatsappSummary(data: SigatokaMuestreo): string {
     cols.length ? cols.map(c => { const v = sel(c); return v == null ? '-' : `${v}%` }).join(' / ') : '-'
 
   const alertas: string[] = []
-  if (peorJ != null && peorJ > 10) alertas.push(`⚠️ ${peorJ}% plantas con EE3-6 (severo) — revisar programa de fumigación`)
-  if (peorI != null && peorI > 5)  alertas.push(`⚠️ ${peorI}% plantas con EE2 avanzado (4+)`)
-  if (peorH != null && peorH > UMBRAL_EE2_LEVE) alertas.push(`⚠️ ${peorH}% plantas con EE2 (1-3) — infección temprana extendida`)
-  if (peorM != null && peorM < 9)  alertas.push(`⚠️ Promedio hojas funcionales bajo (${peorM}) — evaluar nutrición`)
+  if (peorJ != null && peorJ > umbrales.ee3a6Severo) alertas.push(`⚠️ ${peorJ}% plantas con EE3-6 (severo) — revisar programa de fumigación`)
+  if (peorI != null && peorI > umbrales.ee2Avanzado) alertas.push(`⚠️ ${peorI}% plantas con EE2 avanzado (4+)`)
+  if (peorH != null && peorH > umbrales.ee2Leve) alertas.push(`⚠️ ${peorH}% plantas con EE2 (1-3) — infección temprana extendida`)
+  if (peorM != null && peorM < umbrales.hojasFuncionalesMin)  alertas.push(`⚠️ Promedio hojas funcionales bajo (${peorM}) — evaluar nutrición`)
 
   // Estado general de un vistazo (para decidir rápido). Usa los mismos umbrales.
   // Guard (Tarea 2): con < 3 columnas no se puede afirmar "BAJO CONTROL" — la
   // pasada e1 solo leyó parte del bloque DATOS. Se bloquea ese estado.
   const estadoCalculado =
-    (peorJ != null && peorJ > 10) || (peorI != null && peorI > 5)
+    (peorJ != null && peorJ > umbrales.ee3a6Severo) || (peorI != null && peorI > umbrales.ee2Avanzado)
       ? '⚠️ *CRÍTICO*'
-      : (peorH != null && peorH > UMBRAL_EE2_LEVE) || (peorM != null && peorM < 9)
+      : (peorH != null && peorH > umbrales.ee2Leve) || (peorM != null && peorM < umbrales.hojasFuncionalesMin)
         ? '⚠️ *ATENCIÓN*'
         : '✅ *BAJO CONTROL*'
   const estado = cols.length < 3 && estadoCalculado === '✅ *BAJO CONTROL*'
