@@ -12,8 +12,9 @@ import { supabase } from './integrations/supabase.js'
 import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { enviarAlertasClima } from './pipeline/alertaClima.js'
 import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
-import { getCorreccionesParaEval } from './pipeline/supabaseQueries.js'
-import { analizarCorrecciones } from './pipeline/sigatokaEval.js'
+import { getCorreccionesParaEval, getEventoSigatokaById } from './pipeline/supabaseQueries.js'
+import { analizarCorrecciones, compararMuestreos } from './pipeline/sigatokaEval.js'
+import { getSignedUrlEvento } from './integrations/supabaseStorage.js'
 import { langfuse } from './integrations/langfuse.js'
 import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 
@@ -546,6 +547,49 @@ app.get('/sigatoka/eval', async (c) => {
     return c.json({ muestras: rows.length, evento_id: eventoId ?? null, reporte: analizarCorrecciones(rows) })
   } catch (err) {
     console.error('[sigatoka/eval] error:', err)
+    return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
+  }
+})
+
+// GET /sigatoka/reextract?evento_id=... — loop de re-extracción (CR5/D32).
+// Re-corre la extracción sobre la imagen GUARDADA del muestreo y la compara,
+// celda por celda, contra el muestreo ya corregido (ground-truth). Mide si un
+// cambio de prompt/región baja los errores. Read-only (no modifica el evento),
+// pero CONSUME llamadas LLM (re-corre el pipeline). Protegido por REPORTE_SECRET.
+app.get('/sigatoka/reextract', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  const expected = process.env['REPORTE_SECRET']
+  if (!secret || !expected || !secureSecretCompare(secret, expected)) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const eventoId = c.req.query('evento_id')
+  if (!eventoId) return c.json({ error: 'evento_id requerido' }, 400)
+  try {
+    const evento = await getEventoSigatokaById(eventoId)
+    if (!evento) return c.json({ error: 'evento no encontrado' }, 404)
+    const groundTruth = (evento.datos_evento as Record<string, unknown>)?.['sigatoka']
+    if (!groundTruth) return c.json({ error: 'el evento no tiene muestreo sigatoka' }, 422)
+    if (!evento.imagen_path) return c.json({ error: 'el evento no tiene imagen guardada' }, 422)
+
+    const url = await getSignedUrlEvento(evento.imagen_path)
+    if (!url) return c.json({ error: 'no se pudo firmar la URL de la imagen' }, 500)
+    const imgRes = await fetch(url)
+    if (!imgRes.ok) return c.json({ error: `descarga de imagen falló: ${imgRes.status}` }, 502)
+    const base64 = Buffer.from(await imgRes.arrayBuffer()).toString('base64')
+    const mimeType = imgRes.headers.get('content-type') ?? 'image/jpeg'
+
+    const nuevo = await llm.extraerMuestreoSigatoka(base64, mimeType, `reextract-${eventoId}-${Date.now()}`)
+    const reporte = compararMuestreos(
+      nuevo as unknown as Parameters<typeof compararMuestreos>[0],
+      groundTruth as Parameters<typeof compararMuestreos>[1],
+    )
+    return c.json({
+      evento_id: eventoId,
+      resumen: { celdasMal: reporte.totalCeldasMal, filasFaltantes: reporte.totalFilasFaltantes },
+      reporte,
+    })
+  } catch (err) {
+    console.error('[sigatoka/reextract] error:', err)
     return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
   }
 })

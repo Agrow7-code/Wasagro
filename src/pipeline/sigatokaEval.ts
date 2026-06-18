@@ -61,3 +61,75 @@ export function analizarCorrecciones(correcciones: CorreccionEval[]): ReporteEva
 
   return { total: correcciones.length, errores, erroresConfiados, ilegiblesCompletados, porSeccion }
 }
+
+// ─── Comparación de dos extracciones (loop de re-extracción) ──────────────────
+// Re-corremos la extracción sobre la imagen guardada y comparamos contra el
+// ground-truth (el muestreo ya corregido por el humano). Mide celdas mal Y filas
+// faltantes/de más por sección — las faltantes son el bug de filas omitidas.
+
+const CAMPOS_MATRIZ = [
+  'planta1_estadio', 'planta1_piscas', 'planta2_estadio', 'planta2_piscas',
+  'planta3_estadio', 'planta3_piscas', 'hVle', 'hVlq', 'func',
+] as const
+const CAMPOS_SEMANA = ['ht', 'hVle', 'q5menos', 'q5mas', 'lc'] as const
+
+// Lee el valor numérico de una celda tolerando { valor, estado } o número plano.
+function valorDe(row: Record<string, unknown>, campo: string): number | null {
+  const c = row[campo]
+  if (c !== null && typeof c === 'object' && 'valor' in (c as object)) {
+    const v = (c as { valor: number | null }).valor
+    return v ?? null
+  }
+  return typeof c === 'number' ? c : null
+}
+
+export interface ConteoComp { celdasMal: number; filasFaltantes: number; filasDeMas: number; celdasComparadas: number }
+export interface ReporteComparacion {
+  porSeccion: { matriz: ConteoComp; sem11: ConteoComp; sem00: ConteoComp }
+  totalCeldasMal: number
+  totalFilasFaltantes: number
+}
+
+export interface MuestreoComparable {
+  puntosMuestreo?: Array<Record<string, unknown>>
+  plantas11sem?: Array<Record<string, unknown>>
+  plantas00sem?: Array<Record<string, unknown>>
+}
+
+function compararFilas(
+  nuevo: Array<Record<string, unknown>>,
+  verdad: Array<Record<string, unknown>>,
+  campos: readonly string[],
+  claveDe: (row: Record<string, unknown>, idx: number) => string,
+): ConteoComp {
+  const c: ConteoComp = { celdasMal: 0, filasFaltantes: 0, filasDeMas: 0, celdasComparadas: 0 }
+  const mapNuevo = new Map(nuevo.map((r, i) => [claveDe(r, i), r]))
+  const clavesVerdad = new Set<string>()
+
+  verdad.forEach((v, i) => {
+    const k = claveDe(v, i)
+    clavesVerdad.add(k)
+    const n = mapNuevo.get(k)
+    if (!n) { c.filasFaltantes++; return } // el ground-truth la tiene, la re-extracción NO
+    for (const campo of campos) {
+      c.celdasComparadas++
+      if (valorDe(n, campo) !== valorDe(v, campo)) c.celdasMal++
+    }
+  })
+  nuevo.forEach((r, i) => { if (!clavesVerdad.has(claveDe(r, i))) c.filasDeMas++ })
+  return c
+}
+
+export function compararMuestreos(nuevo: MuestreoComparable, verdad: MuestreoComparable): ReporteComparacion {
+  const porPunto = (r: Record<string, unknown>, i: number) => String(r['punto'] ?? `i${i}`)
+  const porFila = (r: Record<string, unknown>, i: number) => (r['fila'] != null ? `f${r['fila']}` : `i${i}`)
+
+  const porSeccion = {
+    matriz: compararFilas(nuevo.puntosMuestreo ?? [], verdad.puntosMuestreo ?? [], CAMPOS_MATRIZ, porPunto),
+    sem11: compararFilas(nuevo.plantas11sem ?? [], verdad.plantas11sem ?? [], CAMPOS_SEMANA, porFila),
+    sem00: compararFilas(nuevo.plantas00sem ?? [], verdad.plantas00sem ?? [], CAMPOS_SEMANA, porFila),
+  }
+  const totalCeldasMal = porSeccion.matriz.celdasMal + porSeccion.sem11.celdasMal + porSeccion.sem00.celdasMal
+  const totalFilasFaltantes = porSeccion.matriz.filasFaltantes + porSeccion.sem11.filasFaltantes + porSeccion.sem00.filasFaltantes
+  return { porSeccion, totalCeldasMal, totalFilasFaltantes }
+}
