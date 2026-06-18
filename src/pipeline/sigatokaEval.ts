@@ -83,10 +83,27 @@ function valorDe(row: Record<string, unknown>, campo: string): number | null {
   return typeof c === 'number' ? c : null
 }
 
-export interface ConteoComp { celdasMal: number; filasFaltantes: number; filasDeMas: number; celdasComparadas: number }
+// Estado de lectura de la celda. Forma vieja (número plano) ⟹ 'leida'.
+function estadoDe(row: Record<string, unknown>, campo: string): string | null {
+  const c = row[campo]
+  if (c !== null && typeof c === 'object' && 'estado' in (c as object)) {
+    return (c as { estado: string }).estado
+  }
+  return typeof c === 'number' ? 'leida' : null
+}
+
+export interface ConteoComp {
+  celdasMal: number
+  silenciosas: number   // mismatch donde el modelo leyó 'leida' pero mal — lo peligroso (calibración debe bajarlo)
+  marcadas: number      // mismatch donde el modelo marcó 'ilegible' — flag honesto (mejor que silencioso)
+  filasFaltantes: number
+  filasDeMas: number
+  celdasComparadas: number
+}
 export interface ReporteComparacion {
   porSeccion: { matriz: ConteoComp; sem11: ConteoComp; sem00: ConteoComp }
   totalCeldasMal: number
+  totalSilenciosas: number
   totalFilasFaltantes: number
 }
 
@@ -102,7 +119,7 @@ function compararFilas(
   campos: readonly string[],
   claveDe: (row: Record<string, unknown>, idx: number) => string,
 ): ConteoComp {
-  const c: ConteoComp = { celdasMal: 0, filasFaltantes: 0, filasDeMas: 0, celdasComparadas: 0 }
+  const c: ConteoComp = { celdasMal: 0, silenciosas: 0, marcadas: 0, filasFaltantes: 0, filasDeMas: 0, celdasComparadas: 0 }
   const mapNuevo = new Map(nuevo.map((r, i) => [claveDe(r, i), r]))
   const clavesVerdad = new Set<string>()
 
@@ -113,7 +130,12 @@ function compararFilas(
     if (!n) { c.filasFaltantes++; return } // el ground-truth la tiene, la re-extracción NO
     for (const campo of campos) {
       c.celdasComparadas++
-      if (valorDe(n, campo) !== valorDe(v, campo)) c.celdasMal++
+      if (valorDe(n, campo) !== valorDe(v, campo)) {
+        c.celdasMal++
+        // ¿el modelo lo marcó honestamente (ilegible) o lo reportó confiado (leida)?
+        if (estadoDe(n, campo) === 'ilegible') c.marcadas++
+        else c.silenciosas++
+      }
     }
   })
   nuevo.forEach((r, i) => { if (!clavesVerdad.has(claveDe(r, i))) c.filasDeMas++ })
@@ -130,6 +152,7 @@ export function compararMuestreos(nuevo: MuestreoComparable, verdad: MuestreoCom
     sem00: compararFilas(nuevo.plantas00sem ?? [], verdad.plantas00sem ?? [], CAMPOS_SEMANA, porFila),
   }
   const totalCeldasMal = porSeccion.matriz.celdasMal + porSeccion.sem11.celdasMal + porSeccion.sem00.celdasMal
+  const totalSilenciosas = porSeccion.matriz.silenciosas + porSeccion.sem11.silenciosas + porSeccion.sem00.silenciosas
   const totalFilasFaltantes = porSeccion.matriz.filasFaltantes + porSeccion.sem11.filasFaltantes + porSeccion.sem00.filasFaltantes
-  return { porSeccion, totalCeldasMal, totalFilasFaltantes }
+  return { porSeccion, totalCeldasMal, totalSilenciosas, totalFilasFaltantes }
 }

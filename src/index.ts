@@ -585,7 +585,11 @@ app.get('/sigatoka/reextract', async (c) => {
     )
     return c.json({
       evento_id: eventoId,
-      resumen: { celdasMal: reporte.totalCeldasMal, filasFaltantes: reporte.totalFilasFaltantes },
+      resumen: {
+        celdasMal: reporte.totalCeldasMal,
+        silenciosas: reporte.totalSilenciosas, // métrica de calibración: debe BAJAR
+        filasFaltantes: reporte.totalFilasFaltantes,
+      },
       reporte,
     })
   } catch (err) {

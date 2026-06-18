@@ -111,4 +111,17 @@ describe('compararMuestreos (re-extracción vs ground-truth)', () => {
     const r = compararMuestreos(nuevo, verdad)
     expect(r.porSeccion.matriz.celdasMal).toBe(1)
   })
+
+  it('distingue mismatch silencioso (leída) de marcado (ilegible) — la métrica de la calibración', () => {
+    const verdad = { plantas00sem: [fila(1, { ht: cel(10), hVle: cel(5) })] } as any
+    const nuevo = { plantas00sem: [fila(1, {
+      ht: { valor: 7, estado: 'leida' },          // mal y confiado → silencioso (lo peligroso)
+      hVle: { valor: null, estado: 'ilegible' },  // mal pero marcado → honesto
+    })] } as any
+    const r = compararMuestreos(nuevo, verdad)
+    expect(r.porSeccion.sem00.celdasMal).toBe(2)
+    expect(r.porSeccion.sem00.silenciosas).toBe(1)
+    expect(r.porSeccion.sem00.marcadas).toBe(1)
+    expect(r.totalSilenciosas).toBe(1)
+  })
 })
