@@ -284,6 +284,21 @@ export async function guardarCorreccionesSigatoka(
   if (error) throw error
 }
 
+// Lee las correcciones humanas para el eval de extracción (CR5). Opcionalmente
+// acotado a un evento. El shape es estructuralmente compatible con CorreccionEval.
+export async function getCorreccionesParaEval(
+  eventoId?: string,
+  client: SupabaseClient = defaultClient,
+): Promise<Array<{ evento_id: string; punto: string; campo: string; estado_extraido: string | null; valor_extraido: number | null; valor_corregido: number | null }>> {
+  let q = client
+    .from('sigatoka_correcciones')
+    .select('evento_id, punto, campo, estado_extraido, valor_extraido, valor_corregido')
+  if (eventoId) q = q.eq('evento_id', eventoId)
+  const { data, error } = await q
+  if (error) throw error
+  return (data ?? []) as Array<{ evento_id: string; punto: string; campo: string; estado_extraido: string | null; valor_extraido: number | null; valor_corregido: number | null }>
+}
+
 export interface ProspectoInsert {
   phone: string
   tipo_contacto: 'trabajador' | 'decision_maker' | 'otro'
