@@ -544,7 +544,8 @@ app.get('/sigatoka/eval', async (c) => {
   const eventoId = c.req.query('evento_id') || undefined
   try {
     const rows = await getCorreccionesParaEval(eventoId)
-    return c.json({ muestras: rows.length, evento_id: eventoId ?? null, reporte: analizarCorrecciones(rows) })
+    const eventos = [...new Set(rows.map(r => r.evento_id))]
+    return c.json({ muestras: rows.length, evento_id: eventoId ?? null, eventos, reporte: analizarCorrecciones(rows) })
   } catch (err) {
     console.error('[sigatoka/eval] error:', err)
     return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
