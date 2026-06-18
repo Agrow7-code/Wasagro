@@ -27,12 +27,18 @@ Por cada fila con datos, emití un objeto con:
 - `sector`: el último nombre de lote MANUSCRITO visto encima de esta fila (ej.
   "Corrijal", "arrastradero"). Si lo único cerca es un rótulo IMPRESO
   (CERAMIDA/SIBINE/PLAGAS FOLIARES), entonces `sector: null`. `lote_id` siempre null.
-- Las 5 columnas como `CeldaMuestra`:
-  - número legible → `{ "valor": 8, "estado": "leida" }`
-  - en blanco → `{ "valor": null, "estado": "vacia" }`
-  - escrito pero ilegible → `{ "valor": null, "estado": "ilegible" }` (**NUNCA inventes**)
-  - **REGLA DE ORO**: `ilegible` solo si hay tinta que no podés descifrar; vacío es
-    `vacia`.
+- Las 5 columnas como `CeldaMuestra`. Esta tabla es **TENUE y difícil de leer**, y un
+  número MAL leído acá **llega al cliente** — así que acá la HONESTIDAD vale más que la
+  completitud:
+  - número que leés **CLARO y con seguridad** → `{ "valor": 8, "estado": "leida" }`
+  - en blanco, sin tinta → `{ "valor": null, "estado": "vacia" }`
+  - hay tinta pero **NO estás seguro del dígito exacto** (tenue, borroso, ambiguo —
+    podría ser 1 o 7, 3 u 8, un 4 o un 9…) → `{ "valor": null, "estado": "ilegible" }`
+  - **REGLA DE ORO (calibración):** marcá `leida` SOLO si podés leer el dígito CON
+    CONFIANZA. Ante **CUALQUIER duda**, marcá `ilegible` — **NUNCA adivines un número**.
+    Es MUCHO mejor marcar `ilegible` (un humano lo revisa de un vistazo) que reportar un
+    valor equivocado como `leida`, porque ese se cuela sin que nadie lo note. No te
+    premia leer más celdas; te premia no equivocarte.
 
 Leé TODAS las filas con datos, de arriba a abajo, sin saltarte ninguna. Si la tabla está
 vacía o ausente, emití `"filas": []`.
