@@ -12,6 +12,8 @@ import { supabase } from './integrations/supabase.js'
 import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { enviarAlertasClima } from './pipeline/alertaClima.js'
 import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
+import { getCorreccionesParaEval } from './pipeline/supabaseQueries.js'
+import { analizarCorrecciones } from './pipeline/sigatokaEval.js'
 import { langfuse } from './integrations/langfuse.js'
 import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 
@@ -525,6 +527,27 @@ app.post('/alertas/clima', async (c) => {
     })
 
   return c.json({ status: 'triggered' }, 202)
+})
+
+// GET /sigatoka/eval — reporte de calidad de extracción Sigatoka (CR5/D32).
+// Mide DÓNDE falla la extracción con las correcciones humanas guardadas:
+// errores confiados (modelo leyó y erró, sin avisar) vs ilegibles completados,
+// por sección (matriz / 11sem / 00sem). Read-only, protegido por REPORTE_SECRET.
+// Query opcional ?evento_id=... para acotar a un muestreo.
+app.get('/sigatoka/eval', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  const expected = process.env['REPORTE_SECRET']
+  if (!secret || !expected || !secureSecretCompare(secret, expected)) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const eventoId = c.req.query('evento_id') || undefined
+  try {
+    const rows = await getCorreccionesParaEval(eventoId)
+    return c.json({ muestras: rows.length, evento_id: eventoId ?? null, reporte: analizarCorrecciones(rows) })
+  } catch (err) {
+    console.error('[sigatoka/eval] error:', err)
+    return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
+  }
 })
 
 export { app, llm }
