@@ -15,6 +15,7 @@ import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
 import { getCorreccionesParaEval, getEventoSigatokaById } from './pipeline/supabaseQueries.js'
 import { analizarCorrecciones, compararMuestreos, distribucionEstados } from './pipeline/sigatokaEval.js'
 import { getSignedUrlEvento } from './integrations/supabaseStorage.js'
+import { PromptManager } from './pipeline/promptManager.js'
 import { langfuse } from './integrations/langfuse.js'
 import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
 
@@ -549,6 +550,26 @@ app.get('/sigatoka/eval', async (c) => {
   } catch (err) {
     console.error('[sigatoka/eval] error:', err)
     return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
+  }
+})
+
+// GET /sigatoka/prompt-check?name=... — diagnóstico INSTANTÁNEO: muestra qué
+// prompt está usando el agente AHORA (vía PromptManager, igual que la extracción),
+// para confirmar si la versión calibrada está viva o si Langfuse sirve la vieja.
+app.get('/sigatoka/prompt-check', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  const expected = process.env['REPORTE_SECRET']
+  if (!secret || !expected || !secureSecretCompare(secret, expected)) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const name = c.req.query('name') ?? 'sp-03e2b-sigatoka-00sem.md'
+  try {
+    const live = await PromptManager.getPrompt(name, `prompts/${name}`)
+    // Marcadores que SOLO existen en la versión calibrada.
+    const calibrado = /ante\s+CUALQUIER\s+duda/i.test(live) || /no te premia leer m[aá]s celdas/i.test(live)
+    return c.json({ name, calibrado, length: live.length, head: live.slice(0, 200) })
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'error' }, 500)
   }
 })
 
