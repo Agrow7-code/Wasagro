@@ -565,8 +565,9 @@ app.get('/sigatoka/prompt-check', async (c) => {
   const name = c.req.query('name') ?? 'sp-03e2b-sigatoka-00sem.md'
   try {
     const live = await PromptManager.getPrompt(name, `prompts/${name}`)
-    // Marcadores que SOLO existen en la versión calibrada.
-    const calibrado = /ante\s+CUALQUIER\s+duda/i.test(live) || /no te premia leer m[aá]s celdas/i.test(live)
+    // Marcador a prueba de markdown/saltos: la palabra HONESTIDAD solo está en la
+    // versión calibrada (la vieja no la tiene). Robusto a ** y wrapping.
+    const calibrado = /HONESTIDAD/i.test(live) || /\bTENUE\b/i.test(live)
     return c.json({ name, calibrado, length: live.length, head: live.slice(0, 200) })
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'error' }, 500)
