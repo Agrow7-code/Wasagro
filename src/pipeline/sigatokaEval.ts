@@ -142,6 +142,33 @@ function compararFilas(
   return c
 }
 
+// Distribución de estados de lectura en UNA extracción (sin ground-truth).
+// Métrica directa de calibración: cuántas celdas el modelo marca 'ilegible' vs
+// 'leida'. La calibración del 00sem debe SUBIR `ilegible` (admite la duda) en vez
+// de adivinar. Robusto a desalineación de filas (no compara contra otra cosa).
+export interface DistSeccion { leida: number; ilegible: number; vacia: number }
+
+function distribucionFilas(filas: Array<Record<string, unknown>>, campos: readonly string[]): DistSeccion {
+  const d: DistSeccion = { leida: 0, ilegible: 0, vacia: 0 }
+  for (const f of filas) {
+    for (const campo of campos) {
+      const e = estadoDe(f, campo)
+      if (e === 'leida') d.leida++
+      else if (e === 'ilegible') d.ilegible++
+      else if (e === 'vacia') d.vacia++
+    }
+  }
+  return d
+}
+
+export function distribucionEstados(m: MuestreoComparable): { matriz: DistSeccion; sem11: DistSeccion; sem00: DistSeccion } {
+  return {
+    matriz: distribucionFilas(m.puntosMuestreo ?? [], CAMPOS_MATRIZ),
+    sem11: distribucionFilas(m.plantas11sem ?? [], CAMPOS_SEMANA),
+    sem00: distribucionFilas(m.plantas00sem ?? [], CAMPOS_SEMANA),
+  }
+}
+
 export function compararMuestreos(nuevo: MuestreoComparable, verdad: MuestreoComparable): ReporteComparacion {
   const porPunto = (r: Record<string, unknown>, i: number) => String(r['punto'] ?? `i${i}`)
   const porFila = (r: Record<string, unknown>, i: number) => (r['fila'] != null ? `f${r['fila']}` : `i${i}`)

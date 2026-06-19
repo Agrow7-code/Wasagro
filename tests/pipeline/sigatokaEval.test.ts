@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { seccionDeCorreccion, analizarCorrecciones, compararMuestreos, type CorreccionEval } from '../../src/pipeline/sigatokaEval.js'
+import { seccionDeCorreccion, analizarCorrecciones, compararMuestreos, distribucionEstados, type CorreccionEval } from '../../src/pipeline/sigatokaEval.js'
 
 // Fixtures mínimos para la comparación.
 const cel = (v: number | null) => ({ valor: v, estado: v == null ? 'vacia' : 'leida' } as const)
@@ -123,5 +123,21 @@ describe('compararMuestreos (re-extracción vs ground-truth)', () => {
     expect(r.porSeccion.sem00.silenciosas).toBe(1)
     expect(r.porSeccion.sem00.marcadas).toBe(1)
     expect(r.totalSilenciosas).toBe(1)
+  })
+})
+
+describe('distribucionEstados (métrica de calibración)', () => {
+  it('cuenta leida/ilegible/vacia por sección', () => {
+    const m = { plantas00sem: [fila(1, {
+      ht: { valor: 5, estado: 'leida' },
+      hVle: { valor: null, estado: 'ilegible' },
+      q5menos: { valor: null, estado: 'ilegible' },
+      q5mas: { valor: null, estado: 'vacia' },
+      lc: { valor: 8, estado: 'leida' },
+    })] } as any
+    const d = distribucionEstados(m)
+    expect(d.sem00.ilegible).toBe(2)
+    expect(d.sem00.leida).toBe(2)
+    expect(d.sem00.vacia).toBe(1)
   })
 })

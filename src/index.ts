@@ -13,7 +13,7 @@ import { generarYEnviarReportes } from './pipeline/reporteSemanal.js'
 import { enviarAlertasClima } from './pipeline/alertaClima.js'
 import { enviarAlertasPrecio } from './pipeline/alertaPrecio.js'
 import { getCorreccionesParaEval, getEventoSigatokaById } from './pipeline/supabaseQueries.js'
-import { analizarCorrecciones, compararMuestreos } from './pipeline/sigatokaEval.js'
+import { analizarCorrecciones, compararMuestreos, distribucionEstados } from './pipeline/sigatokaEval.js'
 import { getSignedUrlEvento } from './integrations/supabaseStorage.js'
 import { langfuse } from './integrations/langfuse.js'
 import { initPgBoss, isPgBossReady } from './workers/pgBoss.js'
@@ -580,16 +580,20 @@ app.get('/sigatoka/reextract', async (c) => {
     const mimeType = imgRes.headers.get('content-type') ?? 'image/jpeg'
 
     const nuevo = await llm.extraerMuestreoSigatoka(base64, mimeType, `reextract-${eventoId}-${Date.now()}`)
-    const reporte = compararMuestreos(
-      nuevo as unknown as Parameters<typeof compararMuestreos>[0],
-      groundTruth as Parameters<typeof compararMuestreos>[1],
-    )
+    const nuevoComp = nuevo as unknown as Parameters<typeof compararMuestreos>[0]
+    const reporte = compararMuestreos(nuevoComp, groundTruth as Parameters<typeof compararMuestreos>[1])
+    // Métrica de calibración ROBUSTA (no depende de alinear filas con el ground-truth):
+    // distribución de estados de la extracción fresca. Si la calibración del 00sem
+    // funciona, sem00.ilegible debe SUBIR (el modelo admite duda en vez de adivinar).
+    const distribucion = distribucionEstados(nuevoComp)
     return c.json({
       evento_id: eventoId,
+      calibracion: { sem00: distribucion.sem00, sem11: distribucion.sem11 }, // ← mirá sem00.ilegible
       resumen: {
         celdasMal: reporte.totalCeldasMal,
-        silenciosas: reporte.totalSilenciosas, // métrica de calibración: debe BAJAR
+        silenciosas: reporte.totalSilenciosas,
         filasFaltantes: reporte.totalFilasFaltantes,
+        nota: 'el 00sem sin numeros de fila desalinea la comparacion contra ground-truth; para calibracion mira `calibracion.sem00.ilegible`',
       },
       reporte,
     })
