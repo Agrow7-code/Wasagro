@@ -217,6 +217,25 @@ describe('LLMRouter', () => {
     expect(b.generarTexto).toHaveBeenCalledOnce()
   })
 
+  it('excluir saltea los nodos cuyo nombre incluye el substring (2ª opinión de otro modelo)', async () => {
+    const gem = mockOk('gem')
+    const mini = mockOk('mini')
+    const router = new LLMRouter([
+      { name: 'Gemini-2.5-F', adapter: gem, tier: 'ultra' },
+      { name: 'Minimax', adapter: mini, tier: 'ultra' },
+    ])
+    const result = await router.generarTexto('hola', { ...OPTS, modelClass: 'ultra', excluir: 'Gemini' })
+    expect(result).toBe('respuesta-mini')
+    expect(gem.generarTexto).not.toHaveBeenCalled()
+    expect(mini.generarTexto).toHaveBeenCalledOnce()
+  })
+
+  it('excluir sin alternativa en el tier → falla explícito', async () => {
+    const gem = mockOk('gem')
+    const router = new LLMRouter([{ name: 'Gemini-2.5-F', adapter: gem, tier: 'ultra' }])
+    await expect(router.generarTexto('hola', { ...OPTS, modelClass: 'ultra', excluir: 'Gemini' })).rejects.toThrow(/sin nodos/)
+  })
+
   it('rutea a tier ocr cuando modelClass es ocr', async () => {
     const reasoningAdapter = mockOk('reasoning')
     const ocrAdapter = mockOk('ocr')

@@ -758,14 +758,17 @@ export class WasagroAIAgent implements IWasagroLLM {
     const elegida11 = await recuperarTabla(1, REGION_11SEM, '11 semanas', '11sem', full11)
     let elegida00 = await recuperarTabla(2, REGION_00SEM, '00 semanas', '00sem', full00)
 
-    // Calibración por DESACUERDO para el 00sem (la tabla problemática: Gemini marca
-    // todo 'leida' aunque no vea claro). Una 2ª lectura a temp>0 da una visión
-    // independiente; las celdas donde DIFIERE de la 1ª se marcan 'ilegible' (ámbar
-    // para el asesor) — la incertidumbre se DERIVA del desacuerdo, no del auto-reporte
-    // del modelo. Guarda: solo reconciliamos si ambas leyeron la MISMA cantidad de
-    // filas; si no, alinear por índice no tiene sentido (se traza como otra señal).
+    // Calibración por DESACUERDO entre MODELOS DISTINTOS para el 00sem (la tabla
+    // problemática). Gemini está CONSISTENTEMENTE confiado-mal acá: marca todo 'leida'
+    // y lee igual cada vez, así que ni el auto-reporte ni el desacuerdo consigo mismo
+    // lo atrapan. Pedimos una 2ª opinión a OTRO modelo del pool (excluye 'Gemini' →
+    // Minimax/Gemma/Qwen): modelos diferentes erran distinto, así que donde COINCIDEN
+    // confiamos y donde DIFIEREN marcamos 'ilegible' (ámbar para el asesor). Guarda:
+    // solo reconciliamos si ambos leyeron la MISMA cantidad de filas (alinear por
+    // índice sin números de fila solo tiene sentido con igual conteo).
     if (elegida00.filas.length > 0) {
-      const tab00AltRaw = await conCap(this.#extraerParteSigatoka(PASADAS[2]![0], PASADAS[2]![1], base64, mimeType, traceId, costCtx, 0.4))
+      const excluir = process.env['SIGATOKA_SEGUNDA_OPINION_EXCLUIR'] ?? 'Gemini'
+      const tab00AltRaw = await conCap(this.#extraerParteSigatoka(PASADAS[2]![0], PASADAS[2]![1], base64, mimeType, traceId, costCtx, 0, excluir))
       if (tab00AltRaw) {
         const altFilas = arr((tab00AltRaw as any).filas).map(normalizarFilaSemana)
         if (altFilas.length === elegida00.filas.length) {
@@ -904,6 +907,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     traceId: string,
     costCtx?: CostContext,
     temperatura: number = 0,
+    excluir?: string,
   ): Promise<Record<string, unknown> | null> {
     const trace = this.#lf.trace({ id: traceId })
     try {
@@ -912,6 +916,7 @@ export class WasagroAIAgent implements IWasagroLLM {
         systemPrompt: rawPrompt,
         responseFormat: 'json_object',
         temperature: temperatura,
+        ...(excluir ? { excluir } : {}),
         imageBase64: base64,
         imageMimeType: mimeType,
         traceId,

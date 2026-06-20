@@ -26,6 +26,11 @@ export interface LLMGeneracionOpciones {
   // Subir solo para cargas que legítimamente necesitan más: extractores con
   // schema pesado, prompts densos. Pasar el límite degrada la latencia P3.
   timeoutMs?: number
+  // Excluye del routing los nodos cuyo NOMBRE incluye este substring (case-insensitive).
+  // Sirve para pedir una 2ª opinión de un modelo DISTINTO del pool (ej. excluir
+  // 'Gemini' → rutea a Minimax/Gemma): el desacuerdo entre modelos diferentes revela
+  // incertidumbre que el auto-reporte de un solo modelo esconde.
+  excluir?: string
 }
 
 export interface ILLMAdapter {

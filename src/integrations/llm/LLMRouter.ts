@@ -70,6 +70,19 @@ export class LLMRouter implements ILLMAdapter {
       throw new Error(`[LLMRouter] No hay adaptadores configurados para el tier: ${targetTier}`)
     }
 
+    // Exclusión por nombre (2ª opinión de un modelo distinto): saca los nodos cuyo
+    // nombre incluye `excluir`. Si no queda ninguno, falla explícito (el caller lo
+    // trata como "sin 2ª opinión disponible", no como degradación silenciosa).
+    if (opciones.excluir) {
+      const ex = opciones.excluir.toLowerCase()
+      const filtrados = availableNodes.filter(n => !n.name.toLowerCase().includes(ex))
+      if (filtrados.length === 0) {
+        this.#onMetric?.({ adapterName: 'none', tier: targetTier, success: false, latencyMs: 0, error: `excluir_sin_alternativa:${opciones.excluir}` })
+        throw new Error(`[LLMRouter] excluir='${opciones.excluir}' dejó el tier '${targetTier}' sin nodos`)
+      }
+      availableNodes = filtrados
+    }
+
     // Routing por capacidad: si la petición pide tools, SOLO se enruta a adapters
     // tool-capaces. Servir una petición con tools en un adapter que las ignora
     // haría que el modelo respondiera sin poder consultar la DB → riesgo de
