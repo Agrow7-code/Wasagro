@@ -375,6 +375,49 @@ export function elegirMejorDatos(a: ResumenColumna[], b: ResumenColumna[]): Resu
   return score(b) < score(a) ? b : a
 }
 
+// ─── Incertidumbre por DESACUERDO entre dos lecturas (calibración real) ───────
+// Gemini no se auto-califica (infla su confianza: marca todo 'leida'). Derivamos
+// la incertidumbre del DESACUERDO entre dos lecturas independientes de la MISMA
+// tabla: donde COINCIDEN conservamos el valor; donde DIFIEREN marcamos `ilegible`
+// (incierta) → sale ámbar en la UI y el validador sabe exactamente qué mirar. Una
+// fila presente en una sola lectura → existencia dudosa → ilegible. Pura.
+const CAMPOS_SEMANA_REC = ['ht', 'hVle', 'q5menos', 'q5mas', 'lc'] as const
+
+function valorCeldaSemana(fila: FilaSemana, campo: string): number | null {
+  const c = (fila as unknown as Record<string, unknown>)[campo]
+  if (c !== null && typeof c === 'object' && 'valor' in (c as object)) return (c as CeldaMuestra).valor ?? null
+  return typeof c === 'number' ? c : null
+}
+
+export function reconciliarPorDesacuerdo(filasA: FilaSemana[], filasB: FilaSemana[]): { filas: FilaSemana[]; marcadas: number } {
+  const n = Math.max(filasA.length, filasB.length)
+  let marcadas = 0
+  const filas: FilaSemana[] = []
+  for (let i = 0; i < n; i++) {
+    const a = filasA[i]
+    const b = filasB[i]
+    const base = a ?? b
+    const fila: Record<string, unknown> = { fila: base?.fila ?? null, sector: base?.sector ?? null, lote_id: base?.lote_id ?? null }
+    for (const campo of CAMPOS_SEMANA_REC) {
+      if (a && b) {
+        const va = valorCeldaSemana(a, campo)
+        const vb = valorCeldaSemana(b, campo)
+        if (va === vb) {
+          fila[campo] = { valor: va, estado: va == null ? 'vacia' : 'leida' }
+        } else {
+          fila[campo] = { valor: null, estado: 'ilegible' }
+          marcadas++
+        }
+      } else {
+        fila[campo] = { valor: null, estado: 'ilegible' }
+        marcadas++
+      }
+    }
+    filas.push(fila as unknown as FilaSemana)
+  }
+  return { filas, marcadas }
+}
+
 // ─── Atribución de puntos a lotes ─────────────────────────────────────────────
 // Cada bloque de puntos lleva un rótulo de sector (ej. "Corrijal"). Si coincide
 // con un lote registrado de la finca, atribuimos esos puntos a ese lote_id. Si

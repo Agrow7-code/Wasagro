@@ -97,6 +97,8 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — cuatro pasadas paralelas + 
 
     const data = await agent.extraerMuestreoSigatoka('base64img', 'image/jpeg', 'trace-sig-ok')
 
+    // 4 pasadas. (La lectura de desacuerdo del 00sem solo corre si esa tabla tiene
+    // filas; este mock no las puebla, así que no agrega una 5ª llamada.)
     expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(4)
     const opts = generarTextoDe(adapter).mock.calls[0][1] as LLMGeneracionOpciones
     expect(opts.modelClass).toBe('ultra')
@@ -189,7 +191,7 @@ describe('WasagroAIAgent.extraerMuestreoSigatoka — cuatro pasadas paralelas + 
 
     const data = await agent.extraerMuestreoSigatoka('b64', 'image/jpeg', 'trace-sig-retry')
 
-    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(5) // 4 + 1 reintento (solo la nula)
+    expect(generarTextoDe(adapter)).toHaveBeenCalledTimes(5) // 4 pasadas + 1 reintento (solo la nula)
     expect(data.nombreFinca).toBe('Finca Test')
     expect(data.resumenColumnas[0]!.H_calculado).toBe(10)
   })

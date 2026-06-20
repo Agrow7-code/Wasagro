@@ -27,6 +27,7 @@ import {
   filasConDato,
   elegirMejorTabla,
   reconciliarCrossField,
+  reconciliarPorDesacuerdo,
   elegirMejorDatos,
   resolverUmbralEnv,
   UMBRALES_SEVERIDAD_DEFAULT,
@@ -313,6 +314,41 @@ describe('aplicarAclaraciones', () => {
       { punto: 'P3', campo: 'planta2_estadio', valor: null }, // null → ignorar
     ])
     expect(r.puntosMuestreo[0]!.planta1_estadio.valor).toBe(2)
+  })
+})
+
+// ─── reconciliarPorDesacuerdo (incertidumbre por desacuerdo) ─────────────────
+
+describe('reconciliarPorDesacuerdo', () => {
+  const leer = (f: FilaSemana, campo: 'ht'|'hVle'|'q5menos'|'q5mas'|'lc') =>
+    (f as unknown as Record<string, { valor: number | null; estado: string }>)[campo]
+
+  it('dos lecturas idénticas → 0 marcadas, conserva valores', () => {
+    const a = [fila11({ fila: 1 })]
+    const b = [fila11({ fila: 1 })]
+    const r = reconciliarPorDesacuerdo(a, b)
+    expect(r.marcadas).toBe(0)
+    expect(leer(r.filas[0]!, 'ht').valor).toBe(12)
+    expect(leer(r.filas[0]!, 'ht').estado).toBe('leida')
+  })
+
+  it('celda donde difieren → ilegible (la incierta)', () => {
+    const a = [fila11({ fila: 1, ht: { valor: 12, estado: 'leida' } })]
+    const b = [fila11({ fila: 1, ht: { valor: 7, estado: 'leida' } })]
+    const r = reconciliarPorDesacuerdo(a, b)
+    expect(r.marcadas).toBe(1)
+    expect(leer(r.filas[0]!, 'ht').estado).toBe('ilegible')
+    expect(leer(r.filas[0]!, 'ht').valor).toBeNull()
+    expect(leer(r.filas[0]!, 'lc').estado).toBe('leida') // las que coinciden quedan
+  })
+
+  it('fila presente en una sola lectura → toda ilegible (existencia dudosa)', () => {
+    const a = [fila11({ fila: 1 }), fila11({ fila: 2 })]
+    const b = [fila11({ fila: 1 })]
+    const r = reconciliarPorDesacuerdo(a, b)
+    expect(r.filas).toHaveLength(2)
+    expect(leer(r.filas[1]!, 'ht').estado).toBe('ilegible')
+    expect(r.marcadas).toBe(5) // las 5 columnas de la fila 2
   })
 })
 

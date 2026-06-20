@@ -26,7 +26,7 @@ import { ResultadoOCRSchema, type ResultadoOCR } from '../../types/dominio/OCR.j
 import { SigatokaMuestreoSchema, AclaracionSigatokaSchema, type SigatokaMuestreo, type AclaracionCelda } from '../../types/dominio/SigatokaMuestreo.js'
 import { aplicarFiltroConfianza } from './confidenceFilter.js'
 import { CalidadSigatokaSchema, CALIDAD_FALLBACK_PASA, type CalidadSigatoka } from '../../types/dominio/CalidadSigatoka.js'
-import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, reconciliarCrossField, elegirMejorDatos, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
+import { calcularColumna, detectarCamposDudosos, construirFallbackSigatoka, normalizarPunto, normalizarFilaSemana, verificarChecksumTabla, filasConDato, elegirMejorTabla, reconciliarCrossField, reconciliarPorDesacuerdo, elegirMejorDatos, type ResultadoTabla } from '../../pipeline/handlers/SigatokaHandler.js'
 import type { ContextoOCR } from './IWasagroLLM.js'
 import { injectarVariables } from '../../pipeline/promptInjector.js'
 import { ExtraccionSDRSchema, type EntradaSDR, type ExtraccionSDR } from '../../types/dominio/SDRTypes.js'
@@ -756,7 +756,27 @@ export class WasagroAIAgent implements IWasagroLLM {
     // Secuencial (no paralelo): cuando ambas tablas fallan, evita disparar dos
     // crops concurrentes y volver a presionar el rate-limit.
     const elegida11 = await recuperarTabla(1, REGION_11SEM, '11 semanas', '11sem', full11)
-    const elegida00 = await recuperarTabla(2, REGION_00SEM, '00 semanas', '00sem', full00)
+    let elegida00 = await recuperarTabla(2, REGION_00SEM, '00 semanas', '00sem', full00)
+
+    // Calibración por DESACUERDO para el 00sem (la tabla problemática: Gemini marca
+    // todo 'leida' aunque no vea claro). Una 2ª lectura a temp>0 da una visión
+    // independiente; las celdas donde DIFIERE de la 1ª se marcan 'ilegible' (ámbar
+    // para el asesor) — la incertidumbre se DERIVA del desacuerdo, no del auto-reporte
+    // del modelo. Guarda: solo reconciliamos si ambas leyeron la MISMA cantidad de
+    // filas; si no, alinear por índice no tiene sentido (se traza como otra señal).
+    if (elegida00.filas.length > 0) {
+      const tab00AltRaw = await conCap(this.#extraerParteSigatoka(PASADAS[2]![0], PASADAS[2]![1], base64, mimeType, traceId, costCtx, 0.4))
+      if (tab00AltRaw) {
+        const altFilas = arr((tab00AltRaw as any).filas).map(normalizarFilaSemana)
+        if (altFilas.length === elegida00.filas.length) {
+          const recon = reconciliarPorDesacuerdo(elegida00.filas, altFilas)
+          trace.event({ name: 'sigatoka_desacuerdo_00sem', level: 'DEFAULT', input: { marcadas: recon.marcadas, filas: elegida00.filas.length } })
+          elegida00 = { ...elegida00, filas: recon.filas }
+        } else {
+          trace.event({ name: 'sigatoka_desacuerdo_00sem_rowcount', level: 'WARNING', input: { primera: elegida00.filas.length, alt: altFilas.length } })
+        }
+      }
+    }
 
     const filas11Final = elegida11.filas
     const totales11Final = elegida11.totales
@@ -883,6 +903,7 @@ export class WasagroAIAgent implements IWasagroLLM {
     mimeType: string,
     traceId: string,
     costCtx?: CostContext,
+    temperatura: number = 0,
   ): Promise<Record<string, unknown> | null> {
     const trace = this.#lf.trace({ id: traceId })
     try {
@@ -890,7 +911,7 @@ export class WasagroAIAgent implements IWasagroLLM {
       const raw = await this.#adapter.generarTexto(userContent, {
         systemPrompt: rawPrompt,
         responseFormat: 'json_object',
-        temperature: 0,
+        temperature: temperatura,
         imageBase64: base64,
         imageMimeType: mimeType,
         traceId,
