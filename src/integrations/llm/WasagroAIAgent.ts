@@ -766,9 +766,13 @@ export class WasagroAIAgent implements IWasagroLLM {
     // confiamos y donde DIFIEREN marcamos 'ilegible' (ámbar para el asesor). Guarda:
     // solo reconciliamos si ambos leyeron la MISMA cantidad de filas (alinear por
     // índice sin números de fila solo tiene sentido con igual conteo).
-    if (elegida00.filas.length > 0) {
-      // Excluye Gemini (la 1ª opinión) y Minimax (ID roto: 500 'unknown variant',
-      // D11) → la 2ª opinión va a Gemma-4, que responde OK. Configurable por env.
+    // 2ª opinión multi-modelo para el 00sem: OFF por default. Los modelos no-Gemini
+    // del pool no son confiables hoy (deuda D11): Minimax da 500 (ID inválido) y
+    // Gemma-4 timeoutea a 30s de forma intermitente → la 2ª lectura vuelve null y
+    // suma 30-60s de latencia por muestreo (rompe P3) sin beneficio. Se PRENDE con
+    // SIGATOKA_SEGUNDA_OPINION=on recién cuando haya un no-Gemini multimodal rápido y
+    // válido. La arquitectura (router.excluir + reconciliarPorDesacuerdo) ya está lista.
+    if (elegida00.filas.length > 0 && process.env['SIGATOKA_SEGUNDA_OPINION'] === 'on') {
       const excluir = process.env['SIGATOKA_SEGUNDA_OPINION_EXCLUIR'] ?? 'Gemini,Minimax'
       const tab00AltRaw = await conCap(this.#extraerParteSigatoka(PASADAS[2]![0], PASADAS[2]![1], base64, mimeType, traceId, costCtx, 0, excluir))
       if (tab00AltRaw) {
