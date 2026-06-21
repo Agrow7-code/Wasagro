@@ -773,13 +773,18 @@ export class WasagroAIAgent implements IWasagroLLM {
       const tab00AltRaw = await conCap(this.#extraerParteSigatoka(PASADAS[2]![0], PASADAS[2]![1], base64, mimeType, traceId, costCtx, 0, excluir))
       if (tab00AltRaw) {
         const altFilas = arr((tab00AltRaw as any).filas).map(normalizarFilaSemana)
+        console.log(`[sigatoka_desacuerdo] 00sem primera(gemini)=${elegida00.filas.length} alt(2da-opinion)=${altFilas.length}`)
         if (altFilas.length === elegida00.filas.length) {
           const recon = reconciliarPorDesacuerdo(elegida00.filas, altFilas)
+          console.log(`[sigatoka_desacuerdo] reconciliado: ${recon.marcadas} celdas marcadas ilegible`)
           trace.event({ name: 'sigatoka_desacuerdo_00sem', level: 'DEFAULT', input: { marcadas: recon.marcadas, filas: elegida00.filas.length } })
           elegida00 = { ...elegida00, filas: recon.filas }
         } else {
+          console.log(`[sigatoka_desacuerdo] SKIP row-count mismatch: gemini=${elegida00.filas.length} vs alt=${altFilas.length}`)
           trace.event({ name: 'sigatoka_desacuerdo_00sem_rowcount', level: 'WARNING', input: { primera: elegida00.filas.length, alt: altFilas.length } })
         }
+      } else {
+        console.log('[sigatoka_desacuerdo] 2da-opinion = null (no respondio a tiempo)')
       }
     }
 
