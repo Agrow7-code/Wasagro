@@ -74,8 +74,8 @@ export class LLMRouter implements ILLMAdapter {
     // nombre incluye `excluir`. Si no queda ninguno, falla explícito (el caller lo
     // trata como "sin 2ª opinión disponible", no como degradación silenciosa).
     if (opciones.excluir) {
-      const ex = opciones.excluir.toLowerCase()
-      const filtrados = availableNodes.filter(n => !n.name.toLowerCase().includes(ex))
+      const exs = opciones.excluir.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
+      const filtrados = availableNodes.filter(n => !exs.some(ex => n.name.toLowerCase().includes(ex)))
       if (filtrados.length === 0) {
         this.#onMetric?.({ adapterName: 'none', tier: targetTier, success: false, latencyMs: 0, error: `excluir_sin_alternativa:${opciones.excluir}` })
         throw new Error(`[LLMRouter] excluir='${opciones.excluir}' dejó el tier '${targetTier}' sin nodos`)

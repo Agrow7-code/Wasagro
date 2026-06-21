@@ -767,7 +767,9 @@ export class WasagroAIAgent implements IWasagroLLM {
     // solo reconciliamos si ambos leyeron la MISMA cantidad de filas (alinear por
     // índice sin números de fila solo tiene sentido con igual conteo).
     if (elegida00.filas.length > 0) {
-      const excluir = process.env['SIGATOKA_SEGUNDA_OPINION_EXCLUIR'] ?? 'Gemini'
+      // Excluye Gemini (la 1ª opinión) y Minimax (ID roto: 500 'unknown variant',
+      // D11) → la 2ª opinión va a Gemma-4, que responde OK. Configurable por env.
+      const excluir = process.env['SIGATOKA_SEGUNDA_OPINION_EXCLUIR'] ?? 'Gemini,Minimax'
       const tab00AltRaw = await conCap(this.#extraerParteSigatoka(PASADAS[2]![0], PASADAS[2]![1], base64, mimeType, traceId, costCtx, 0, excluir))
       if (tab00AltRaw) {
         const altFilas = arr((tab00AltRaw as any).filas).map(normalizarFilaSemana)

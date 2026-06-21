@@ -230,6 +230,20 @@ describe('LLMRouter', () => {
     expect(mini.generarTexto).toHaveBeenCalledOnce()
   })
 
+  it('excluir acepta varios separados por coma (saltea Gemini Y Minimax → Gemma)', async () => {
+    const gem = mockOk('gem'); const mini = mockOk('mini'); const gemma = mockOk('gemma')
+    const router = new LLMRouter([
+      { name: 'Gemini-2.5-F', adapter: gem, tier: 'ultra' },
+      { name: 'Minimax', adapter: mini, tier: 'ultra' },
+      { name: 'Gemma-4', adapter: gemma, tier: 'ultra' },
+    ])
+    const r = await router.generarTexto('hola', { ...OPTS, modelClass: 'ultra', excluir: 'Gemini,Minimax' })
+    expect(r).toBe('respuesta-gemma')
+    expect(gem.generarTexto).not.toHaveBeenCalled()
+    expect(mini.generarTexto).not.toHaveBeenCalled()
+    expect(gemma.generarTexto).toHaveBeenCalledOnce()
+  })
+
   it('excluir sin alternativa en el tier → falla explícito', async () => {
     const gem = mockOk('gem')
     const router = new LLMRouter([{ name: 'Gemini-2.5-F', adapter: gem, tier: 'ultra' }])
