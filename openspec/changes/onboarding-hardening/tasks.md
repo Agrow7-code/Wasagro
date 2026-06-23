@@ -21,15 +21,15 @@ Work units are ordered by dependency. Each is an independently reviewable slice.
 - [x] 2.2 Implement `alertarFounder` + `construirMensajeFounder` in `src/integrations/whatsapp/founderAlerts.ts` (lazy sender import so it stays importable in isolation).
 - [x] 2.3 TEST: send failure is swallowed (best-effort, never blocks). Transition-based idempotency primitive is `setOnboardingEstado().transitioned` (tested in 1.2); wiring into handlers lands in PR-B.
 
-## WU3 — Recovery & P2 backstop (#1, #6)
+## WU3 — Recovery & P2 backstop (#1, #6) ✅ DONE (PR-B)
 
-- [ ] 3.1 TEST: at step ceiling without completion → user → `requiere_revision`, session → `fallback_nota_libre` (not `completed`), holding message sent, `onboarding_stuck` event, founder alert once.
-- [ ] 3.2 TEST: same step repeated beyond `ONBOARDING_MAX_STEP_ATTEMPTS` → `requiere_revision` even if LLM never advanced `siguiente_paso` (structural backstop, not prompt-dependent).
-- [ ] 3.3 TEST (routing): inbound from a `requiere_revision` user → short-circuit (no onboarding restart, no `handleEvento`), at most one ack, no duplicate alert.
-- [ ] 3.4 Implement ceiling/attempt transitions in `OnboardingHandler` (both flows) + named constants `ONBOARDING_MAX_STEPS`, `ONBOARDING_MAX_STEP_ATTEMPTS` (env-overridable).
-- [ ] 3.5 Implement terminal short-circuit in `procesarMensajeEntrante` after `planGuard`, before `!onboarding_completo`. Respect `shouldSuppressOnboardingForActiveSDR` ordering.
+- [x] 3.1 TEST: step ceiling → `requiere_revision` + founder alert + holding (`onboardingHandler.recovery.test.ts`).
+- [x] 3.2 TEST: P2 backstop via reducer `clarificationTurnsUsed >= max` → stuck even if LLM didn't advance (`onboardingOutcome.test.ts`).
+- [x] 3.3 TEST: terminal short-circuit pure check `esEstadoOnboardingTerminal` (`onboardingOutcome.test.ts`); routing wired in `procesarMensajeEntrante`.
+- [x] 3.4 Implement: `decidirDesenlaceOnboarding` + `finalizarOnboardingTrabado` in both flows; constants in `onboardingOutcome.ts` (env-overridable).
+- [x] 3.5 Implement: terminal short-circuit in `procesarMensajeEntrante` after `planGuard`, before `!onboarding_completo`.
 
-## WU4 — Activation Option B: one-turn post-onboarding state (#2)
+## WU4 — Activation Option B: one-turn post-onboarding state (#2)  ⟶ PR-C
 
 - [ ] 4.1 TEST: activation turn sets `esperando_explicacion` + `onboarding_completo=false`, sends offer; next message routes to the post-onboarding branch (not `handleEvento`).
 - [ ] 4.2 TEST: affirmation → explanation sent → finalize (`completo`+`true`, `onboarding_completado_at` stamped).
@@ -38,16 +38,16 @@ Work units are ordered by dependency. Each is an independently reviewable slice.
 - [ ] 4.5 Implement the post-onboarding branch + yes/no keyword detector (ambiguous → case 3 fall-through).
 - [ ] 4.6 Edit `prompts/sp-04a-onboarding-admin.md` step 6 so the offer maps to this state (keep the question; the flow now honors it).
 
-## WU5 — Consent rejection terminal (#3)
+## WU5 — Consent rejection terminal (#3) ✅ DONE (PR-B)
 
-- [ ] 5.1 TEST: `datos.consentimiento === false` → `rechazo_consentimiento`, session `fallback_nota_libre`, warm close, `onboarding_consent_rejected` event, founder alert once; no field data retained beyond P6.
-- [ ] 5.2 TEST (routing): inbound from `rechazo_consentimiento` user → short-circuit (no consent re-loop, no `handleEvento`).
-- [ ] 5.3 Implement in both handlers; adjust `sp-04a/sp-04b` step-2 close copy (structured `consentimiento=false` already drives it).
+- [x] 5.1 TEST: `datos.consentimiento === false` → `rechazo_consentimiento` + founder alert + warm close (`onboardingHandler.recovery.test.ts`).
+- [x] 5.2 TEST: routing short-circuit covers `rechazo_consentimiento` (`esEstadoOnboardingTerminal`, `onboardingOutcome.test.ts`).
+- [x] 5.3 Implement `finalizarConsentRechazado` in both handlers (structured `consentimiento=false` drives it; copy unchanged). Prompt copy tweak deferred — behavior is structural.
 
-## WU6 — STT degradation (#7)
+## WU6 — STT degradation (#7) ✅ DONE (PR-B)
 
-- [ ] 6.1 TEST: STT throws or returns empty/whitespace during onboarding → explicit "no te entendí el audio, ¿lo escribís?" sent, LLM NOT invoked, step NOT advanced, `onboarding_stt_degraded` event.
-- [ ] 6.2 Implement in both handlers' audio branches.
+- [x] 6.1 TEST: failed/empty STT → ask-to-type, LLM NOT invoked, step NOT advanced (`onboardingHandler.recovery.test.ts`).
+- [x] 6.2 Implement `obtenerTextoEntrada` + `manejarSttDegradado` in both flows.
 
 ## WU7 — Agricultor approval resilience (#5)
 

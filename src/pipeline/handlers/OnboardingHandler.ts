@@ -14,7 +14,16 @@ import {
   getJefeByFinca,
   actualizarMensaje,
   updateFincaCoordenadas,
+  setOnboardingEstado,
 } from '../supabaseQueries.js'
+import type { SesionActivaRow, UsuarioRow } from '../supabaseQueries.js'
+import { alertarFounder } from '../../integrations/whatsapp/founderAlerts.js'
+import {
+  decidirDesenlaceOnboarding,
+  mensajeEnEspera,
+  ONBOARDING_MAX_STEPS,
+} from '../onboardingOutcome.js'
+import type { OnboardingContext } from '../../agents/onboarding/context.js'
 import {
   reduceOnboardingContext,
   mapDatosToExtraction,
@@ -50,7 +59,84 @@ import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMed
 // TODO: Extraer a un archivo de constantes compartidas
 const CONSENT_TEXT_ADMIN = 'Para guardar los reportes de tu finca necesito tu autorización. Tus datos son tuyos — solo se usan para generar tus reportes. Nadie más los ve sin tu permiso. ¿Aceptas?'
 const CONSENT_TEXT_AGRICULTOR = 'Para guardar tus reportes de campo necesito tu permiso. Tus datos solo se usan para los reportes de tu finca. ¿Está bien?'
-const MAX_ONBOARDING_STEPS = 10
+const MAX_ONBOARDING_STEPS = ONBOARDING_MAX_STEPS
+
+// ─── Terminal/recovery helpers (change: onboarding-hardening) ───────────────
+
+/** Extracts text from a WhatsApp message; transcribes audio. Returns '' when
+ *  transcription fails or yields nothing — the caller decides degradation. */
+async function obtenerTextoEntrada(msg: NormalizedMessage, traceId: string): Promise<string> {
+  if (msg.tipo === 'texto') return msg.texto ?? ''
+  if (msg.tipo !== 'audio') return ''
+  let audioInput: string | Buffer = msg.audioUrl ?? ''
+  const evApiUrl = process.env['EVOLUTION_API_URL']
+  const evApiKey = process.env['EVOLUTION_API_KEY']
+  const evInstance = process.env['EVOLUTION_INSTANCE']
+  if (evApiUrl && evApiKey && evInstance) {
+    try {
+      const media = await downloadEvolutionMedia(msg.rawPayload, evApiUrl, evApiKey, evInstance)
+      audioInput = Buffer.from(media.base64, 'base64')
+    } catch (downloadErr) {
+      langfuse.trace({ id: traceId }).event({ name: 'audio_download_failed', level: 'WARNING', input: { error: String(downloadErr), wamid: msg.wamid } })
+    }
+  }
+  try {
+    return await transcribirAudio(audioInput, traceId)
+  } catch (err) {
+    langfuse.trace({ id: traceId }).event({ name: 'stt_error', level: 'ERROR', input: { audio_ref: typeof audioInput === 'string' ? audioInput : '[buffer]', wamid: msg.wamid, error: String(err) } })
+    return ''
+  }
+}
+
+/** STT degradation (#7): explicit ask-to-type instead of a blind LLM re-ask. */
+async function manejarSttDegradado(msg: NormalizedMessage, mensajeId: string, traceId: string): Promise<void> {
+  langfuse.trace({ id: traceId }).event({ name: 'onboarding_stt_degraded', level: 'WARNING', input: { phone: msg.from, wamid: msg.wamid } })
+  await _sender!.enviarTexto(msg.from, 'No te entendí el audio, ¿lo escribís? ⚠️')
+  await actualizarMensaje(mensajeId, { status: 'processed' }).catch(() => {})
+}
+
+/** Stuck recovery (#1, #6): durable requiere_revision + holding + once-only
+ *  founder alert (driven by the compare-and-set transition). */
+async function finalizarOnboardingTrabado(
+  usuario: UsuarioRow,
+  session: SesionActivaRow,
+  ctxNext: OnboardingContext,
+  pasoTrabado: number,
+  msg: NormalizedMessage,
+  mensajeId: string,
+  traceId: string,
+): Promise<void> {
+  const { transitioned } = await setOnboardingEstado(usuario.id, 'requiere_revision', { pasoTrabado })
+    .catch(err => { console.error('[onboarding] setOnboardingEstado requiere_revision falló:', err); return { transitioned: false } })
+  await updateSession(session.session_id, { status: 'fallback_nota_libre', contexto_parcial: serializeContextForSession(ctxNext) })
+    .catch(err => console.error('[onboarding] updateSession trabado falló:', err))
+  langfuse.trace({ id: traceId }).event({ name: 'onboarding_stuck', level: 'WARNING', input: { phone: msg.from, paso: pasoTrabado, finca_id: usuario.finca_id } })
+  if (transitioned) {
+    await alertarFounder('onboarding_requiere_revision', { phone: msg.from, nombre: usuario.nombre, finca: usuario.finca_id, org: usuario.org_id, detalle: `trabado en el paso ${pasoTrabado}` })
+  }
+  await _sender!.enviarTexto(msg.from, mensajeEnEspera('requiere_revision'))
+  await actualizarMensaje(mensajeId, { status: 'processed' }).catch(() => {})
+}
+
+/** Consent rejection (#3): explicit terminal + founder signal, never a mute loop. */
+async function finalizarConsentRechazado(
+  usuario: UsuarioRow,
+  session: SesionActivaRow,
+  msg: NormalizedMessage,
+  mensajeId: string,
+  traceId: string,
+): Promise<void> {
+  const { transitioned } = await setOnboardingEstado(usuario.id, 'rechazo_consentimiento')
+    .catch(err => { console.error('[onboarding] setOnboardingEstado rechazo falló:', err); return { transitioned: false } })
+  await updateSession(session.session_id, { status: 'fallback_nota_libre' })
+    .catch(err => console.error('[onboarding] updateSession rechazo falló:', err))
+  langfuse.trace({ id: traceId }).event({ name: 'onboarding_consent_rejected', level: 'WARNING', input: { phone: msg.from } })
+  if (transitioned) {
+    await alertarFounder('consentimiento_rechazado', { phone: msg.from, nombre: usuario.nombre, finca: usuario.finca_id, org: usuario.org_id, detalle: 'rechazó el consentimiento de datos' })
+  }
+  await _sender!.enviarTexto(msg.from, mensajeEnEspera('rechazo_consentimiento'))
+  await actualizarMensaje(mensajeId, { status: 'processed' }).catch(() => {})
+}
 
 // ─── Onboarding admin / propietario ───────────────────────────────────────
 
@@ -72,25 +158,12 @@ export async function handleOnboardingAdmin(
 
   const session = await getOrCreateSession(msg.from, 'onboarding')
 
-  let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
-  if (msg.tipo === 'audio') {
-    let audioInput: string | Buffer = msg.audioUrl ?? ''
-    const evApiUrl = process.env['EVOLUTION_API_URL']
-    const evApiKey = process.env['EVOLUTION_API_KEY']
-    const evInstance = process.env['EVOLUTION_INSTANCE']
-    if (evApiUrl && evApiKey && evInstance) {
-      try {
-        const media = await downloadEvolutionMedia(msg.rawPayload, evApiUrl, evApiKey, evInstance)
-        audioInput = Buffer.from(media.base64, 'base64')
-      } catch (downloadErr) {
-        langfuse.trace({ id: traceId }).event({ name: 'audio_download_failed', level: 'WARNING', input: { error: String(downloadErr), wamid: msg.wamid } })
-      }
-    }
-    try {
-      texto = await transcribirAudio(audioInput, traceId)
-    } catch (err) {
-      langfuse.trace({ id: traceId }).event({ name: 'stt_error', level: 'ERROR', input: { audio_ref: typeof audioInput === 'string' ? audioInput : '[buffer]', wamid: msg.wamid, error: String(err) } })
-    }
+  const texto = await obtenerTextoEntrada(msg, traceId)
+  // STT degradation (#7): an unusable audio gets an explicit ask-to-type, not a
+  // blind LLM re-ask with empty input.
+  if (msg.tipo === 'audio' && texto.trim() === '') {
+    await manejarSttDegradado(msg, mensajeId, traceId)
+    return
   }
 
   // Fase F-2 commit 3: Redis cache primero (TTL 24h) — evita el parsing del
@@ -115,6 +188,13 @@ export async function handleOnboardingAdmin(
       })
     await updateUsuario(usuario.id, { consentimiento_datos: true })
       .catch(err => console.error('[pipeline] Error actualizando consentimiento_datos admin:', err))
+  }
+
+  // Consent rejection (#3): terminal + founder signal, not a mute re-loop. Only
+  // when not already consented (reducer keeps consent monotonic).
+  if (datos.consentimiento === false && !consentAlreadySaved) {
+    await finalizarConsentRechazado(usuario, session, msg, mensajeId, traceId)
+    return
   }
 
   // When onboarding completes: create finca and lotes under the admin's org
@@ -169,15 +249,30 @@ export async function handleOnboardingAdmin(
     botMessage:         resultado.mensaje_para_usuario,
   })
 
-  if (!ctxNext.onboardingCompleto && ctxNext.pasoSiguiente >= MAX_ONBOARDING_STEPS) {
-    langfuse.trace({ id: traceId }).event({ name: 'onboarding_admin_max_steps', level: 'WARNING', input: { steps: ctxNext.pasoSiguiente } })
+  // Recovery (#1, #6): a non-completing onboarding that hits the step ceiling
+  // OR exhausts the per-step attempts (P2 backstop, computed by the reducer,
+  // not the LLM) goes to a durable requiere_revision — never the old loop.
+  const desenlace = decidirDesenlaceOnboarding({
+    onboardingCompleto:     ctxNext.onboardingCompleto,
+    consentRejected:        false, // handled earlier with an early return
+    pasoSiguiente:          ctxNext.pasoSiguiente,
+    clarificationTurnsUsed: ctxNext.clarificationTurnsUsed,
+  })
+
+  if (desenlace.kind === 'stuck') {
+    await finalizarOnboardingTrabado(usuario, session, ctxNext, desenlace.pasoTrabado, msg, mensajeId, traceId)
+    return
   }
 
   await updateSession(session.session_id, {
     clarification_count: ctxNext.onboardingCompleto ? 0 : Math.min(ctxNext.pasoSiguiente, MAX_ONBOARDING_STEPS),
     contexto_parcial:    serializeContextForSession(ctxNext),
-    status:              ctxNext.onboardingCompleto || ctxNext.pasoSiguiente >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
+    status:              ctxNext.onboardingCompleto ? 'completed' : 'active',
   })
+
+  // Keep the durable onboarding_estado in sync (compare-and-set stamps once).
+  await setOnboardingEstado(usuario.id, ctxNext.onboardingCompleto ? 'completo' : 'en_progreso')
+    .catch(err => console.error('[onboarding] setOnboardingEstado admin falló:', err))
 
   // Cache después de Supabase (source-of-truth first). Si Redis falla, no
   // fatal — próximo turno paga el round-trip a Postgres hasta que Redis vuelva.
@@ -205,25 +300,10 @@ export async function handleOnboardingAgricultor(
 
   const session = await getOrCreateSession(msg.from, 'onboarding')
 
-  let texto = msg.tipo === 'texto' ? (msg.texto ?? '') : ''
-  if (msg.tipo === 'audio') {
-    let audioInput: string | Buffer = msg.audioUrl ?? ''
-    const evApiUrl = process.env['EVOLUTION_API_URL']
-    const evApiKey = process.env['EVOLUTION_API_KEY']
-    const evInstance = process.env['EVOLUTION_INSTANCE']
-    if (evApiUrl && evApiKey && evInstance) {
-      try {
-        const media = await downloadEvolutionMedia(msg.rawPayload, evApiUrl, evApiKey, evInstance)
-        audioInput = Buffer.from(media.base64, 'base64')
-      } catch (downloadErr) {
-        langfuse.trace({ id: traceId }).event({ name: 'audio_download_failed', level: 'WARNING', input: { error: String(downloadErr), wamid: msg.wamid } })
-      }
-    }
-    try {
-      texto = await transcribirAudio(audioInput, traceId)
-    } catch (err) {
-      langfuse.trace({ id: traceId }).event({ name: 'stt_error', level: 'ERROR', input: { audio_ref: typeof audioInput === 'string' ? audioInput : '[buffer]', wamid: msg.wamid, error: String(err) } })
-    }
+  const texto = await obtenerTextoEntrada(msg, traceId)
+  if (msg.tipo === 'audio' && texto.trim() === '') {
+    await manejarSttDegradado(msg, mensajeId, traceId)
+    return
   }
 
   // Fase F-2 commit 3: cache Redis primero, fallback a hydrate-from-row.
@@ -252,6 +332,12 @@ export async function handleOnboardingAgricultor(
       })
     await updateUsuario(usuario.id, { consentimiento_datos: true })
       .catch(err => console.error('[pipeline] Error actualizando consentimiento_datos agricultor:', err))
+  }
+
+  // Consent rejection (#3): terminal + founder signal, not a mute re-loop.
+  if (datosAgr.consentimiento === false && !consentAlreadySavedAgr) {
+    await finalizarConsentRechazado(usuario, session, msg, mensajeId, traceId)
+    return
   }
 
   // Assign finca_id when the agricultor selects their finca
@@ -302,15 +388,31 @@ export async function handleOnboardingAgricultor(
     botMessage:         resultado.mensaje_para_usuario,
   })
 
-  if (!ctxNextAgr.onboardingCompleto && ctxNextAgr.pasoSiguiente >= MAX_ONBOARDING_STEPS) {
-    langfuse.trace({ id: traceId }).event({ name: 'onboarding_agricultor_max_steps', level: 'WARNING', input: { steps: ctxNextAgr.pasoSiguiente } })
+  // pendiente_aprobacion is legitimate waiting (#5), NOT a stuck onboarding —
+  // never let the P2 backstop mark a waiting agricultor as requiere_revision.
+  const esEsperaAprobacion = resultado.status_usuario === 'pendiente_aprobacion' || usuario.status === 'pendiente_aprobacion'
+
+  const desenlaceAgr = decidirDesenlaceOnboarding({
+    onboardingCompleto:     ctxNextAgr.onboardingCompleto,
+    consentRejected:        false, // handled earlier with an early return
+    pasoSiguiente:          ctxNextAgr.pasoSiguiente,
+    clarificationTurnsUsed: ctxNextAgr.clarificationTurnsUsed,
+  })
+
+  if (desenlaceAgr.kind === 'stuck' && !esEsperaAprobacion) {
+    await finalizarOnboardingTrabado(usuario, session, ctxNextAgr, desenlaceAgr.pasoTrabado, msg, mensajeId, traceId)
+    return
   }
 
   await updateSession(session.session_id, {
     clarification_count: ctxNextAgr.onboardingCompleto ? 0 : Math.min(ctxNextAgr.pasoSiguiente, MAX_ONBOARDING_STEPS),
     contexto_parcial:    serializeContextForSession(ctxNextAgr),
-    status:              ctxNextAgr.onboardingCompleto || ctxNextAgr.pasoSiguiente >= MAX_ONBOARDING_STEPS ? 'completed' : 'active',
+    status:              ctxNextAgr.onboardingCompleto ? 'completed' : 'active',
   })
+
+  // Keep durable onboarding_estado in sync (waiting agricultor stays en_progreso).
+  await setOnboardingEstado(usuario.id, ctxNextAgr.onboardingCompleto ? 'completo' : 'en_progreso')
+    .catch(err => console.error('[onboarding] setOnboardingEstado agricultor falló:', err))
 
   // Cache después de Supabase (source-of-truth first).
   await cacheOnboardingContext(ctxNextAgr)
