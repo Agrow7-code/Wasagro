@@ -12,6 +12,7 @@ export interface UsuarioRow {
   onboarding_completo: boolean
   consentimiento_datos: boolean
   status: string
+  onboarding_estado: string
 }
 
 /** Durable onboarding state (change: onboarding-hardening). Orthogonal to
@@ -132,7 +133,7 @@ export async function actualizarMensaje(
 export async function getUserByPhone(phone: string, client: SupabaseClient = defaultClient): Promise<UsuarioRow | null> {
   const { data, error } = await client
     .from('usuarios')
-    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos, status')
+    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos, status, onboarding_estado')
     .eq('phone', phone)
     .maybeSingle()
   if (error) throw error

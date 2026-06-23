@@ -20,6 +20,7 @@ import { shouldSuppressOnboardingForActiveSDR } from '../agents/sdr/onboardingGu
 import { recordInboundWaCost } from '../integrations/whatsapp/CostTrackedSender.js'
 import { planGuardWhatsApp } from '../auth/planGuard.js'
 import { handleBillingIntent } from './handlers/BillingIntentHandler.js'
+import { esEstadoOnboardingTerminal, mensajeEnEspera } from './onboardingOutcome.js'
 
 export const ROLES_ADMIN = new Set(['propietario', 'jefe_finca', 'admin_org', 'director'])
 
@@ -127,6 +128,18 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
         await actualizarMensaje(mensajeId, { status: 'blocked_billing' }).catch(() => {})
         return
       }
+
+    // ── Onboarding terminal short-circuit (change: onboarding-hardening) ──
+    // A user in a terminal-trouble onboarding state (requiere_revision /
+    // rechazo_consentimiento) must NOT restart onboarding (the old infinite
+    // restart loop, #1) nor fall through to handleEvento. Acknowledge once and
+    // stop; the founder was already alerted on the transition (no re-alert here).
+    if (esEstadoOnboardingTerminal(usuario.onboarding_estado)) {
+      trace.event({ name: 'onboarding_terminal_inbound', level: 'WARNING', input: { phone: msg.from, estado: usuario.onboarding_estado } })
+      await _sender!.enviarTexto(msg.from, mensajeEnEspera(usuario.onboarding_estado))
+      await actualizarMensaje(mensajeId, { status: 'processed' }).catch(() => {})
+      return
+    }
 
     if (!usuario.onboarding_completo) {
       // Guard: a live SDR conversation must not be interrupted by the onboarding
