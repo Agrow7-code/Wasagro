@@ -14,6 +14,31 @@ export interface UsuarioRow {
   status: string
 }
 
+/** Durable onboarding state (change: onboarding-hardening). Orthogonal to
+ *  onboarding_completo (boolean) and status (account-activation axis). */
+export type OnboardingEstado =
+  | 'no_iniciado'
+  | 'en_progreso'
+  | 'esperando_explicacion'
+  | 'completo'
+  | 'requiere_revision'
+  | 'rechazo_consentimiento'
+
+export interface OnboardingTrabadoRow {
+  id: string
+  phone: string
+  nombre: string | null
+  finca_id: string | null
+  org_id: string
+  onboarding_estado: string
+  status: string
+  onboarding_iniciado_at: string | null
+  paso_trabado: number | null
+  updated_at: string | null
+  /** Derived reason for the back-office/alert consumer. */
+  motivo: 'requiere_revision' | 'rechazo_consentimiento' | 'pendiente_aprobacion'
+}
+
 export interface FincaRow {
   finca_id: string
   org_id: string
@@ -654,6 +679,70 @@ export async function approveAgricultor(userId: string, client: SupabaseClient =
     .update({ status: 'activo', onboarding_completo: true, updated_at: new Date().toISOString() })
     .eq('id', userId)
   if (error) throw error
+}
+
+// ─── Onboarding state (change: onboarding-hardening) ──────────────────────────
+
+/**
+ * Compare-and-set of the durable onboarding state. Writes ONLY when the current
+ * state differs from `target` (via `.neq`), so it is idempotent and the returned
+ * `transitioned` flag is the single source of truth for firing a founder alert
+ * exactly once on the actual transition (survives worker retries).
+ *
+ * Stamps breadcrumbs in the same write — and because the update only fires on a
+ * real transition, each stamp lands exactly once:
+ *   - completo → onboarding_completo=true + onboarding_completado_at
+ *   - en_progreso → onboarding_iniciado_at (first entry only)
+ *   - requiere_revision → paso_trabado (the step where it got stuck)
+ */
+export async function setOnboardingEstado(
+  userId: string,
+  target: OnboardingEstado,
+  opts: { pasoTrabado?: number } = {},
+  client: SupabaseClient = defaultClient,
+): Promise<{ transitioned: boolean }> {
+  const now = new Date().toISOString()
+  const patch: Record<string, unknown> = { onboarding_estado: target, updated_at: now }
+
+  if (target === 'completo') {
+    patch['onboarding_completo'] = true
+    patch['onboarding_completado_at'] = now
+  } else if (target === 'en_progreso') {
+    patch['onboarding_iniciado_at'] = now
+  } else if (target === 'requiere_revision' && opts.pasoTrabado != null) {
+    patch['paso_trabado'] = opts.pasoTrabado
+  }
+
+  const { data, error } = await client
+    .from('usuarios')
+    .update(patch)
+    .eq('id', userId)
+    .neq('onboarding_estado', target)
+    .select('id')
+  if (error) throw error
+  return { transitioned: ((data as unknown[] | null)?.length ?? 0) > 0 }
+}
+
+/**
+ * Stuck/pending onboardings for the founder alert worker and the future
+ * back-office view. Transport-agnostic (no HTTP concerns) so any consumer can
+ * reuse it. Returns terminal-trouble states plus pending approvals, each tagged
+ * with a derived `motivo`.
+ */
+export async function getOnboardingsTrabados(client: SupabaseClient = defaultClient): Promise<OnboardingTrabadoRow[]> {
+  const { data, error } = await client
+    .from('usuarios')
+    .select('id, phone, nombre, finca_id, org_id, onboarding_estado, status, onboarding_iniciado_at, paso_trabado, updated_at')
+    .or('onboarding_estado.eq.requiere_revision,onboarding_estado.eq.rechazo_consentimiento,status.eq.pendiente_aprobacion')
+  if (error) throw error
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const estado = row['onboarding_estado'] as string
+    const motivo: OnboardingTrabadoRow['motivo'] =
+      estado === 'requiere_revision' || estado === 'rechazo_consentimiento'
+        ? estado
+        : 'pendiente_aprobacion'
+    return { ...(row as unknown as OnboardingTrabadoRow), motivo }
+  })
 }
 
 // ─── SDR Prospectos ────────────────────────────────────────────────────────
