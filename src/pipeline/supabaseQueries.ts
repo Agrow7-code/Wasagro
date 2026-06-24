@@ -833,7 +833,7 @@ import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
  * EventHandler does not read from umbrales_metrica for Sigatoka (Fix 1).
  *
  * Idempotent: upsert uses onConflict:'nombre,finca_id' backed by migration
- * 20260624000065_metricas-finca-unique-nombre-finca.sql (Fix 2).
+ * 20260624000064_metricas-finca-unique-nombre-finca.sql (Fix 2).
  */
 export async function seedMetricasPlantilla(
   orgId: string,
