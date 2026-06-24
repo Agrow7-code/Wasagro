@@ -18,6 +18,9 @@ import {
   getSDRProspecto,
   getSDRProspectosPendingApproval,
   updateFincaCoordenadas,
+  // T-06: provisioning helpers (not yet implemented — imported to make tests fail)
+  getNextOrgId,
+  provisionarClienteAtomico,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -47,6 +50,8 @@ function crearSupabaseMock() {
     in: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(),
     single: vi.fn(),
   }
@@ -217,6 +222,75 @@ describe('supabaseQueries', () => {
       const mockFinal = { from: vi.fn().mockReturnValue(thenable) }
 
       await expect(actualizarMensaje('msg-1', { status: 'processed' }, mockFinal as any)).resolves.toBeUndefined()
+    })
+  })
+})
+
+// ─── T-06: provisioning helpers (failing before T-07) ────────────────────────────
+// These tests must fail until getNextOrgId / provisionarClienteAtomico are implemented.
+describe('provisioning helpers', () => {
+  describe('getNextOrgId', () => {
+    it('tabla vacía → ORG001', async () => {
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: null, error: null })
+
+      const result = await getNextOrgId(mock as any)
+
+      expect(result).toBe('ORG001')
+    })
+
+    it('último org_id = ORG003 → ORG004', async () => {
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: { org_id: 'ORG003' }, error: null })
+
+      const result = await getNextOrgId(mock as any)
+
+      expect(result).toBe('ORG004')
+    })
+
+    it('último org_id = ORG999 → ORG1000 (sin padding overflow)', async () => {
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: { org_id: 'ORG999' }, error: null })
+
+      const result = await getNextOrgId(mock as any)
+
+      expect(result).toBe('ORG1000')
+    })
+  })
+
+  describe('provisionarClienteAtomico', () => {
+    it('llama rpc con los argumentos correctos y retorna el UUID del admin', async () => {
+      const adminUuid = 'b1c2d3e4-0000-0000-0000-000000000001'
+      const rpcMock = vi.fn().mockResolvedValue({ data: adminUuid, error: null })
+      const mock = { ...crearSupabaseMock(), rpc: rpcMock }
+
+      const args = {
+        p_org_id: 'ORG002',
+        p_nombre_org: 'Exportadora Test',
+        p_tipo: 'empresa' as const,
+        p_pais: 'EC',
+        p_fincas: 1,
+        p_usuarios: 1,
+        p_phone: '593987654321',
+        p_nombre_admin: 'Carlos López',
+        p_consent_texto: 'Acepto los términos de uso de Wasagro.',
+      }
+
+      const result = await provisionarClienteAtomico(args, mock as any)
+
+      expect(rpcMock).toHaveBeenCalledWith('provisionar_cliente_atomico', args)
+      expect(result).toBe(adminUuid)
+    })
+
+    it('lanza si rpc devuelve error', async () => {
+      const rpcMock = vi.fn().mockResolvedValue({ data: null, error: { message: 'unique violation' } })
+      const mock = { ...crearSupabaseMock(), rpc: rpcMock }
+
+      await expect(provisionarClienteAtomico({
+        p_org_id: 'ORG002', p_nombre_org: 'Test', p_tipo: 'empresa' as const,
+        p_pais: 'EC', p_fincas: 1, p_usuarios: 1,
+        p_phone: '593987654321', p_nombre_admin: 'Admin', p_consent_texto: 'texto',
+      }, mock as any)).rejects.toThrow('unique violation')
     })
   })
 })

@@ -809,3 +809,114 @@ export async function marcarIntencionFallida(
   const r = data as { todas_completas: boolean; intenciones: IntencionPendiente[] }
   return { todas_completas: r.todas_completas, intenciones: r.intenciones ?? [] }
 }
+
+// ─── Provisioning helpers (T-07, client-provisioning change) ──────────────────
+
+/**
+ * Returns the next available org_id (e.g. 'ORG001', 'ORG002', 'ORG1000').
+ * Reads the highest existing org_id, increments the numeric suffix, and pads
+ * to at least 3 digits. Zero-based when the table is empty.
+ *
+ * NOTE: Concurrency-unsafe (no advisory lock). Acceptable for H0-R (founder-driven,
+ * ≤1 concurrent provisioning). For H1, replace with a Postgres sequence or
+ * advisory lock before allowing concurrent provisioning.
+ */
+export async function getNextOrgId(client: SupabaseClient = defaultClient): Promise<string> {
+  const { data, error } = await client
+    .from('organizaciones')
+    .select('org_id')
+    .order('org_id', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  const match = (data as { org_id: string } | null)?.org_id?.match(/^ORG(\d+)$/)
+  const next = match?.[1] != null ? parseInt(match[1], 10) + 1 : 1
+  // Pad to 3 digits minimum; numbers > 999 are NOT truncated (no overflow).
+  return `ORG${String(next).padStart(3, '0')}`
+}
+
+export interface OrganizacionInsert {
+  org_id: string
+  nombre: string
+  tipo: 'individual' | 'empresa'
+  pais: string
+  plan?: string
+  activa?: boolean
+  fincas_contratadas?: number
+  usuarios_contratados?: number
+  is_test_org?: boolean
+}
+
+/**
+ * Direct INSERT into organizaciones. Used in tests and partial-state recovery paths.
+ * The production provisioning path uses provisionarClienteAtomico (RPC) instead.
+ */
+export async function createOrganizacion(data: OrganizacionInsert, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client.from('organizaciones').insert({
+    org_id: data.org_id,
+    nombre: data.nombre,
+    tipo: data.tipo,
+    pais: data.pais,
+    plan: data.plan ?? 'trial',
+    activa: data.activa ?? true,
+    trial_inicio: null,
+    trial_fin: null,
+    fincas_contratadas: data.fincas_contratadas ?? 1,
+    usuarios_contratados: data.usuarios_contratados ?? 1,
+    is_test_org: data.is_test_org ?? false,
+  })
+  if (error) throw error
+}
+
+export interface UsuarioAdminInsert {
+  phone: string
+  nombre: string
+  org_id: string
+}
+
+/**
+ * INSERT a new admin_org user. Used in tests and partial-state recovery paths.
+ * The production path uses provisionarClienteAtomico (RPC).
+ */
+export async function createUsuarioAdmin(data: UsuarioAdminInsert, client: SupabaseClient = defaultClient): Promise<string> {
+  const { data: row, error } = await client
+    .from('usuarios')
+    .insert({
+      phone: data.phone,
+      nombre: data.nombre,
+      rol: 'admin_org',
+      org_id: data.org_id,
+      onboarding_completo: false,
+      consentimiento_datos: true,
+    })
+    .select('id')
+    .single()
+  if (error) throw error
+  return (row as { id: string }).id
+}
+
+export interface ProvisionarClienteAtomicoArgs {
+  p_org_id: string
+  p_nombre_org: string
+  p_tipo: 'individual' | 'empresa'
+  p_pais: string
+  p_fincas: number
+  p_usuarios: number
+  p_phone: string
+  p_nombre_admin: string
+  p_consent_texto: string
+}
+
+/**
+ * Thin wrapper around the provisionar_cliente_atomico SQL RPC.
+ * The RPC creates org + admin user + user_consent in a single transaction
+ * (atomic: all three or none). Returns the UUID of the created admin user.
+ */
+export async function provisionarClienteAtomico(
+  args: ProvisionarClienteAtomicoArgs,
+  client: SupabaseClient = defaultClient,
+): Promise<string> {
+  const { data, error } = await client.rpc('provisionar_cliente_atomico', args)
+  if (error) throw new Error(error.message)
+  return data as string
+}
