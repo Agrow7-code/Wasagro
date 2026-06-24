@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// supabaseQueries is imported by provisionarCliente.ts; mock it so supabase.ts
-// never executes (it throws if SUPABASE_URL is not set).
+// supabaseQueries is imported transitively by provisionarCliente.ts; mock it so
+// supabase.ts never executes (it throws when SUPABASE_URL is missing in test env).
 vi.mock('../../../src/pipeline/supabaseQueries.js', () => ({
   getUserByPhone: vi.fn(),
   provisionarClienteAtomico: vi.fn(),
 }))
 
 // Mock provisionarCliente so each test controls its return value.
-// The async factory preserves named exports (ProvisionInputSchema) from the real module.
+// The async factory spreads real named exports (ProvisionInputSchema, createProvisionHandler)
+// while replacing only the domain function.
 vi.mock('../../../src/agents/provisioning/provisionarCliente.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../src/agents/provisioning/provisionarCliente.js')>()
   return {
@@ -17,65 +18,27 @@ vi.mock('../../../src/agents/provisioning/provisionarCliente.js', async (importO
   }
 })
 
-// We do NOT import src/index.ts — we build a minimal Hono app from the schema
-// and route factory exported by provisionarCliente.ts to keep the test isolated.
-// The route logic lives entirely in src/index.ts so we replicate only the route
-// under test here, mirroring the exact handler code we will write in T-11.
-
 import { Hono } from 'hono'
-import { timingSafeEqual } from 'node:crypto'
 import {
   provisionarCliente,
-  ProvisionInputSchema,
+  createProvisionHandler,
 } from '../../../src/agents/provisioning/provisionarCliente.js'
 
 const mockProvisionarCliente = vi.mocked(provisionarCliente)
 
-// ── Helper: replicate the same secureSecretCompare used in src/index.ts ───────
+// ── Shared secret used across all tests ──────────────────────────────────────
 
-function secureSecretCompare(a: string, b: string): boolean {
-  const aBuf = Buffer.from(String(a))
-  const bBuf = Buffer.from(String(b))
-  if (aBuf.length !== bBuf.length) return false
-  return timingSafeEqual(aBuf, bBuf)
-}
+const TEST_SECRET = 'test-secret'
 
-// ── Build a minimal app that only has the one route under test ────────────────
+// ── Build a Hono app using the REAL handler factory ───────────────────────────
+// This guarantees the test exercises the same code path that index.ts uses.
 
-function buildApp(reporteSecret = 'test-secret') {
+function buildApp(overrides: { secret?: string } = {}) {
   const app = new Hono()
-
-  app.post('/internal/provision-client', async (c) => {
-    const secret = c.req.header('x-reporte-secret')
-    const expected = reporteSecret
-    if (!secret || !expected || !secureSecretCompare(secret, expected)) {
-      return c.json({ error: 'Unauthorized' }, 401)
-    }
-
-    let rawBody: unknown
-    try {
-      rawBody = await c.req.json()
-    } catch {
-      return c.json({ error: 'Invalid JSON' }, 400)
-    }
-
-    const parsed = ProvisionInputSchema.safeParse(rawBody)
-    if (!parsed.success) {
-      return c.json({ error: 'Validation error', issues: parsed.error.issues }, 400)
-    }
-
-    try {
-      const result = await provisionarCliente(parsed.data, {})
-      const status = result.yaExistia ? 200 : 201
-      return c.json(
-        { org_id: result.orgId, usuario_id: result.usuarioId, ya_existia: result.yaExistia },
-        status,
-      )
-    } catch (err) {
-      return c.json({ error: 'Internal server error' }, 500)
-    }
+  const handler = createProvisionHandler({
+    secret: overrides.secret ?? TEST_SECRET,
   })
-
+  app.post('/internal/provision-client', handler)
   return app
 }
 
@@ -94,10 +57,11 @@ function validBody(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── resetAllMocks in beforeEach ───────────────────────────────────────────────
+// vi.resetAllMocks clears .mock.calls AND the pending mockResolvedValueOnce
+// queue, preventing stale values from leaking between tests.
 
 beforeEach(() => {
-  // resetAllMocks clears .mock.calls AND pending mockResolvedValueOnce queue
   vi.resetAllMocks()
 })
 
@@ -134,8 +98,6 @@ describe('POST /internal/provision-client — non-enumeration', () => {
   it('returns identical 401 body regardless of whether phone/org exists (no DB state leak)', async () => {
     const app = buildApp()
 
-    // Simulate: phone does NOT exist (provisionarCliente would return yaExistia:false)
-    mockProvisionarCliente.mockResolvedValueOnce({ orgId: 'ORG001', usuarioId: 'uid-1', yaExistia: false })
     const res1 = await app.request('/internal/provision-client', {
       method: 'POST',
       headers: {
@@ -145,8 +107,6 @@ describe('POST /internal/provision-client — non-enumeration', () => {
       body: JSON.stringify(validBody()),
     })
 
-    // Simulate: phone DOES exist (provisionarCliente would return yaExistia:true)
-    mockProvisionarCliente.mockResolvedValueOnce({ orgId: 'ORG002', usuarioId: 'uid-2', yaExistia: true })
     const res2 = await app.request('/internal/provision-client', {
       method: 'POST',
       headers: {
@@ -162,7 +122,7 @@ describe('POST /internal/provision-client — non-enumeration', () => {
     const body1 = await res1.json()
     const body2 = await res2.json()
     expect(body1).toEqual(body2)
-    // provisionarCliente must NOT have been called (auth check is fail-closed, before dispatch)
+    // Auth runs before dispatch — provisionarCliente must never be called on 401
     expect(mockProvisionarCliente).not.toHaveBeenCalled()
   })
 })
@@ -178,9 +138,37 @@ describe('POST /internal/provision-client — payload validation', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(body),
+    })
+    expect(res.status).toBe(400)
+    expect(mockProvisionarCliente).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when telefono_admin is whitespace-only (prevents double-provision via idempotency bypass)', async () => {
+    const app = buildApp()
+    const res = await app.request('/internal/provision-client', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-reporte-secret': TEST_SECRET,
+      },
+      body: JSON.stringify(validBody({ telefono_admin: '   ' })),
+    })
+    expect(res.status).toBe(400)
+    expect(mockProvisionarCliente).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when telefono_admin is too short (fewer than 7 digits)', async () => {
+    const app = buildApp()
+    const res = await app.request('/internal/provision-client', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-reporte-secret': TEST_SECRET,
+      },
+      body: JSON.stringify(validBody({ telefono_admin: '12345' })),
     })
     expect(res.status).toBe(400)
     expect(mockProvisionarCliente).not.toHaveBeenCalled()
@@ -194,7 +182,7 @@ describe('POST /internal/provision-client — payload validation', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(body),
     })
@@ -208,7 +196,7 @@ describe('POST /internal/provision-client — payload validation', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(validBody({ consent_texto: '' })),
     })
@@ -222,12 +210,29 @@ describe('POST /internal/provision-client — payload validation', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(validBody({ consent_texto: 'x'.repeat(2001) })),
     })
     expect(res.status).toBe(400)
     expect(mockProvisionarCliente).not.toHaveBeenCalled()
+  })
+
+  it('400 response does not expose Zod issue paths (non-enumeration)', async () => {
+    const app = buildApp()
+    const res = await app.request('/internal/provision-client', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-reporte-secret': TEST_SECRET,
+      },
+      body: JSON.stringify(validBody({ consent_texto: '' })),
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    // Must return exactly this shape — no field names, no Zod issue structure
+    expect(body).toEqual({ error: 'Validation error' })
+    expect(body).not.toHaveProperty('issues')
   })
 })
 
@@ -246,7 +251,7 @@ describe('POST /internal/provision-client — happy path', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(validBody()),
     })
@@ -268,7 +273,7 @@ describe('POST /internal/provision-client — happy path', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(validBody({ telefono_admin: '+593987000002' })),
     })
@@ -290,7 +295,7 @@ describe('POST /internal/provision-client — happy path', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(validBody({ tipo_org: 'cooperativa' })),
     })
@@ -299,6 +304,97 @@ describe('POST /internal/provision-client — happy path', () => {
     const callArg = mockProvisionarCliente.mock.calls[0]![0]
     // cooperativa must be mapped to empresa at the schema boundary so the DB enum is never violated
     expect(callArg.tipoOrg).toBe('empresa')
+  })
+})
+
+// ─── Trace contract (P4 observability) ───────────────────────────────────────
+
+describe('POST /internal/provision-client — trace contract (P4)', () => {
+  it('passes trace to provisionarCliente on success (yaExistia=false)', async () => {
+    const mockTrace = { event: vi.fn() }
+    const app = new Hono()
+    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace })
+    app.post('/internal/provision-client', handler)
+
+    mockProvisionarCliente.mockResolvedValueOnce({
+      orgId: 'ORG001',
+      usuarioId: 'uuid-1',
+      yaExistia: false,
+    })
+
+    await app.request('/internal/provision-client', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-reporte-secret': TEST_SECRET,
+      },
+      body: JSON.stringify(validBody()),
+    })
+
+    // The handler must forward a trace adapter to provisionarCliente.
+    // The adapter's .event method must have the positional (name, body) signature.
+    expect(mockProvisionarCliente).toHaveBeenCalledOnce()
+    const [, deps] = mockProvisionarCliente.mock.calls[0]!
+    expect(deps?.trace).toBeDefined()
+    expect(typeof deps?.trace?.event).toBe('function')
+
+    // The trace adapter must call through to the underlying trace.event on invocation.
+    deps!.trace!.event('provision.created', { orgId: 'ORG001' })
+    expect(mockTrace.event).toHaveBeenCalledWith('provision.created', { orgId: 'ORG001' })
+  })
+
+  it('passes trace to provisionarCliente on idempotent path (yaExistia=true)', async () => {
+    const mockTrace = { event: vi.fn() }
+    const app = new Hono()
+    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace })
+    app.post('/internal/provision-client', handler)
+
+    mockProvisionarCliente.mockResolvedValueOnce({
+      orgId: 'ORG002',
+      usuarioId: 'uuid-2',
+      yaExistia: true,
+    })
+
+    await app.request('/internal/provision-client', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-reporte-secret': TEST_SECRET,
+      },
+      body: JSON.stringify(validBody()),
+    })
+
+    expect(mockProvisionarCliente).toHaveBeenCalledOnce()
+    const [, deps] = mockProvisionarCliente.mock.calls[0]!
+    expect(deps?.trace).toBeDefined()
+  })
+
+  it('emits provision.error trace event with (name, body) when provisionarCliente throws', async () => {
+    const mockTrace = { event: vi.fn() }
+    const app = new Hono()
+    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace })
+    app.post('/internal/provision-client', handler)
+
+    mockProvisionarCliente.mockRejectedValueOnce(new Error('DB connection failed'))
+
+    const res = await app.request('/internal/provision-client', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-reporte-secret': TEST_SECRET,
+      },
+      body: JSON.stringify(validBody()),
+    })
+
+    expect(res.status).toBe(500)
+    // Handler must emit trace event with positional (name, body) shape (P4)
+    expect(mockTrace.event).toHaveBeenCalledWith(
+      'provision.error',
+      expect.objectContaining({ error: expect.any(String) }),
+    )
+    // HTTP response must not leak internal error detail
+    const body = await res.json()
+    expect(body).toEqual({ error: 'Internal server error' })
   })
 })
 
@@ -313,7 +409,7 @@ describe('POST /internal/provision-client — error handling', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-reporte-secret': 'test-secret',
+        'x-reporte-secret': TEST_SECRET,
       },
       body: JSON.stringify(validBody()),
     })
