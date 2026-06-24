@@ -11,12 +11,18 @@
 --   organizaciones: fincas_contratadas, usuarios_contratados added in migr. 056
 --   is_test_org: added in migr. 052
 --
+-- Review fixes applied (adversarial review 2026-06-23):
+--   Fix 1: REVOKE EXECUTE FROM PUBLIC on provisionar_cliente_atomico
+--   Fix 3: SET search_path = public, pg_temp on set_trial_fin() (D31 pattern)
+--   Fix 4: org_id generated atomically INSIDE the RPC via advisory lock
+--
 -- Changes in this migration:
 --   1. Make trial_inicio / trial_fin nullable (drop NOT NULL + DEFAULT)
---   2. Rewrite set_trial_fin() conditioned on trial_inicio IS NOT NULL
+--   2. Rewrite set_trial_fin() conditioned on trial_inicio IS NOT NULL + pin search_path
 --   3. Recreate trigger as BEFORE INSERT OR UPDATE OF trial_inicio
---   4. Create provisionar_cliente_atomico() RPC (SECURITY DEFINER, search_path pineado)
---   5. GRANT EXECUTE to service_role
+--   4. Create provisionar_cliente_atomico() RPC — org_id generated atomically via
+--      pg_advisory_xact_lock; returns JSONB {org_id, usuario_id}
+--   5. REVOKE EXECUTE FROM PUBLIC (close PostgREST bypass), then GRANT to service_role
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -30,13 +36,14 @@ ALTER TABLE organizaciones ALTER COLUMN trial_fin    DROP NOT NULL;
 ALTER TABLE organizaciones ALTER COLUMN trial_fin    DROP DEFAULT;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 2. Rewrite set_trial_fin() — only compute trial_fin when trial_inicio is set.
---    If trial_inicio IS NULL (deferred), trial_fin stays NULL.
---    The +30d is computed exclusively by the DB trigger — TS never calculates it.
+-- 2. Rewrite set_trial_fin() — conditioned on trial_inicio IS NOT NULL + pin
+--    search_path (Fix 3, D31: prevent search-path hijacking on all SECURITY
+--    DEFINER functions, consistent with migr. 058).
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION set_trial_fin()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   IF NEW.trial_inicio IS NOT NULL THEN
@@ -62,16 +69,25 @@ CREATE TRIGGER trg_set_trial_fin
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. RPC: provisionar_cliente_atomico
---    Creates org + admin user + consent in a single transaction.
---    Called by the TS wrapper provisionarClienteAtomico() in supabaseQueries.ts.
---    Returns the UUID of the created admin user.
+--
+--    Fix 4: org_id is now generated INSIDE the RPC, not passed by the caller.
+--    Uses pg_advisory_xact_lock(hashtext('provisionar_cliente')) to serialize
+--    concurrent calls within the same Postgres transaction, eliminating the TOCTOU
+--    race that existed when the TS side pre-computed the id before the INSERT.
+--
+--    The function:
+--      a) acquires an advisory transaction-level lock (released automatically on commit)
+--      b) computes next org_id from MAX(org_id) with regex parse
+--      c) inserts org + admin + consent atomically
+--      d) returns JSONB: { org_id TEXT, usuario_id UUID }
+--
+--    Callers (TS wrapper provisionarClienteAtomico) no longer pass p_org_id.
 --
 --    Verified column names (T-01):
 --      user_consents: texto_mostrado, aceptado
 --      usuarios: status='activo', rol='admin_org', consentimiento_datos=true
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION provisionar_cliente_atomico(
-  p_org_id       TEXT,
   p_nombre_org   TEXT,
   p_tipo         tipo_org,            -- 'individual' | 'empresa'
   p_pais         TEXT,
@@ -81,14 +97,36 @@ CREATE OR REPLACE FUNCTION provisionar_cliente_atomico(
   p_nombre_admin TEXT,
   p_consent_texto TEXT
 )
-RETURNS UUID
+RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public             -- D31: pin search_path, prevent hijacking
 AS $$
 DECLARE
-  v_uid UUID;
+  v_org_id    TEXT;
+  v_uid       UUID;
+  v_max_id    TEXT;
+  v_num       INTEGER;
 BEGIN
+  -- Acquire advisory transaction-level lock (auto-released on commit/rollback).
+  -- Key: hashtext of the function name, scoped to prevent conflicts with other locks.
+  -- This serializes concurrent provisionings without blocking other workloads.
+  PERFORM pg_advisory_xact_lock(hashtext('provisionar_cliente_atomico'));
+
+  -- Compute next org_id from the current maximum, numeric-aware.
+  SELECT org_id INTO v_max_id
+  FROM organizaciones
+  WHERE org_id ~ '^ORG\d+$'
+  ORDER BY length(org_id) DESC, org_id DESC
+  LIMIT 1;
+
+  IF v_max_id IS NULL THEN
+    v_org_id := 'ORG001';
+  ELSE
+    v_num    := substring(v_max_id FROM 4)::INTEGER + 1;
+    v_org_id := 'ORG' || lpad(v_num::TEXT, 3, '0');
+  END IF;
+
   -- Step 1: Create organization with deferred trial (trial_inicio = NULL).
   --         trial_fin will also be NULL (trigger set_trial_fin runs, sees NULL, keeps NULL).
   INSERT INTO organizaciones (
@@ -104,7 +142,7 @@ BEGIN
     usuarios_contratados,
     is_test_org
   ) VALUES (
-    p_org_id,
+    v_org_id,
     p_nombre_org,
     p_tipo,
     p_pais,
@@ -131,7 +169,7 @@ BEGIN
     p_phone,
     p_nombre_admin,
     'admin_org',
-    p_org_id,
+    v_org_id,
     false,
     true,
     'activo'
@@ -155,13 +193,20 @@ BEGIN
     true
   );
 
-  RETURN v_uid;
+  RETURN jsonb_build_object('org_id', v_org_id, 'usuario_id', v_uid);
 END;
 $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 5. Grant execute to service_role (backend pipeline bypasses RLS via service key)
+-- 5. Permission hardening (Fix 1 — CRITICAL)
+--    REVOKE from PUBLIC first (PostgreSQL grants EXECUTE to PUBLIC by default on
+--    new functions, which allows anon/authenticated to call it via PostgREST and
+--    bypass REPORTE_SECRET entirely). Then grant only to service_role.
 -- ─────────────────────────────────────────────────────────────────────────────
+REVOKE EXECUTE ON FUNCTION provisionar_cliente_atomico(
+  TEXT, tipo_org, TEXT, INTEGER, INTEGER, TEXT, TEXT, TEXT
+) FROM PUBLIC;
+
 GRANT EXECUTE ON FUNCTION provisionar_cliente_atomico(
-  TEXT, TEXT, tipo_org, TEXT, INTEGER, INTEGER, TEXT, TEXT, TEXT
+  TEXT, tipo_org, TEXT, INTEGER, INTEGER, TEXT, TEXT, TEXT
 ) TO service_role;
