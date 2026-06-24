@@ -100,7 +100,7 @@ CREATE OR REPLACE FUNCTION provisionar_cliente_atomico(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public             -- D31: pin search_path, prevent hijacking
+SET search_path = public, pg_temp    -- D31: pin search_path, prevent hijacking
 AS $$
 DECLARE
   v_org_id    TEXT;

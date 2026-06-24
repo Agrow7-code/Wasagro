@@ -812,88 +812,11 @@ export async function marcarIntencionFallida(
 
 // ─── Provisioning helpers (T-07, client-provisioning change) ──────────────────
 
-/**
- * Returns the next available org_id (e.g. 'ORG001', 'ORG002', 'ORG1000').
- * Reads the highest existing org_id, increments the numeric suffix, and pads
- * to at least 3 digits. Zero-based when the table is empty.
- *
- * NOTE: Concurrency-unsafe (no advisory lock). Acceptable for H0-R (founder-driven,
- * ≤1 concurrent provisioning). For H1, replace with a Postgres sequence or
- * advisory lock before allowing concurrent provisioning.
- */
-export async function getNextOrgId(client: SupabaseClient = defaultClient): Promise<string> {
-  const { data, error } = await client
-    .from('organizaciones')
-    .select('org_id')
-    .order('org_id', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) throw error
-  const match = (data as { org_id: string } | null)?.org_id?.match(/^ORG(\d+)$/)
-  const next = match?.[1] != null ? parseInt(match[1], 10) + 1 : 1
-  // Pad to 3 digits minimum; numbers > 999 are NOT truncated (no overflow).
-  return `ORG${String(next).padStart(3, '0')}`
-}
-
-// NOT exported — these are partial-state helpers that skip consent registration.
-// Using them standalone creates consent-less tenants, violating P6. They exist only
-// as internal primitives for testing and recovery paths that go through the full
-// provisionar_cliente_atomico RPC flow. DO NOT export.
-interface OrganizacionInsert {
-  org_id: string
-  nombre: string
-  tipo: 'individual' | 'empresa'
-  pais: string
-  plan?: string
-  activa?: boolean
-  fincas_contratadas?: number
-  usuarios_contratados?: number
-  is_test_org?: boolean
-}
-
-async function createOrganizacion(data: OrganizacionInsert, client: SupabaseClient = defaultClient): Promise<void> {
-  const { error } = await client.from('organizaciones').insert({
-    org_id: data.org_id,
-    nombre: data.nombre,
-    tipo: data.tipo,
-    pais: data.pais,
-    plan: data.plan ?? 'trial',
-    activa: data.activa ?? true,
-    trial_inicio: null,
-    trial_fin: null,
-    fincas_contratadas: data.fincas_contratadas ?? 1,
-    usuarios_contratados: data.usuarios_contratados ?? 1,
-    is_test_org: data.is_test_org ?? false,
-  })
-  if (error) throw error
-}
-
-interface UsuarioAdminInsert {
-  phone: string
-  nombre: string
-  org_id: string
-}
-
-async function createUsuarioAdmin(data: UsuarioAdminInsert, client: SupabaseClient = defaultClient): Promise<string> {
-  const { data: row, error } = await client
-    .from('usuarios')
-    .insert({
-      phone: data.phone,
-      nombre: data.nombre,
-      rol: 'admin_org',
-      org_id: data.org_id,
-      onboarding_completo: false,
-      consentimiento_datos: true,
-    })
-    .select('id')
-    .single()
-  if (error) throw error
-  return (row as { id: string }).id
-}
-
-// Silence unused-variable warnings: these remain available for internal recovery paths.
-void createOrganizacion
-void createUsuarioAdmin
+// org_id generation lives INSIDE the provisionar_cliente_atomico RPC (advisory lock +
+// sequential assignment in one transaction). There is intentionally no TS-side org_id
+// helper and no standalone createOrganizacion/createUsuarioAdmin: a standalone insert
+// would skip consent registration and create a consent-less tenant (P6 violation).
+// The RPC wrapper below is the only provisioning entry point.
 
 export interface ProvisionarClienteAtomicoArgs {
   // Note: p_org_id is NOT in this interface — org_id generation is now atomic inside the

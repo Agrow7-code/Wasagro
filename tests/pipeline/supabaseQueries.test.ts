@@ -18,8 +18,7 @@ import {
   getSDRProspecto,
   getSDRProspectosPendingApproval,
   updateFincaCoordenadas,
-  // provisioning helpers (Fix 4/5: createOrganizacion and createUsuarioAdmin are NOT exported)
-  getNextOrgId,
+  // provisioning entry point — org_id generation + org/admin/consent are atomic inside the RPC
   provisionarClienteAtomico,
 } from '../../src/pipeline/supabaseQueries.js'
 
@@ -226,53 +225,10 @@ describe('supabaseQueries', () => {
   })
 })
 
-// ─── provisioning helpers ─────────────────────────────────────────────────────
-// Fix 4: org_id generation moves INSIDE the RPC (advisory-lock atomic).
-// Fix 5: createOrganizacion and createUsuarioAdmin are NOT exported (footgun removal).
+// ─── provisioning ─────────────────────────────────────────────────────────────
+// org_id generation + org/admin/consent creation are atomic inside the RPC
+// (advisory lock, single transaction). The TS surface exposes only the RPC wrapper.
 describe('provisioning helpers', () => {
-  describe('getNextOrgId', () => {
-    it('tabla vacía → ORG001', async () => {
-      const mock = crearSupabaseMock()
-      mock._chain.maybeSingle.mockResolvedValue({ data: null, error: null })
-
-      const result = await getNextOrgId(mock as any)
-
-      expect(result).toBe('ORG001')
-    })
-
-    it('último org_id = ORG003 → ORG004', async () => {
-      const mock = crearSupabaseMock()
-      mock._chain.maybeSingle.mockResolvedValue({ data: { org_id: 'ORG003' }, error: null })
-
-      const result = await getNextOrgId(mock as any)
-
-      expect(result).toBe('ORG004')
-    })
-
-    it('último org_id = ORG999 → ORG1000 (sin padding overflow)', async () => {
-      const mock = crearSupabaseMock()
-      mock._chain.maybeSingle.mockResolvedValue({ data: { org_id: 'ORG999' }, error: null })
-
-      const result = await getNextOrgId(mock as any)
-
-      expect(result).toBe('ORG1000')
-    })
-
-    it('top row no coincide con /^ORG\\d+$/ → ORG001 (no colapsa sobre filas existentes no parseables)', async () => {
-      // If the highest row has a non-standard id (e.g. legacy data), getNextOrgId
-      // must not silently collide with existing orgs by returning ORG001 blindly.
-      // Correct behaviour: fall back to ORG001 only when the table has NO matching rows.
-      // This test documents that a non-matching top row is treated as "no parseable rows"
-      // → returns ORG001, and the DB UNIQUE constraint on org_id is the final safety net.
-      const mock = crearSupabaseMock()
-      mock._chain.maybeSingle.mockResolvedValue({ data: { org_id: 'LEGACY-001' }, error: null })
-
-      const result = await getNextOrgId(mock as any)
-
-      expect(result).toBe('ORG001')
-    })
-  })
-
   describe('provisionarClienteAtomico', () => {
     it('llama rpc sin p_org_id (generado internamente) y retorna el UUID del admin', async () => {
       // Fix 4: p_org_id is no longer a caller argument — the RPC generates it atomically.
