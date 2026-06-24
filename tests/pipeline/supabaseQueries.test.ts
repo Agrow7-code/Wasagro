@@ -18,6 +18,8 @@ import {
   getSDRProspecto,
   getSDRProspectosPendingApproval,
   updateFincaCoordenadas,
+  // provisioning entry point — org_id generation + org/admin/consent are atomic inside the RPC
+  provisionarClienteAtomico,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -47,6 +49,8 @@ function crearSupabaseMock() {
     in: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(),
     single: vi.fn(),
   }
@@ -217,6 +221,49 @@ describe('supabaseQueries', () => {
       const mockFinal = { from: vi.fn().mockReturnValue(thenable) }
 
       await expect(actualizarMensaje('msg-1', { status: 'processed' }, mockFinal as any)).resolves.toBeUndefined()
+    })
+  })
+})
+
+// ─── provisioning ─────────────────────────────────────────────────────────────
+// org_id generation + org/admin/consent creation are atomic inside the RPC
+// (advisory lock, single transaction). The TS surface exposes only the RPC wrapper.
+describe('provisioning helpers', () => {
+  describe('provisionarClienteAtomico', () => {
+    it('llama rpc sin p_org_id (generado internamente) y retorna el UUID del admin', async () => {
+      // Fix 4: p_org_id is no longer a caller argument — the RPC generates it atomically.
+      const adminUuid = 'b1c2d3e4-0000-0000-0000-000000000001'
+      const rpcMock = vi.fn().mockResolvedValue({ data: { usuario_id: adminUuid, org_id: 'ORG002' }, error: null })
+      const mock = { ...crearSupabaseMock(), rpc: rpcMock }
+
+      const args = {
+        p_nombre_org: 'Exportadora Test',
+        p_tipo: 'empresa' as const,
+        p_pais: 'EC',
+        p_fincas: 1,
+        p_usuarios: 1,
+        p_phone: '593987654321',
+        p_nombre_admin: 'Carlos López',
+        p_consent_texto: 'Acepto los términos de uso de Wasagro.',
+      }
+
+      const result = await provisionarClienteAtomico(args, mock as any)
+
+      expect(rpcMock).toHaveBeenCalledWith('provisionar_cliente_atomico', args)
+      // Returns both the UUID and the generated org_id
+      expect(result.usuarioId).toBe(adminUuid)
+      expect(result.orgId).toBe('ORG002')
+    })
+
+    it('lanza si rpc devuelve error', async () => {
+      const rpcMock = vi.fn().mockResolvedValue({ data: null, error: { message: 'unique violation' } })
+      const mock = { ...crearSupabaseMock(), rpc: rpcMock }
+
+      await expect(provisionarClienteAtomico({
+        p_nombre_org: 'Test', p_tipo: 'empresa' as const,
+        p_pais: 'EC', p_fincas: 1, p_usuarios: 1,
+        p_phone: '593987654321', p_nombre_admin: 'Admin', p_consent_texto: 'texto',
+      }, mock as any)).rejects.toThrow('unique violation')
     })
   })
 })

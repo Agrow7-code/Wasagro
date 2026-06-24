@@ -809,3 +809,46 @@ export async function marcarIntencionFallida(
   const r = data as { todas_completas: boolean; intenciones: IntencionPendiente[] }
   return { todas_completas: r.todas_completas, intenciones: r.intenciones ?? [] }
 }
+
+// ─── Provisioning helpers (T-07, client-provisioning change) ──────────────────
+
+// org_id generation lives INSIDE the provisionar_cliente_atomico RPC (advisory lock +
+// sequential assignment in one transaction). There is intentionally no TS-side org_id
+// helper and no standalone createOrganizacion/createUsuarioAdmin: a standalone insert
+// would skip consent registration and create a consent-less tenant (P6 violation).
+// The RPC wrapper below is the only provisioning entry point.
+
+export interface ProvisionarClienteAtomicoArgs {
+  // Note: p_org_id is NOT in this interface — org_id generation is now atomic inside the
+  // RPC (advisory lock + sequential assignment in a single transaction). This eliminates
+  // the TOCTOU race that existed when the TS caller pre-computed it before the INSERT.
+  p_nombre_org: string
+  p_tipo: 'individual' | 'empresa'
+  p_pais: string
+  p_fincas: number
+  p_usuarios: number
+  p_phone: string
+  p_nombre_admin: string
+  p_consent_texto: string
+}
+
+export interface ProvisionarClienteAtomicoResult {
+  orgId: string
+  usuarioId: string
+}
+
+/**
+ * Thin wrapper around the provisionar_cliente_atomico SQL RPC.
+ * The RPC generates org_id atomically (advisory lock) and creates org + admin +
+ * user_consent in a single transaction (all three or none, P4/P6).
+ * Returns both the generated org_id and the UUID of the created admin user.
+ */
+export async function provisionarClienteAtomico(
+  args: ProvisionarClienteAtomicoArgs,
+  client: SupabaseClient = defaultClient,
+): Promise<ProvisionarClienteAtomicoResult> {
+  const { data, error } = await client.rpc('provisionar_cliente_atomico', args)
+  if (error) throw new Error(error.message)
+  const row = data as { usuario_id: string; org_id: string }
+  return { orgId: row.org_id, usuarioId: row.usuario_id }
+}
