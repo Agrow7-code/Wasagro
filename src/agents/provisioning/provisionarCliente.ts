@@ -7,12 +7,55 @@
 // provisionar_cliente_atomico in a single Postgres transaction. Idempotency is handled
 // here by checking for an existing user before calling the RPC.
 
+import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   getUserByPhone,
   provisionarClienteAtomico,
   type ProvisionarClienteAtomicoArgs,
 } from '../../pipeline/supabaseQueries.js'
+
+// ─── HTTP boundary schema (snake_case input → camelCase ProvisionInput) ───────
+//
+// Rules encoded here:
+// - consent_texto: non-empty (.min(1)) and max-length-bounded (.max(2000)) to
+//   prevent storage-abuse blobs (spec: Security and Non-Enumeration; P4/P5).
+// - tipo_org: the DB enum only has 'individual' | 'empresa'. 'cooperativa' is
+//   accepted at this boundary and mapped to 'empresa' (D26 intent: cooperativa
+//   is a segment of empresa/corporate). This prevents the DB enum constraint from
+//   being violated by callers who use the common term. Documented here so the
+//   mapping is not implicit in the domain function.
+// - telefono_admin: required, non-empty string (E.164 is not enforced here to
+//   avoid false rejections on formatting variants; the domain function validates
+//   the phone is not already registered).
+
+export const ProvisionInputSchema = z.object({
+  nombre_org: z.string().min(1),
+  pais: z.string().min(1).max(2),
+  tipo_org: z
+    .enum(['individual', 'empresa', 'cooperativa'])
+    .optional()
+    .transform((v) => (v === 'cooperativa' ? 'empresa' : v) as 'individual' | 'empresa' | undefined),
+  telefono_admin: z.string().min(1),
+  nombre_admin: z.string().min(1),
+  cultivo_principal: z.string().min(1),
+  fincas_contratadas: z.number().int().positive().optional(),
+  usuarios_contratados: z.number().int().positive().optional(),
+  consent_texto: z.string().min(1).max(2000),
+}).transform((data) => ({
+  nombreOrg: data.nombre_org,
+  pais: data.pais,
+  tipoOrg: data.tipo_org,
+  telefonoAdmin: data.telefono_admin,
+  nombreAdmin: data.nombre_admin,
+  cultivoPrincipal: data.cultivo_principal,
+  fincasContratadas: data.fincas_contratadas,
+  usuariosContratados: data.usuarios_contratados,
+  consentTexto: data.consent_texto,
+}))
+
+// Inferred type of the transformed (camelCase) output — matches ProvisionInput exactly.
+export type ProvisionInputFromSchema = z.output<typeof ProvisionInputSchema>
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 

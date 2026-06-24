@@ -97,7 +97,8 @@ function validBody(overrides: Record<string, unknown> = {}) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // resetAllMocks clears .mock.calls AND pending mockResolvedValueOnce queue
+  vi.resetAllMocks()
 })
 
 // ─── Auth guard ───────────────────────────────────────────────────────────────

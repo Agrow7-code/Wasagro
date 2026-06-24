@@ -32,6 +32,7 @@ import { verifyHmacSignature, verifySharedToken } from './integrations/webhookSe
 import { calcularPrecio, getBasePrice, getSegmentLabel, inferPlanSegment, isPaidPlan, PRICE_PER_FINCA, PRICE_PER_USER } from './auth/pricingUtils.js'
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
+import { provisionarCliente, ProvisionInputSchema } from './agents/provisioning/provisionarCliente.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
 function validarEnvVars(): void {
@@ -622,6 +623,45 @@ app.get('/sigatoka/reextract', async (c) => {
   } catch (err) {
     console.error('[sigatoka/reextract] error:', err)
     return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
+  }
+})
+
+// POST /internal/provision-client — atomic client provisioning (D33).
+// Creates org + admin user + consent in a single idempotent operation.
+// Protected by REPORTE_SECRET (same fail-closed pattern as /reportes/semanal).
+// No business logic here: receive → auth → validate → dispatch → respond.
+app.post('/internal/provision-client', async (c) => {
+  const secret = c.req.header('x-reporte-secret')
+  const expected = process.env['REPORTE_SECRET']
+  if (!secret || !expected || !secureSecretCompare(secret, expected)) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  let rawBody: unknown
+  try {
+    rawBody = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400)
+  }
+
+  const parsed = ProvisionInputSchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return c.json({ error: 'Validation error', issues: parsed.error.issues }, 400)
+  }
+
+  const trace = langfuse.trace({ name: 'provision_client' })
+
+  try {
+    const result = await provisionarCliente(parsed.data, { trace })
+    const status = result.yaExistia ? 200 : 201
+    return c.json(
+      { org_id: result.orgId, usuario_id: result.usuarioId, ya_existia: result.yaExistia },
+      status,
+    )
+  } catch (err) {
+    console.error('[provision-client] error:', err)
+    trace.event({ name: 'error', level: 'ERROR', output: { error: String(err) } })
+    return c.json({ error: 'Internal server error' }, 500)
   }
 })
 
