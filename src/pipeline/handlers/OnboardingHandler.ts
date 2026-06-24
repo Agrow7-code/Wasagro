@@ -14,6 +14,9 @@ import {
   getJefeByFinca,
   actualizarMensaje,
   updateFincaCoordenadas,
+  startTrial,
+  seedMetricasPlantilla,
+  seedFincaConfig,
 } from '../supabaseQueries.js'
 import {
   reduceOnboardingContext,
@@ -147,6 +150,23 @@ export async function handleOnboardingAdmin(
         }
         await updateUsuario(usuario.id, { finca_id: fincaId, onboarding_completo: true })
         langfuse.trace({ id: traceId }).event({ name: 'finca_creada', level: 'DEFAULT', output: { finca_id: fincaId, lotes: lotes.length } })
+
+        // T-15: Start trial clock on first onboarding completion (idempotent via IS NULL guard).
+        await startTrial(usuario.org_id).catch(err => {
+          console.error('[pipeline] Error iniciando trial en onboarding admin:', err)
+          langfuse.trace({ id: traceId }).event({ name: 'start_trial_error', level: 'ERROR', input: { error: String(err), org_id: usuario.org_id } })
+        })
+
+        // T-15: Seed default metrics and per-farm Sigatoka config (best-effort, P4).
+        const cultivoPrincipal = datos.cultivo_principal ?? ''
+        await seedMetricasPlantilla(usuario.org_id, fincaId, cultivoPrincipal).catch(err => {
+          console.error('[pipeline] Error sembrando métricas plantilla en onboarding:', err)
+          langfuse.trace({ id: traceId }).event({ name: 'seed_metricas_error', level: 'WARNING', input: { error: String(err), finca_id: fincaId } })
+        })
+        await seedFincaConfig(fincaId, cultivoPrincipal).catch(err => {
+          console.error('[pipeline] Error sembrando finca config en onboarding:', err)
+          langfuse.trace({ id: traceId }).event({ name: 'seed_config_error', level: 'WARNING', input: { error: String(err), finca_id: fincaId } })
+        })
       } catch (err) {
         console.error('[pipeline] Error creando finca/lotes en onboarding admin:', err)
         langfuse.trace({ id: traceId }).event({ name: 'create_finca_error', level: 'ERROR', input: { error: String(err) } })

@@ -941,6 +941,23 @@ export async function seedFincaConfig(
   }
 }
 
+/**
+ * Starts the trial clock for an organization that has just completed onboarding.
+ * The condition `AND trial_inicio IS NULL` makes this idempotent — safe to call
+ * multiple times; the first call wins and subsequent calls are no-ops.
+ */
+export async function startTrial(
+  orgId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('organizaciones')
+    .update({ trial_inicio: new Date().toISOString() })
+    .eq('org_id', orgId)
+    .is('trial_inicio', null)
+  if (error) throw error
+}
+
 // ─── Provisioning helpers (T-07, client-provisioning change) ──────────────────
 
 // org_id generation lives INSIDE the provisionar_cliente_atomico RPC (advisory lock +
