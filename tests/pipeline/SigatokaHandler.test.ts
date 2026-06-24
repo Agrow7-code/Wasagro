@@ -30,6 +30,7 @@ import {
   reconciliarPorDesacuerdo,
   elegirMejorDatos,
   resolverUmbralEnv,
+  parseFincaUmbrales,
   UMBRALES_SEVERIDAD_DEFAULT,
   type UmbralesSeveridad,
   type ResumenColumnaSinCalculo,
@@ -1525,5 +1526,86 @@ describe('reconciliarCrossField', () => {
     const r = reconciliarCrossField(filas, null)
     expect(r.corregidas).toHaveLength(0)
     expect(r.filas[0]!.ht.valor).toBe(6)
+  })
+})
+
+// ─── T-16: parseFincaUmbrales — per-farm threshold from fincas.config ─────────
+
+describe('parseFincaUmbrales (T-16)', () => {
+  it('returns valid UmbralesSeveridad when all fields are present and numeric', () => {
+    const config = {
+      sigatoka_umbrales: {
+        ee3a6Severo: 5,
+        ee2Avanzado: 3,
+        ee2Leve: 25,
+        hojasFuncionalesMin: 10,
+      },
+    }
+    const result = parseFincaUmbrales(config)
+    expect(result).not.toBeNull()
+    expect(result!.ee3a6Severo).toBe(5)
+    expect(result!.ee2Avanzado).toBe(3)
+    expect(result!.ee2Leve).toBe(25)
+    expect(result!.hojasFuncionalesMin).toBe(10)
+  })
+
+  it('returns null when sigatoka_umbrales key is absent (empty config)', () => {
+    expect(parseFincaUmbrales({})).toBeNull()
+  })
+
+  it('returns null when finca.config is null', () => {
+    expect(parseFincaUmbrales(null)).toBeNull()
+  })
+
+  it('returns null when finca.config is undefined', () => {
+    expect(parseFincaUmbrales(undefined)).toBeNull()
+  })
+
+  it('returns null when a required field is missing from sigatoka_umbrales', () => {
+    const config = {
+      sigatoka_umbrales: {
+        ee3a6Severo: 5,
+        // ee2Avanzado missing
+        ee2Leve: 25,
+        hojasFuncionalesMin: 10,
+      },
+    }
+    expect(parseFincaUmbrales(config)).toBeNull()
+  })
+
+  it('returns null when a field is not a positive number (invalid threshold)', () => {
+    const config = {
+      sigatoka_umbrales: {
+        ee3a6Severo: -1, // invalid
+        ee2Avanzado: 3,
+        ee2Leve: 25,
+        hojasFuncionalesMin: 10,
+      },
+    }
+    expect(parseFincaUmbrales(config)).toBeNull()
+  })
+
+  it('overriding umbrales changes buildWhatsappSummary alert thresholds', () => {
+    // Use very high ee3a6Severo threshold so no CRITICO alert fires
+    const highThreshold: UmbralesSeveridad = {
+      ...UMBRALES_SEVERIDAD_DEFAULT,
+      ee3a6Severo: 99, // no crop will ever hit 99%
+    }
+    // Use low threshold so CRITICO fires
+    const lowThreshold: UmbralesSeveridad = {
+      ...UMBRALES_SEVERIDAD_DEFAULT,
+      ee3a6Severo: 1, // fire on any J > 1%
+    }
+
+    const col = calcularColumna({ ...colRaw(), J_formulario: 5 }) // 5% J
+    const data = muestreo([col, col, col])
+
+    const summaryHigh = buildWhatsappSummary(data, highThreshold)
+    const summaryLow  = buildWhatsappSummary(data, lowThreshold)
+
+    // High threshold → no critical mention; low threshold → critical mentioned
+    expect(summaryLow).toMatch(/CRÍT|J:|⚠️/)
+    // With high threshold the same data should NOT show the same critical alert
+    expect(summaryHigh).not.toMatch(/CRÍT/)
   })
 })

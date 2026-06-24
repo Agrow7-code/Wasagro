@@ -20,6 +20,8 @@ export interface FincaRow {
   nombre: string
   pais: string
   cultivo_principal: string | null
+  // config JSONB added by migration 063 (client-provisioning PR-A)
+  config?: Record<string, unknown> | null
 }
 
 export interface LoteRow {
@@ -117,7 +119,7 @@ export async function getUserByPhone(phone: string, client: SupabaseClient = def
 export async function getFincaById(fincaId: string, client: SupabaseClient = defaultClient): Promise<FincaRow | null> {
   const { data, error } = await client
     .from('fincas')
-    .select('finca_id, org_id, nombre, pais, cultivo_principal')
+    .select('finca_id, org_id, nombre, pais, cultivo_principal, config')
     .eq('finca_id', fincaId)
     .maybeSingle()
   if (error) throw error

@@ -27,7 +27,7 @@ import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
-import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones } from './SigatokaHandler.js'
+import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones, parseFincaUmbrales } from './SigatokaHandler.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
@@ -871,7 +871,21 @@ async function finalizarMuestreoSigatoka(
   })
 
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
-  await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka))
+
+  // T-17: Read per-farm Sigatoka thresholds from fincas.config.sigatoka_umbrales (D29).
+  // Falls back to UMBRALES_SEVERIDAD_DEFAULT when absent or invalid (P1 — never fabricate).
+  let umbralesFinca = undefined
+  try {
+    const fincaData = await getFincaById(ctx.fincaId)
+    const parsed = parseFincaUmbrales(fincaData?.config ?? null)
+    if (parsed !== null) {
+      umbralesFinca = parsed
+    }
+  } catch (err) {
+    console.warn('[EventHandler] parseFincaUmbrales: error leyendo finca config, usando defaults:', err)
+  }
+
+  await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka, umbralesFinca))
 
   const ileg = contarCeldasIlegibles(sigatoka.puntosMuestreo, sigatoka.plantas11sem, sigatoka.plantas00sem ?? [])
   if (ileg.ruta === 'preguntar' && eventoId) {
