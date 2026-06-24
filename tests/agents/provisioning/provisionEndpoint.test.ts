@@ -32,11 +32,17 @@ const TEST_SECRET = 'test-secret'
 
 // ── Build a Hono app using the REAL handler factory ───────────────────────────
 // This guarantees the test exercises the same code path that index.ts uses.
+// The mock for provisionarCliente is injected as `dispatch` to avoid the
+// same-module reference problem: createProvisionHandler is in the same module as
+// provisionarCliente, so vi.mock on the module only affects the exported symbol —
+// the internal reference inside the factory would still point to the real function.
+// Injecting `dispatch: mockProvisionarCliente` closes this gap cleanly.
 
 function buildApp(overrides: { secret?: string } = {}) {
   const app = new Hono()
   const handler = createProvisionHandler({
     secret: overrides.secret ?? TEST_SECRET,
+    dispatch: mockProvisionarCliente,
   })
   app.post('/internal/provision-client', handler)
   return app
@@ -313,7 +319,7 @@ describe('POST /internal/provision-client — trace contract (P4)', () => {
   it('passes trace to provisionarCliente on success (yaExistia=false)', async () => {
     const mockTrace = { event: vi.fn() }
     const app = new Hono()
-    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace })
+    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace, dispatch: mockProvisionarCliente })
     app.post('/internal/provision-client', handler)
 
     mockProvisionarCliente.mockResolvedValueOnce({
@@ -346,7 +352,7 @@ describe('POST /internal/provision-client — trace contract (P4)', () => {
   it('passes trace to provisionarCliente on idempotent path (yaExistia=true)', async () => {
     const mockTrace = { event: vi.fn() }
     const app = new Hono()
-    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace })
+    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace, dispatch: mockProvisionarCliente })
     app.post('/internal/provision-client', handler)
 
     mockProvisionarCliente.mockResolvedValueOnce({
@@ -372,7 +378,7 @@ describe('POST /internal/provision-client — trace contract (P4)', () => {
   it('emits provision.error trace event with (name, body) when provisionarCliente throws', async () => {
     const mockTrace = { event: vi.fn() }
     const app = new Hono()
-    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace })
+    const handler = createProvisionHandler({ secret: TEST_SECRET, trace: mockTrace, dispatch: mockProvisionarCliente })
     app.post('/internal/provision-client', handler)
 
     mockProvisionarCliente.mockRejectedValueOnce(new Error('DB connection failed'))

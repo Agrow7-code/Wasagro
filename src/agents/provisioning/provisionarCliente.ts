@@ -8,6 +8,8 @@
 // here by checking for an existing user before calling the RPC.
 
 import { z } from 'zod'
+import { timingSafeEqual } from 'node:crypto'
+import type { Context } from 'hono'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   getUserByPhone,
@@ -25,9 +27,10 @@ import {
 //   is a segment of empresa/corporate). This prevents the DB enum constraint from
 //   being violated by callers who use the common term. Documented here so the
 //   mapping is not implicit in the domain function.
-// - telefono_admin: required, non-empty string (E.164 is not enforced here to
-//   avoid false rejections on formatting variants; the domain function validates
-//   the phone is not already registered).
+// - telefono_admin: trimmed, min 7 chars after trim. Whitespace-only values are
+//   rejected (they would bypass idempotency — two whitespace variants both look
+//   "new" to getUserByPhone and would double-provision the same phone slot).
+//   E.164 is not enforced to avoid false rejections on formatting variants.
 
 export const ProvisionInputSchema = z.object({
   nombre_org: z.string().min(1),
@@ -36,7 +39,7 @@ export const ProvisionInputSchema = z.object({
     .enum(['individual', 'empresa', 'cooperativa'])
     .optional()
     .transform((v) => (v === 'cooperativa' ? 'empresa' : v) as 'individual' | 'empresa' | undefined),
-  telefono_admin: z.string().min(1),
+  telefono_admin: z.string().trim().min(7),
   nombre_admin: z.string().min(1),
   cultivo_principal: z.string().min(1),
   fincas_contratadas: z.number().int().positive().optional(),
@@ -88,10 +91,99 @@ export interface ProvisionResult {
  */
 export type SeedFn = (orgId: string, cultivoPrincipal: string, client?: SupabaseClient) => Promise<void>
 
+/**
+ * Trace interface for P4 observability.
+ * Uses positional (name, body) signature — the HTTP handler wraps the LangFuse
+ * trace object in an adapter to reconcile LangFuse's object-param API.
+ */
+export interface ProvisionTrace {
+  event(name: string, body?: unknown): void
+}
+
 export interface ProvisionDeps {
-  client?: SupabaseClient        // injectable for tests (default: service-role client)
-  seedMetricasPlantilla?: SeedFn // optional — belongs to PR-D; not required for PR-B
-  trace?: { event: (name: string, body?: unknown) => void }  // P4 observability
+  client?: SupabaseClient           // injectable for tests (default: service-role client)
+  seedMetricasPlantilla?: SeedFn    // optional — belongs to PR-D; not required for PR-B
+  trace?: ProvisionTrace             // P4 observability; positional (name, body)
+}
+
+// ─── Handler factory deps ─────────────────────────────────────────────────────
+
+export interface ProvisionHandlerDeps {
+  /** REPORTE_SECRET value — resolved by caller so the handler is testable without process.env */
+  secret: string
+  /**
+   * Optional trace sink with positional (name, body) signature.
+   * In production, index.ts wraps a LangFuse trace object in an adapter.
+   * In tests, pass a vi.fn()-backed object to assert P4 event emission.
+   */
+  trace?: ProvisionTrace
+  /**
+   * The domain function to dispatch to. Defaults to `provisionarCliente`.
+   * Injected by tests to control the mock without same-module reference issues.
+   */
+  dispatch?: typeof provisionarCliente
+}
+
+// ─── secureSecretCompare — local copy so the factory is self-contained ────────
+// (index.ts has the authoritative version; this is a deliberate duplication to
+// keep the handler factory free of a cross-file reference to a non-exported util.)
+
+function secureSecretCompare(a: string, b: string): boolean {
+  const aBuf = Buffer.from(String(a))
+  const bBuf = Buffer.from(String(b))
+  if (aBuf.length !== bBuf.length) return false
+  return timingSafeEqual(aBuf, bBuf)
+}
+
+// ─── Handler factory ─────────────────────────────────────────────────────────
+//
+// Returns the Hono handler for POST /internal/provision-client.
+// Both src/index.ts and the test suite import THIS factory so both exercise the
+// identical code path — no logic duplication, no drift risk.
+//
+// Trace adapter contract:
+//   ProvisionDeps.trace uses positional (name, body) arguments.
+//   LangFuse trace uses the object-param API: trace.event({ name, metadata }).
+//   index.ts passes a thin adapter object that translates between the two.
+//   The handler itself only knows about ProvisionTrace — not about LangFuse.
+
+export function createProvisionHandler(handlerDeps: ProvisionHandlerDeps) {
+  return async (c: Context): Promise<Response> => {
+    // Auth — fail-closed 401
+    const header = c.req.header('x-reporte-secret')
+    if (!header || !secureSecretCompare(header, handlerDeps.secret)) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    // Parse JSON body
+    let rawBody: unknown
+    try {
+      rawBody = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400)
+    }
+
+    // Validate with Zod — return generic 400 without leaking field names (non-enumeration)
+    const parsed = ProvisionInputSchema.safeParse(rawBody)
+    if (!parsed.success) {
+      return c.json({ error: 'Validation error' }, 400)
+    }
+
+    // Dispatch — no business logic here
+    const dispatchFn = handlerDeps.dispatch ?? provisionarCliente
+    try {
+      const result = await dispatchFn(parsed.data, { trace: handlerDeps.trace })
+      const status = result.yaExistia ? 200 : 201
+      return c.json(
+        { org_id: result.orgId, usuario_id: result.usuarioId, ya_existia: result.yaExistia },
+        status,
+      )
+    } catch (err) {
+      console.error('[provision-client] error:', err)
+      handlerDeps.trace?.event('provision.error', { error: String(err) })
+      return c.json({ error: 'Internal server error' }, 500)
+    }
+  }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,6 +196,16 @@ function mapTipoOrg(tipoOrg: ProvisionInput['tipoOrg']): 'individual' | 'empresa
   if (tipoOrg === 'individual') return 'individual'
   // 'empresa' and 'cooperativa' (unsupported) both map to 'empresa'
   return 'empresa'
+}
+
+/**
+ * Masks a phone number for safe inclusion in logs/traces (P5 — PII protection).
+ * Keeps only the last 4 digits visible; all others become '*'.
+ * Example: '+593987654321' → '**********4321'
+ */
+function maskPhone(phone: string): string {
+  if (phone.length <= 4) return '****'
+  return '*'.repeat(phone.length - 4) + phone.slice(-4)
 }
 
 // ─── Domain function ──────────────────────────────────────────────────────────
@@ -137,11 +239,12 @@ export async function provisionarCliente(
       // Anomalous DB state: a user row exists but has no org. This must never be silently
       // double-provisioned — creating a second org would violate P6 (duplicate consent) and
       // data integrity. Fail-closed and surface for human intervention (P1/P7).
+      // Phone is masked in the thrown message to prevent PII leaking into LangFuse traces (P5).
       throw new Error(
-        `orphan_user_no_org: phone ${input.telefonoAdmin} exists in usuarios without org_id — requires human intervention`,
+        `orphan_user_no_org: phone ${maskPhone(input.telefonoAdmin)} exists in usuarios without org_id — requires human intervention`,
       )
     }
-    deps.trace?.event('provision.idempotent_noop', { phone: input.telefonoAdmin, orgId: existing.org_id })
+    deps.trace?.event('provision.idempotent_noop', { orgId: existing.org_id })
     return { orgId: existing.org_id, usuarioId: existing.id, yaExistia: true }
   }
 
