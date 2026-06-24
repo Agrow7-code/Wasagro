@@ -820,11 +820,20 @@ export async function marcarIntencionFallida(
 import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
 
 /**
- * Seeds default `metricas_finca` rows and a Sigatoka `umbrales_metrica` row
- * (banano only) for a newly created farm.
- * Banano → tasa_rechazo, rendimiento_tha, matas_ha + EE2_LEVE umbral
- * Cacao  → kg_mazorca_sana, incidencia_enfermedades (no Sigatoka)
+ * Seeds default `metricas_finca` rows for a newly created farm.
+ * Banano → tasa_rechazo, rendimiento_tha, matas_ha
+ * Cacao  → kg_mazorca_sana, incidencia_enfermedades
  * Unknown crop → no-op log (P4)
+ *
+ * NOTE on Sigatoka thresholds: per-farm Sigatoka umbrales are stored in
+ * fincas.config.sigatoka_umbrales (written by seedFincaConfig, read by
+ * EventHandler via parseFincaUmbrales). We do NOT seed umbrales_metrica
+ * for Sigatoka because (a) the DB CHECK only allows bajo/medio/alto/critico
+ * and there is no valid band for the EE2-leve alert threshold, and (b)
+ * EventHandler does not read from umbrales_metrica for Sigatoka (Fix 1).
+ *
+ * Idempotent: upsert uses onConflict:'nombre,finca_id' backed by migration
+ * 20260624000065_metricas-finca-unique-nombre-finca.sql (Fix 2).
  */
 export async function seedMetricasPlantilla(
   orgId: string,
@@ -837,51 +846,22 @@ export async function seedMetricasPlantilla(
 
     if (cultivoNorm === 'banano') {
       const metricas = [
-        { org_id: orgId, finca_id: fincaId, nombre: 'tasa_rechazo',    tipo_evento: 'cosecha', formula: 'rechazadas / total * 100', unidad: '%',    es_publica: false },
-        { org_id: orgId, finca_id: fincaId, nombre: 'rendimiento_tha', tipo_evento: 'cosecha', formula: 'cajas_exportadas / hectareas',  unidad: 't/ha', es_publica: false },
-        { org_id: orgId, finca_id: fincaId, nombre: 'matas_ha',        tipo_evento: 'cosecha', formula: 'matas / hectareas',             unidad: 'u/ha', es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'tasa_rechazo',    tipo_evento: 'cosecha', formula: 'rechazadas / total * 100',       unidad: '%',    es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'rendimiento_tha', tipo_evento: 'cosecha', formula: 'cajas_exportadas / hectareas',    unidad: 't/ha', es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'matas_ha',        tipo_evento: 'cosecha', formula: 'matas / hectareas',               unidad: 'u/ha', es_publica: false },
       ]
-      const { data: rows, error: errM } = await client
+      const { error: errM } = await client
         .from('metricas_finca')
         .upsert(metricas, { onConflict: 'nombre,finca_id', ignoreDuplicates: true })
-        .select('metrica_id')
       if (errM) {
         console.error('[seedMetricasPlantilla] Error insertando métricas banano:', errM)
-        return
-      }
-
-      // Insert EE2_LEVE umbral sourced from UMBRALES_SEVERIDAD_DEFAULT (env-resolved)
-      // Uses a stable lookup on nombre+finca_id since we don't have metrica_id yet on first run.
-      // Best-effort: if this fails the metricas still exist.
-      if (rows && rows.length > 0) {
-        // find or derive a metrica for umbrales. We insert one umbral row keyed to
-        // the first metric returned — the intent is to seed the sigatoka threshold
-        // so EventHandler can later pass it to buildWhatsappSummary. The canonical
-        // storage is fincas.config.sigatoka_umbrales (via seedFincaConfig); this row
-        // is an additional reference in the umbrales_metrica table.
-        const firstMetricaId = (rows[0] as { metrica_id?: string })['metrica_id']
-        if (firstMetricaId) {
-          const umbralRow = {
-            metrica_id: firstMetricaId,
-            finca_id:   fincaId,
-            nivel:      'atencion',
-            valor_min:  UMBRALES_SEVERIDAD_DEFAULT.ee2Leve,
-            valor_max:  null as number | null,
-          }
-          const { error: errU } = await client
-            .from('umbrales_metrica')
-            .upsert([umbralRow], { onConflict: 'metrica_id,finca_id,nivel', ignoreDuplicates: true })
-          if (errU) {
-            console.error('[seedMetricasPlantilla] Error insertando umbral EE2_LEVE banano:', errU)
-          }
-        }
       }
       return
     }
 
     if (cultivoNorm === 'cacao') {
       const metricas = [
-        { org_id: orgId, finca_id: fincaId, nombre: 'kg_mazorca_sana',        tipo_evento: 'cosecha', formula: 'kg_sanos / total_cosecha * 100', unidad: '%',  es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'kg_mazorca_sana',        tipo_evento: 'cosecha', formula: 'kg_sanos / total_cosecha * 100',      unidad: '%', es_publica: false },
         { org_id: orgId, finca_id: fincaId, nombre: 'incidencia_enfermedades', tipo_evento: 'plaga',   formula: 'plantas_enfermas / total_plantas * 100', unidad: '%', es_publica: false },
       ]
       const { error: errC } = await client

@@ -1608,4 +1608,22 @@ describe('parseFincaUmbrales (T-16)', () => {
     // With high threshold the same data should NOT show the same critical alert
     expect(summaryHigh).not.toMatch(/CRÍT/)
   })
+
+  // Fix 5 — buildWhatsappSummary(data, undefined) falls back to UMBRALES_SEVERIDAD_DEFAULT
+  it('buildWhatsappSummary(data, undefined) uses UMBRALES_SEVERIDAD_DEFAULT (Fix 5)', () => {
+    const col = calcularColumna(colRaw())
+    const data = muestreo([col, col, col])
+    const withUndefined = buildWhatsappSummary(data, undefined)
+    const withDefault   = buildWhatsappSummary(data, UMBRALES_SEVERIDAD_DEFAULT)
+    expect(withUndefined).toBe(withDefault)
+  })
+
+  // Fix 6 — parseFincaUmbrales null-safety (EventHandler fallback when finca is null)
+  it('parseFincaUmbrales({ config: null }) returns null so EventHandler uses defaults (Fix 6)', () => {
+    expect(parseFincaUmbrales(null)).toBeNull()
+    expect(parseFincaUmbrales(undefined)).toBeNull()
+    // finca row present but config field is null
+    const fincaWithNullConfig = { config: null }
+    expect(parseFincaUmbrales(fincaWithNullConfig)).toBeNull()
+  })
 })

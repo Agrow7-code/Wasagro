@@ -47,6 +47,7 @@ async function geocodeAndUpdateFinca(fincaId: string, address: string, traceId: 
 }
 import { _sender, _llm } from '../procesarMensajeEntrante.js'
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
+import { alertarFounder } from '../../integrations/whatsapp/founderAlerts.js'
 import { transcribirAudio } from '../sttService.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 
@@ -155,6 +156,12 @@ export async function handleOnboardingAdmin(
         await startTrial(usuario.org_id).catch(err => {
           console.error('[pipeline] Error iniciando trial en onboarding admin:', err)
           langfuse.trace({ id: traceId }).event({ name: 'start_trial_error', level: 'ERROR', input: { error: String(err), org_id: usuario.org_id } })
+          // P7: Alert founder — trial failure leaves customer blocked after grace window.
+          // alertarFounder is best-effort and never throws (P4), so the catch is a safety net only.
+          alertarFounder('onboarding_requiere_revision', {
+            org: usuario.org_id,
+            detalle: `trial_inicio falló en onboarding — corregir manualmente. org_id: ${usuario.org_id}. Error: ${String(err)}`,
+          }, {}).catch(() => {})
         })
 
         // T-15: Seed default metrics and per-farm Sigatoka config (best-effort, P4).

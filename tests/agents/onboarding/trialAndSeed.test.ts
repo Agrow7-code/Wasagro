@@ -79,11 +79,18 @@ vi.mock('../../../src/integrations/timedFetch.js', () => ({
   timedFetch: vi.fn().mockReturnValue(() => Promise.resolve({ json: () => Promise.resolve([]) })),
 }))
 
+// Mock founderAlerts so we can assert it is called without real WhatsApp sends
+vi.mock('../../../src/integrations/whatsapp/founderAlerts.js', () => ({
+  alertarFounder: vi.fn().mockResolvedValue({ sent: true }),
+  construirMensajeFounder: vi.fn().mockReturnValue('test message'),
+}))
+
 // ─── Imports (after mocks) ─────────────────────────────────────────────────────
 
 import { handleOnboardingAdmin } from '../../../src/pipeline/handlers/OnboardingHandler.js'
 import * as supabaseQueriesMod from '../../../src/pipeline/supabaseQueries.js'
 import * as procesarMensajeMod from '../../../src/pipeline/procesarMensajeEntrante.js'
+import * as founderAlertsMod from '../../../src/integrations/whatsapp/founderAlerts.js'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -260,6 +267,46 @@ describe('OnboardingHandler — trial start and farm seed wiring (T-14)', () => 
     await expect(
       handleOnboardingAdmin(makeMsg() as any, makeUsuario() as any, 'msg-1', 'trace-1')
     ).resolves.toBeUndefined()
+
+    consoleSpy.mockRestore()
+  })
+
+  it('fires alertarFounder when startTrial rejects AND onboarding still completes (Fix 3)', async () => {
+    // CRITICAL: startTrial failure must not silently leave trial_inicio=NULL with
+    // no signal. The founder must be alerted (P7) so they can fix it manually.
+    const sq = supabaseQueriesMod as Record<string, ReturnType<typeof vi.fn>>
+    sq['getUserByPhone'].mockResolvedValue(makeUsuario())
+    sq['getOrCreateSession'].mockResolvedValue(makeSession())
+    sq['startTrial'].mockRejectedValue(new Error('DB trial error'))
+
+    const llm = (procesarMensajeMod as Record<string, unknown>)['_llm'] as Record<string, ReturnType<typeof vi.fn>>
+    llm['onboardarAdmin'].mockResolvedValue({
+      onboarding_completo: true,
+      paso_completado: 1,
+      siguiente_paso: 2,
+      mensaje_para_usuario: 'Listo.',
+      datos_extraidos: {
+        finca_nombre: 'La Esperanza',
+        cultivo_principal: 'banano',
+        pais: 'EC',
+        lotes: [],
+      },
+    })
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    // onboarding must still complete without throwing (P4)
+    await expect(
+      handleOnboardingAdmin(makeMsg() as any, makeUsuario() as any, 'msg-1', 'trace-1')
+    ).resolves.toBeUndefined()
+
+    // alertarFounder must have been called with the critical alert reason
+    const alertFn = vi.mocked(founderAlertsMod.alertarFounder)
+    expect(alertFn).toHaveBeenCalledWith(
+      'onboarding_requiere_revision',
+      expect.objectContaining({ detalle: expect.stringContaining('ORG001') }),
+      expect.anything(),
+    )
 
     consoleSpy.mockRestore()
   })
