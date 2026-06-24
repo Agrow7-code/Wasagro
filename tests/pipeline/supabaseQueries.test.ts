@@ -18,7 +18,7 @@ import {
   getSDRProspecto,
   getSDRProspectosPendingApproval,
   updateFincaCoordenadas,
-  // T-06: provisioning helpers (not yet implemented — imported to make tests fail)
+  // provisioning helpers (Fix 4/5: createOrganizacion and createUsuarioAdmin are NOT exported)
   getNextOrgId,
   provisionarClienteAtomico,
 } from '../../src/pipeline/supabaseQueries.js'
@@ -226,8 +226,9 @@ describe('supabaseQueries', () => {
   })
 })
 
-// ─── T-06: provisioning helpers (failing before T-07) ────────────────────────────
-// These tests must fail until getNextOrgId / provisionarClienteAtomico are implemented.
+// ─── provisioning helpers ─────────────────────────────────────────────────────
+// Fix 4: org_id generation moves INSIDE the RPC (advisory-lock atomic).
+// Fix 5: createOrganizacion and createUsuarioAdmin are NOT exported (footgun removal).
 describe('provisioning helpers', () => {
   describe('getNextOrgId', () => {
     it('tabla vacía → ORG001', async () => {
@@ -256,16 +257,30 @@ describe('provisioning helpers', () => {
 
       expect(result).toBe('ORG1000')
     })
+
+    it('top row no coincide con /^ORG\\d+$/ → ORG001 (no colapsa sobre filas existentes no parseables)', async () => {
+      // If the highest row has a non-standard id (e.g. legacy data), getNextOrgId
+      // must not silently collide with existing orgs by returning ORG001 blindly.
+      // Correct behaviour: fall back to ORG001 only when the table has NO matching rows.
+      // This test documents that a non-matching top row is treated as "no parseable rows"
+      // → returns ORG001, and the DB UNIQUE constraint on org_id is the final safety net.
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle.mockResolvedValue({ data: { org_id: 'LEGACY-001' }, error: null })
+
+      const result = await getNextOrgId(mock as any)
+
+      expect(result).toBe('ORG001')
+    })
   })
 
   describe('provisionarClienteAtomico', () => {
-    it('llama rpc con los argumentos correctos y retorna el UUID del admin', async () => {
+    it('llama rpc sin p_org_id (generado internamente) y retorna el UUID del admin', async () => {
+      // Fix 4: p_org_id is no longer a caller argument — the RPC generates it atomically.
       const adminUuid = 'b1c2d3e4-0000-0000-0000-000000000001'
-      const rpcMock = vi.fn().mockResolvedValue({ data: adminUuid, error: null })
+      const rpcMock = vi.fn().mockResolvedValue({ data: { usuario_id: adminUuid, org_id: 'ORG002' }, error: null })
       const mock = { ...crearSupabaseMock(), rpc: rpcMock }
 
       const args = {
-        p_org_id: 'ORG002',
         p_nombre_org: 'Exportadora Test',
         p_tipo: 'empresa' as const,
         p_pais: 'EC',
@@ -279,7 +294,9 @@ describe('provisioning helpers', () => {
       const result = await provisionarClienteAtomico(args, mock as any)
 
       expect(rpcMock).toHaveBeenCalledWith('provisionar_cliente_atomico', args)
-      expect(result).toBe(adminUuid)
+      // Returns both the UUID and the generated org_id
+      expect(result.usuarioId).toBe(adminUuid)
+      expect(result.orgId).toBe('ORG002')
     })
 
     it('lanza si rpc devuelve error', async () => {
@@ -287,7 +304,7 @@ describe('provisioning helpers', () => {
       const mock = { ...crearSupabaseMock(), rpc: rpcMock }
 
       await expect(provisionarClienteAtomico({
-        p_org_id: 'ORG002', p_nombre_org: 'Test', p_tipo: 'empresa' as const,
+        p_nombre_org: 'Test', p_tipo: 'empresa' as const,
         p_pais: 'EC', p_fincas: 1, p_usuarios: 1,
         p_phone: '593987654321', p_nombre_admin: 'Admin', p_consent_texto: 'texto',
       }, mock as any)).rejects.toThrow('unique violation')

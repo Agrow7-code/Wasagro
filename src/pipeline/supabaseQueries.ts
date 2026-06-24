@@ -835,7 +835,11 @@ export async function getNextOrgId(client: SupabaseClient = defaultClient): Prom
   return `ORG${String(next).padStart(3, '0')}`
 }
 
-export interface OrganizacionInsert {
+// NOT exported — these are partial-state helpers that skip consent registration.
+// Using them standalone creates consent-less tenants, violating P6. They exist only
+// as internal primitives for testing and recovery paths that go through the full
+// provisionar_cliente_atomico RPC flow. DO NOT export.
+interface OrganizacionInsert {
   org_id: string
   nombre: string
   tipo: 'individual' | 'empresa'
@@ -847,11 +851,7 @@ export interface OrganizacionInsert {
   is_test_org?: boolean
 }
 
-/**
- * Direct INSERT into organizaciones. Used in tests and partial-state recovery paths.
- * The production provisioning path uses provisionarClienteAtomico (RPC) instead.
- */
-export async function createOrganizacion(data: OrganizacionInsert, client: SupabaseClient = defaultClient): Promise<void> {
+async function createOrganizacion(data: OrganizacionInsert, client: SupabaseClient = defaultClient): Promise<void> {
   const { error } = await client.from('organizaciones').insert({
     org_id: data.org_id,
     nombre: data.nombre,
@@ -868,17 +868,13 @@ export async function createOrganizacion(data: OrganizacionInsert, client: Supab
   if (error) throw error
 }
 
-export interface UsuarioAdminInsert {
+interface UsuarioAdminInsert {
   phone: string
   nombre: string
   org_id: string
 }
 
-/**
- * INSERT a new admin_org user. Used in tests and partial-state recovery paths.
- * The production path uses provisionarClienteAtomico (RPC).
- */
-export async function createUsuarioAdmin(data: UsuarioAdminInsert, client: SupabaseClient = defaultClient): Promise<string> {
+async function createUsuarioAdmin(data: UsuarioAdminInsert, client: SupabaseClient = defaultClient): Promise<string> {
   const { data: row, error } = await client
     .from('usuarios')
     .insert({
@@ -895,8 +891,14 @@ export async function createUsuarioAdmin(data: UsuarioAdminInsert, client: Supab
   return (row as { id: string }).id
 }
 
+// Silence unused-variable warnings: these remain available for internal recovery paths.
+void createOrganizacion
+void createUsuarioAdmin
+
 export interface ProvisionarClienteAtomicoArgs {
-  p_org_id: string
+  // Note: p_org_id is NOT in this interface — org_id generation is now atomic inside the
+  // RPC (advisory lock + sequential assignment in a single transaction). This eliminates
+  // the TOCTOU race that existed when the TS caller pre-computed it before the INSERT.
   p_nombre_org: string
   p_tipo: 'individual' | 'empresa'
   p_pais: string
@@ -907,16 +909,23 @@ export interface ProvisionarClienteAtomicoArgs {
   p_consent_texto: string
 }
 
+export interface ProvisionarClienteAtomicoResult {
+  orgId: string
+  usuarioId: string
+}
+
 /**
  * Thin wrapper around the provisionar_cliente_atomico SQL RPC.
- * The RPC creates org + admin user + user_consent in a single transaction
- * (atomic: all three or none). Returns the UUID of the created admin user.
+ * The RPC generates org_id atomically (advisory lock) and creates org + admin +
+ * user_consent in a single transaction (all three or none, P4/P6).
+ * Returns both the generated org_id and the UUID of the created admin user.
  */
 export async function provisionarClienteAtomico(
   args: ProvisionarClienteAtomicoArgs,
   client: SupabaseClient = defaultClient,
-): Promise<string> {
+): Promise<ProvisionarClienteAtomicoResult> {
   const { data, error } = await client.rpc('provisionar_cliente_atomico', args)
   if (error) throw new Error(error.message)
-  return data as string
+  const row = data as { usuario_id: string; org_id: string }
+  return { orgId: row.org_id, usuarioId: row.usuario_id }
 }
