@@ -3,6 +3,16 @@ import { supabase } from '../integrations/supabase.js'
 import type { AuthedUser } from '../auth/middleware.js'
 import { isPaidPlan } from './pricingUtils.js'
 
+// Grace window for provisioned-but-not-onboarded orgs (trial_fin=null).
+// Configurable via env PROVISION_GRACE_DAYS; default 7.
+// After this window the org is blocked until the admin completes onboarding
+// (which sets trial_inicio → trigger computes trial_fin → normal 30d applies).
+function getProvisionGraceDays(): number {
+  const raw = process.env['PROVISION_GRACE_DAYS']
+  const parsed = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 7
+}
+
 interface OrgBillingState {
   plan: string
   trial_fin: string | null
@@ -11,12 +21,13 @@ interface OrgBillingState {
   fincas_contratadas: number
   usuarios_contratados: number
   precio_mensual: number | null
+  created_at: string
 }
 
 async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null> {
   const { data, error } = await supabase
     .from('organizaciones')
-    .select('plan, trial_fin, subscription_status, is_test_org, fincas_contratadas, usuarios_contratados, precio_mensual')
+    .select('plan, trial_fin, subscription_status, is_test_org, fincas_contratadas, usuarios_contratados, precio_mensual, created_at')
     .eq('org_id', orgId)
     .single()
 
@@ -27,10 +38,15 @@ async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null
 export function isOrgBillingActive(state: OrgBillingState): boolean {
   if (state.is_test_org) return true
   if (state.plan === 'trial') {
-    // trial_fin === null → trial provisioned but not yet started (onboarding pending).
-    // Access is granted so the admin can complete onboarding. Once onboarding sets
-    // trial_inicio (migration 062 deferred-trial), the trigger computes trial_fin = +30d.
-    if (state.trial_fin === null) return true
+    if (state.trial_fin === null) {
+      // trial_fin=null → deferred trial: trial_inicio not yet set (onboarding pending).
+      // Grant access only within the provision grace window from created_at.
+      // This prevents permanently-open orgs for accounts that never onboard.
+      const graceDays = getProvisionGraceDays()
+      const graceMs = graceDays * 24 * 60 * 60 * 1000
+      const createdAt = new Date(state.created_at).getTime()
+      return Date.now() - createdAt < graceMs
+    }
     return new Date(state.trial_fin) > new Date()
   }
   if (isPaidPlan(state.plan)) {
@@ -79,6 +95,13 @@ export async function planGuard(c: Context, next: Next): Promise<Response | void
 
 export async function planGuardWhatsApp(orgId: string): Promise<{ allowed: boolean; state: OrgBillingState }> {
   const state = await getOrgBillingState(orgId)
-  if (!state) return { allowed: false, state: { plan: 'free', trial_fin: null, subscription_status: 'none', is_test_org: false, fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null } }
+  if (!state) return {
+    allowed: false,
+    state: {
+      plan: 'free', trial_fin: null, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
+      created_at: new Date().toISOString(),
+    },
+  }
   return { allowed: isOrgBillingActive(state), state }
 }
