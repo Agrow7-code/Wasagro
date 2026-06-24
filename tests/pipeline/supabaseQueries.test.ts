@@ -20,6 +20,8 @@ import {
   updateFincaCoordenadas,
   // provisioning entry point — org_id generation + org/admin/consent are atomic inside the RPC
   provisionarClienteAtomico,
+  // trial + farm-seed helpers (PR-D)
+  startTrial,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -360,6 +362,38 @@ describe('SDR supabaseQueries', () => {
       const result = await getSDRProspectosPendingApproval(mock as any)
 
       expect(result).toEqual([])
+    })
+  })
+
+  // ─── startTrial idempotency (Fix 4 — T-15 regression guard) ────────────────
+  describe('startTrial', () => {
+    it('emite UPDATE con .eq(org_id) y .is(trial_inicio, null) — guarda idempotencia', async () => {
+      // This test exercises the REAL startTrial implementation with a mock client.
+      // A regression that removes the `.is('trial_inicio', null)` guard MUST fail here.
+      const mock = crearSupabaseMock()
+      mock._chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+      // The chain terminates when the awaitable resolves (no .single()/.maybeSingle()
+      // needed — update().eq().is() is the terminal form that resolves via then).
+      ;(mock._chain as Record<string, ReturnType<typeof vi.fn>>)['is'] = vi.fn().mockResolvedValue({ data: null, error: null })
+
+      await startTrial('ORG002', mock as any)
+
+      // Must call .update with a trial_inicio timestamp
+      expect(mock._chain.update).toHaveBeenCalledWith(
+        expect.objectContaining({ trial_inicio: expect.any(String) }),
+      )
+      // Must scope to the right org
+      expect(mock._chain.eq).toHaveBeenCalledWith('org_id', 'ORG002')
+      // CRITICAL: idempotency guard — only update if trial_inicio IS NULL
+      const isMock = (mock._chain as Record<string, ReturnType<typeof vi.fn>>)['is']
+      expect(isMock).toHaveBeenCalledWith('trial_inicio', null)
+    })
+
+    it('lanza si Supabase devuelve error', async () => {
+      const mock = crearSupabaseMock()
+      ;(mock._chain as Record<string, ReturnType<typeof vi.fn>>)['is'] = vi.fn().mockResolvedValue({ error: { message: 'DB error' } })
+
+      await expect(startTrial('ORG002', mock as any)).rejects.toThrow('DB error')
     })
   })
 

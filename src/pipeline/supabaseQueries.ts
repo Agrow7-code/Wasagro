@@ -20,6 +20,8 @@ export interface FincaRow {
   nombre: string
   pais: string
   cultivo_principal: string | null
+  // config JSONB added by migration 063 (client-provisioning PR-A)
+  config?: Record<string, unknown> | null
 }
 
 export interface LoteRow {
@@ -117,7 +119,7 @@ export async function getUserByPhone(phone: string, client: SupabaseClient = def
 export async function getFincaById(fincaId: string, client: SupabaseClient = defaultClient): Promise<FincaRow | null> {
   const { data, error } = await client
     .from('fincas')
-    .select('finca_id, org_id, nombre, pais, cultivo_principal')
+    .select('finca_id, org_id, nombre, pais, cultivo_principal, config')
     .eq('finca_id', fincaId)
     .maybeSingle()
   if (error) throw error
@@ -808,6 +810,134 @@ export async function marcarIntencionFallida(
 
   const r = data as { todas_completas: boolean; intenciones: IntencionPendiente[] }
   return { todas_completas: r.todas_completas, intenciones: r.intenciones ?? [] }
+}
+
+// ─── Farm-seed helpers (T-13, client-provisioning change PR-D) ────────────────
+// Seeds default metricas and config for a newly provisioned farm.
+// All functions are best-effort (P4): they wrap in try/catch and never re-throw,
+// so a seed failure never breaks onboarding or event processing.
+
+import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
+
+/**
+ * Seeds default `metricas_finca` rows for a newly created farm.
+ * Banano → tasa_rechazo, rendimiento_tha, matas_ha
+ * Cacao  → kg_mazorca_sana, incidencia_enfermedades
+ * Unknown crop → no-op log (P4)
+ *
+ * NOTE on Sigatoka thresholds: per-farm Sigatoka umbrales are stored in
+ * fincas.config.sigatoka_umbrales (written by seedFincaConfig, read by
+ * EventHandler via parseFincaUmbrales). We do NOT seed umbrales_metrica
+ * for Sigatoka because (a) the DB CHECK only allows bajo/medio/alto/critico
+ * and there is no valid band for the EE2-leve alert threshold, and (b)
+ * EventHandler does not read from umbrales_metrica for Sigatoka (Fix 1).
+ *
+ * Idempotent: upsert uses onConflict:'nombre,finca_id' backed by migration
+ * 20260624000064_metricas-finca-unique-nombre-finca.sql (Fix 2).
+ */
+export async function seedMetricasPlantilla(
+  orgId: string,
+  fincaId: string,
+  cultivo: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  try {
+    const cultivoNorm = cultivo.toLowerCase().trim()
+
+    if (cultivoNorm === 'banano') {
+      const metricas = [
+        { org_id: orgId, finca_id: fincaId, nombre: 'tasa_rechazo',    tipo_evento: 'cosecha', formula: 'rechazadas / total * 100',       unidad: '%',    es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'rendimiento_tha', tipo_evento: 'cosecha', formula: 'cajas_exportadas / hectareas',    unidad: 't/ha', es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'matas_ha',        tipo_evento: 'cosecha', formula: 'matas / hectareas',               unidad: 'u/ha', es_publica: false },
+      ]
+      const { error: errM } = await client
+        .from('metricas_finca')
+        .upsert(metricas, { onConflict: 'nombre,finca_id', ignoreDuplicates: true })
+      if (errM) {
+        console.error('[seedMetricasPlantilla] Error insertando métricas banano:', errM)
+      }
+      return
+    }
+
+    if (cultivoNorm === 'cacao') {
+      const metricas = [
+        { org_id: orgId, finca_id: fincaId, nombre: 'kg_mazorca_sana',        tipo_evento: 'cosecha', formula: 'kg_sanos / total_cosecha * 100',      unidad: '%', es_publica: false },
+        { org_id: orgId, finca_id: fincaId, nombre: 'incidencia_enfermedades', tipo_evento: 'plaga',   formula: 'plantas_enfermas / total_plantas * 100', unidad: '%', es_publica: false },
+      ]
+      const { error: errC } = await client
+        .from('metricas_finca')
+        .upsert(metricas, { onConflict: 'nombre,finca_id', ignoreDuplicates: true })
+      if (errC) {
+        console.error('[seedMetricasPlantilla] Error insertando métricas cacao:', errC)
+      }
+      return
+    }
+
+    // Unknown crop — log and skip (P4)
+    console.warn('[seedMetricasPlantilla] Cultivo desconocido, sin métricas predefinidas:', cultivo)
+  } catch (err) {
+    console.error('[seedMetricasPlantilla] Error inesperado:', err)
+  }
+}
+
+/**
+ * Seeds `fincas.config.sigatoka_umbrales` for banano farms.
+ * Reads the current config JSONB, merges the sigatoka_umbrales key, writes back.
+ * No-op for non-banano crops. Best-effort (P4): never re-throws.
+ */
+export async function seedFincaConfig(
+  fincaId: string,
+  cultivo: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const cultivoNorm = cultivo.toLowerCase().trim()
+  if (cultivoNorm !== 'banano') return
+
+  try {
+    // Read current config so we can merge without overwriting other keys
+    const { data: fincaRow, error: errRead } = await client
+      .from('fincas')
+      .select('config')
+      .eq('finca_id', fincaId)
+      .maybeSingle()
+    if (errRead) {
+      console.error('[seedFincaConfig] Error leyendo fincas.config:', errRead)
+      return
+    }
+
+    const currentConfig = (fincaRow as { config?: Record<string, unknown> } | null)?.config ?? {}
+    const mergedConfig: Record<string, unknown> = {
+      ...currentConfig,
+      sigatoka_umbrales: UMBRALES_SEVERIDAD_DEFAULT,
+    }
+
+    const { error: errWrite } = await client
+      .from('fincas')
+      .update({ config: mergedConfig })
+      .eq('finca_id', fincaId)
+    if (errWrite) {
+      console.error('[seedFincaConfig] Error escribiendo fincas.config:', errWrite)
+    }
+  } catch (err) {
+    console.error('[seedFincaConfig] Error inesperado:', err)
+  }
+}
+
+/**
+ * Starts the trial clock for an organization that has just completed onboarding.
+ * The condition `AND trial_inicio IS NULL` makes this idempotent — safe to call
+ * multiple times; the first call wins and subsequent calls are no-ops.
+ */
+export async function startTrial(
+  orgId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('organizaciones')
+    .update({ trial_inicio: new Date().toISOString() })
+    .eq('org_id', orgId)
+    .is('trial_inicio', null)
+  if (error) throw error
 }
 
 // ─── Provisioning helpers (T-07, client-provisioning change) ──────────────────

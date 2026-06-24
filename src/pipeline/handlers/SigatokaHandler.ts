@@ -823,6 +823,34 @@ export const UMBRALES_SEVERIDAD_DEFAULT: UmbralesSeveridad = {
 // Retrocompat: el umbral suelto que antes era una constante. Apunta al default.
 export const UMBRAL_EE2_LEVE = UMBRALES_SEVERIDAD_DEFAULT.ee2Leve
 
+/**
+ * Parses a raw finca.config value for a valid UmbralesSeveridad object.
+ * Returns null if the config is absent, the key is missing, or any numeric
+ * field is not a finite positive number (fail-safe — never fabricates thresholds, P1).
+ * Used by EventHandler to pass per-farm umbrales to buildWhatsappSummary (D29).
+ */
+export function parseFincaUmbrales(config: unknown): UmbralesSeveridad | null {
+  if (config == null || typeof config !== 'object') return null
+  const cfg = config as Record<string, unknown>
+  const raw = cfg['sigatoka_umbrales']
+  if (raw == null || typeof raw !== 'object') return null
+  const u = raw as Record<string, unknown>
+  const isPositiveFinite = (v: unknown): v is number =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0
+  if (
+    !isPositiveFinite(u['ee3a6Severo']) ||
+    !isPositiveFinite(u['ee2Avanzado']) ||
+    !isPositiveFinite(u['ee2Leve'])     ||
+    !isPositiveFinite(u['hojasFuncionalesMin'])
+  ) return null
+  return {
+    ee3a6Severo:         u['ee3a6Severo'],
+    ee2Avanzado:         u['ee2Avanzado'],
+    ee2Leve:             u['ee2Leve'],
+    hojasFuncionalesMin: u['hojasFuncionalesMin'],
+  }
+}
+
 // Etiqueta humana de cada columna de tabla semana para el veredicto de checksum.
 const LABEL_COLUMNA_SEMANA: Record<string, string> = {
   ht:      'H.T',
