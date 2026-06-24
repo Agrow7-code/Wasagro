@@ -201,12 +201,18 @@ describe('provisionarCliente — orphan user (phone exists, org_id is null)', ()
     expect(mockProvisionarClienteAtomico).not.toHaveBeenCalled()
   })
 
-  it('includes the phone number in the orphan error message for human intervention', async () => {
+  it('includes a MASKED phone in the orphan error message (P5 — raw PII must not appear)', async () => {
     mockGetUserByPhone.mockResolvedValue(orphanUser)
 
+    // Phone '+593987654321' (13 chars) → last 4 visible: '*********4321'
     await expect(
       provisionarCliente(baseInput(), testDeps),
-    ).rejects.toThrow('+593987654321')
+    ).rejects.toThrow('*********4321')
+
+    // The raw phone must NOT appear in the thrown message (P5 LangFuse PII guard)
+    await expect(
+      provisionarCliente(baseInput(), testDeps),
+    ).rejects.not.toThrow('+593987654321')
   })
 })
 

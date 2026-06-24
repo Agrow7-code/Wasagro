@@ -32,6 +32,7 @@ import { verifyHmacSignature, verifySharedToken } from './integrations/webhookSe
 import { calcularPrecio, getBasePrice, getSegmentLabel, inferPlanSegment, isPaidPlan, PRICE_PER_FINCA, PRICE_PER_USER } from './auth/pricingUtils.js'
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
+import { createProvisionHandler } from './agents/provisioning/provisionarCliente.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
 function validarEnvVars(): void {
@@ -623,6 +624,35 @@ app.get('/sigatoka/reextract', async (c) => {
     console.error('[sigatoka/reextract] error:', err)
     return c.json({ error: err instanceof Error ? err.message : 'error interno' }, 500)
   }
+})
+
+// POST /internal/provision-client — atomic client provisioning (D33).
+// Uses createProvisionHandler factory so the test suite exercises the same handler
+// code as production (no test-fidelity drift, no logic duplication).
+//
+// Trace adapter: ProvisionDeps.trace uses positional (name, body) arguments while
+// LangFuse uses object-param API { name, metadata }. createProvisionHandler accepts
+// an optional per-request trace factory via the ProvisionHandlerDeps interface.
+// Here we pass no static trace — each request creates its own LangFuse trace inside
+// a thin wrapper registered after the handler's auth+validate steps.
+//
+// Because createProvisionHandler only accepts a static trace in ProvisionHandlerDeps,
+// and LangFuse traces must be per-request, we register two middlewares: the factory
+// handler for auth+validate+dispatch, and a separate catcher for observability.
+// Alternatively: the factory receives an optional trace factory function.
+// For simplicity and to avoid over-engineering, we wrap the handler with per-request
+// trace injection using a thin outer handler.
+app.post('/internal/provision-client', async (c) => {
+  const lfTrace = langfuse.trace({ name: 'provision_client' })
+  // Adapter: ProvisionTrace positional (name, body) → LangFuse object-param API
+  const traceAdapter = {
+    event: (name: string, body?: unknown) =>
+      lfTrace.event({ name, metadata: body as Record<string, unknown> | undefined }),
+  }
+  return createProvisionHandler({
+    secret: process.env['REPORTE_SECRET'] ?? '',
+    trace: traceAdapter,
+  })(c)
 })
 
 export { app, llm }
