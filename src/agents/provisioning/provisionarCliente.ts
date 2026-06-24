@@ -45,17 +45,22 @@ export const ProvisionInputSchema = z.object({
   fincas_contratadas: z.number().int().positive().optional(),
   usuarios_contratados: z.number().int().positive().optional(),
   consent_texto: z.string().min(1).max(2000),
-}).transform((data) => ({
-  nombreOrg: data.nombre_org,
-  pais: data.pais,
-  tipoOrg: data.tipo_org,
-  telefonoAdmin: data.telefono_admin,
-  nombreAdmin: data.nombre_admin,
-  cultivoPrincipal: data.cultivo_principal,
-  fincasContratadas: data.fincas_contratadas,
-  usuariosContratados: data.usuarios_contratados,
-  consentTexto: data.consent_texto,
-}))
+}).transform((data) => {
+  // Build the camelCase ProvisionInput. Optional fields are OMITTED when undefined
+  // (not set to `undefined`) so the result conforms under exactOptionalPropertyTypes.
+  const out: ProvisionInput = {
+    nombreOrg: data.nombre_org,
+    pais: data.pais,
+    telefonoAdmin: data.telefono_admin,
+    nombreAdmin: data.nombre_admin,
+    cultivoPrincipal: data.cultivo_principal,
+    consentTexto: data.consent_texto,
+  }
+  if (data.tipo_org !== undefined) out.tipoOrg = data.tipo_org
+  if (data.fincas_contratadas !== undefined) out.fincasContratadas = data.fincas_contratadas
+  if (data.usuarios_contratados !== undefined) out.usuariosContratados = data.usuarios_contratados
+  return out
+})
 
 // Inferred type of the transformed (camelCase) output — matches ProvisionInput exactly.
 export type ProvisionInputFromSchema = z.output<typeof ProvisionInputSchema>
@@ -172,7 +177,9 @@ export function createProvisionHandler(handlerDeps: ProvisionHandlerDeps) {
     // Dispatch — no business logic here
     const dispatchFn = handlerDeps.dispatch ?? provisionarCliente
     try {
-      const result = await dispatchFn(parsed.data, { trace: handlerDeps.trace })
+      const deps: ProvisionDeps = {}
+      if (handlerDeps.trace !== undefined) deps.trace = handlerDeps.trace
+      const result = await dispatchFn(parsed.data, deps)
       const status = result.yaExistia ? 200 : 201
       return c.json(
         { org_id: result.orgId, usuario_id: result.usuarioId, ya_existia: result.yaExistia },
