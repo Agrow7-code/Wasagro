@@ -27,7 +27,11 @@ async function getOrgBillingState(orgId: string): Promise<OrgBillingState | null
 export function isOrgBillingActive(state: OrgBillingState): boolean {
   if (state.is_test_org) return true
   if (state.plan === 'trial') {
-    return state.trial_fin !== null && new Date(state.trial_fin) > new Date()
+    // trial_fin === null → trial provisioned but not yet started (onboarding pending).
+    // Access is granted so the admin can complete onboarding. Once onboarding sets
+    // trial_inicio (migration 062 deferred-trial), the trigger computes trial_fin = +30d.
+    if (state.trial_fin === null) return true
+    return new Date(state.trial_fin) > new Date()
   }
   if (isPaidPlan(state.plan)) {
     return state.subscription_status === 'active'

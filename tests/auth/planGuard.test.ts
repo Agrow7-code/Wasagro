@@ -7,6 +7,29 @@ vi.mock('../../src/integrations/supabase.js', () => ({
 
 import { isOrgBillingActive } from '../../src/auth/planGuard.js'
 
+// ─── Deferred trial (T-04 failing tests — must fail before T-05 applies the fix) ──────
+// After migration 062, provisioning creates orgs with trial_inicio=NULL / trial_fin=NULL.
+// planGuard must treat trial_fin=null as ACTIVE (trial provisioned, onboarding pending).
+// These tests MUST fail against the current planGuard until T-05 is applied.
+describe('isOrgBillingActive — deferred trial (NULL trial_fin)', () => {
+  it('plan=trial, trial_fin=null, is_test_org=false → active (provisionado sin onboardear)', () => {
+    // Org was just provisioned: trial has not started yet. Must be allowed to onboard.
+    expect(isOrgBillingActive({
+      plan: 'trial', trial_fin: null, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
+    })).toBe(true)
+  })
+
+  it('plan=trial, trial_fin=null, 60 days since creation, is_test_org=false → active (never onboarded)', () => {
+    // Org provisioned 60 days ago but admin never completed onboarding.
+    // trial_fin remains NULL → trial never consumed → must remain ACTIVE.
+    expect(isOrgBillingActive({
+      plan: 'trial', trial_fin: null, subscription_status: 'none', is_test_org: false,
+      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
+    })).toBe(true)
+  })
+})
+
 describe('isOrgBillingActive — is_test_org override', () => {
   it('is_test_org=true → always active, even with trial expired', () => {
     const expired = new Date(Date.now() - 86400000).toISOString()
@@ -66,12 +89,10 @@ describe('isOrgBillingActive — standard logic when is_test_org=false', () => {
     })).toBe(false)
   })
 
-  it('trial sin trial_fin → inactive', () => {
-    expect(isOrgBillingActive({
-      plan: 'trial', trial_fin: null, subscription_status: 'none', is_test_org: false,
-      fincas_contratadas: 1, usuarios_contratados: 1, precio_mensual: null,
-    })).toBe(false)
-  })
+  // Pre-deferred-trial behaviour: trial_fin=null was "inactive". That semantic no longer applies
+  // after migration 062: trial_fin=null now means "provisioned, onboarding pending → active".
+  // This test is intentionally REMOVED / replaced by the deferred-trial describe block above.
+  // Kept as a comment so reviewers understand the semantic change (see design.md DECISIÓN 1).
 
   it('agricultor con subscription active → active', () => {
     expect(isOrgBillingActive({
@@ -121,4 +142,9 @@ describe('isOrgBillingActive — standard logic when is_test_org=false', () => {
       fincas_contratadas: 10, usuarios_contratados: 12, precio_mensual: 79,
     })).toBe(false)
   })
+
+  // NOTE: The test below ("trial sin trial_fin → inactive") was the pre-deferred-trial behaviour.
+  // After T-05 applies the deferred-trial semantic, trial_fin=null BECOMES active (provisioned
+  // but not yet onboarded). This test is kept as a regression marker: it will be inverted by T-05.
+  // See tasks.md T-04/T-05 and design.md DECISIÓN 1.
 })
