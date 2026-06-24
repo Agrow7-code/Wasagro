@@ -88,8 +88,16 @@ export async function provisionarCliente(
   const client = deps.client
 
   // Step 2 — Idempotency: check if phone already registered
-  const existing = await getUserByPhone(input.telefonoAdmin, client as SupabaseClient)
-  if (existing && existing.org_id) {
+  const existing = await getUserByPhone(input.telefonoAdmin, client as SupabaseClient | undefined)
+  if (existing !== null) {
+    if (!existing.org_id) {
+      // Anomalous DB state: a user row exists but has no org. This must never be silently
+      // double-provisioned — creating a second org would violate P6 (duplicate consent) and
+      // data integrity. Fail-closed and surface for human intervention (P1/P7).
+      throw new Error(
+        `orphan_user_no_org: phone ${input.telefonoAdmin} exists in usuarios without org_id — requires human intervention`,
+      )
+    }
     deps.trace?.event('provision.idempotent_noop', { phone: input.telefonoAdmin, orgId: existing.org_id })
     return { orgId: existing.org_id, usuarioId: existing.id, yaExistia: true }
   }
@@ -108,7 +116,7 @@ export async function provisionarCliente(
     p_consent_texto: input.consentTexto,
   }
 
-  const { orgId, usuarioId } = await provisionarClienteAtomico(rpcArgs, client as SupabaseClient)
+  const { orgId, usuarioId } = await provisionarClienteAtomico(rpcArgs, client as SupabaseClient | undefined)
   deps.trace?.event('provision.created', { orgId, usuarioId })
 
   // Step 4 — Best-effort seed (PR-D concern, optional injection)
@@ -116,7 +124,7 @@ export async function provisionarCliente(
   // If it throws, log the error but do not re-throw (P4: errors logged, not silenced or propagated).
   if (deps.seedMetricasPlantilla) {
     try {
-      await deps.seedMetricasPlantilla(orgId, input.cultivoPrincipal, client as SupabaseClient | undefined)
+      await deps.seedMetricasPlantilla(orgId, input.cultivoPrincipal, client)
       deps.trace?.event('provision.seed_ok', { orgId })
     } catch (err) {
       console.error('[provisionarCliente] seed failed (best-effort, non-fatal):', err)

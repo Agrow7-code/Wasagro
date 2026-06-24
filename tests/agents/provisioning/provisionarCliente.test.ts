@@ -105,6 +105,23 @@ describe('provisionarCliente — happy path', () => {
   })
 })
 
+// ─── tipoOrg undefined default ───────────────────────────────────────────────
+
+describe('provisionarCliente — tipoOrg mapping', () => {
+  it("maps tipoOrg undefined (omitted) to 'empresa'", async () => {
+    mockGetUserByPhone.mockResolvedValue(null)
+    mockProvisionarClienteAtomico.mockResolvedValue({ orgId: 'ORG010', usuarioId: 'uuid-admin-10' })
+
+    // Omit tipoOrg entirely — should not throw and should default to 'empresa'
+    const input = baseInput()
+    delete (input as Partial<ProvisionInput>).tipoOrg
+    await provisionarCliente(input, testDeps)
+
+    const [args] = mockProvisionarClienteAtomico.mock.calls[0]!
+    expect(args.p_tipo).toBe('empresa')
+  })
+})
+
 // ─── Idempotency ─────────────────────────────────────────────────────────────
 
 describe('provisionarCliente — idempotency (phone already exists)', () => {
@@ -149,6 +166,66 @@ describe('provisionarCliente — idempotency (phone already exists)', () => {
     await provisionarCliente(baseInput(), testDeps)
 
     // The RPC (which also inserts consent) must never be called
+    expect(mockProvisionarClienteAtomico).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Orphan user (exists in DB but org_id is null) ───────────────────────────
+
+describe('provisionarCliente — orphan user (phone exists, org_id is null)', () => {
+  const orphanUser = {
+    id: 'uuid-orphan',
+    phone: '+593987654321',
+    nombre: 'Carlos López',
+    rol: 'admin_org',
+    org_id: null as unknown as string, // anomalous DB state: user without org
+    finca_id: null,
+    email: null,
+    onboarding_completo: false,
+    consentimiento_datos: false,
+    status: 'activo',
+  }
+
+  it("rejects with 'orphan_user_no_org' when getUserByPhone returns a row with null org_id", async () => {
+    mockGetUserByPhone.mockResolvedValue(orphanUser)
+
+    await expect(
+      provisionarCliente(baseInput(), testDeps),
+    ).rejects.toThrow('orphan_user_no_org')
+  })
+
+  it('does NOT call provisionarClienteAtomico for an orphan user (no double-provisioning)', async () => {
+    mockGetUserByPhone.mockResolvedValue(orphanUser)
+
+    await expect(provisionarCliente(baseInput(), testDeps)).rejects.toThrow()
+    expect(mockProvisionarClienteAtomico).not.toHaveBeenCalled()
+  })
+
+  it('includes the phone number in the orphan error message for human intervention', async () => {
+    mockGetUserByPhone.mockResolvedValue(orphanUser)
+
+    await expect(
+      provisionarCliente(baseInput(), testDeps),
+    ).rejects.toThrow('+593987654321')
+  })
+})
+
+// ─── getUserByPhone throws ────────────────────────────────────────────────────
+
+describe('provisionarCliente — getUserByPhone throws', () => {
+  it('propagates DB error from getUserByPhone (does not swallow into false idempotency)', async () => {
+    const dbError = new Error('connection timeout')
+    mockGetUserByPhone.mockRejectedValue(dbError)
+
+    await expect(
+      provisionarCliente(baseInput(), testDeps),
+    ).rejects.toThrow('connection timeout')
+  })
+
+  it('does NOT call provisionarClienteAtomico when getUserByPhone throws', async () => {
+    mockGetUserByPhone.mockRejectedValue(new Error('DB unavailable'))
+
+    await expect(provisionarCliente(baseInput(), testDeps)).rejects.toThrow()
     expect(mockProvisionarClienteAtomico).not.toHaveBeenCalled()
   })
 })
@@ -201,11 +278,11 @@ describe('provisionarCliente — seed best-effort', () => {
     consoleSpy.mockRestore()
   })
 
-  it('logs the seed error via console.error when seed throws (P4)', async () => {
+  it('logs the seed error with the actual error object via console.error (P4 — not a silent swallow)', async () => {
     mockGetUserByPhone.mockResolvedValue(null)
     mockProvisionarClienteAtomico.mockResolvedValue({ orgId: 'ORG007', usuarioId: 'uuid-admin-6' })
 
-    const seedError = new Error('seed failed')
+    const seedError = new Error('seed failed — metricas insert conflict')
     const seedSpy = vi.fn().mockRejectedValue(seedError)
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
@@ -214,7 +291,11 @@ describe('provisionarCliente — seed best-effort', () => {
       seedMetricasPlantilla: seedSpy,
     })
 
-    expect(consoleSpy).toHaveBeenCalled()
+    // Must log the actual error, not just call console.error with no args (P4: logged with content)
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[provisionarCliente]'),
+      seedError,
+    )
     consoleSpy.mockRestore()
   })
 
