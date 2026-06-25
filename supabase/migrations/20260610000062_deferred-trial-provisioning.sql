@@ -44,7 +44,7 @@ CREATE OR REPLACE FUNCTION set_trial_fin()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SET search_path = public, pg_temp
-AS $$
+AS $fn_set_trial_fin$
 BEGIN
   IF NEW.trial_inicio IS NOT NULL THEN
     NEW.trial_fin := NEW.trial_inicio + INTERVAL '30 days';
@@ -53,7 +53,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$;
+$fn_set_trial_fin$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Recreate trigger: BEFORE INSERT OR UPDATE OF trial_inicio
@@ -101,7 +101,7 @@ RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp    -- D31: pin search_path, prevent hijacking
-AS $$
+AS $fn_provisionar$
 DECLARE
   v_org_id    TEXT;
   v_uid       UUID;
@@ -114,9 +114,16 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('provisionar_cliente_atomico'));
 
   -- Compute next org_id from the current maximum, numeric-aware.
+  -- NOTE: filter avoids a regex end-anchor ('$') on purpose. The supabase CLI
+  -- migration splitter toggles dollar-quote state on every '$' char, so a lone
+  -- '$' inside the function body corrupts statement splitting (merges this
+  -- function with the trailing REVOKE/GRANT → SQLSTATE 42601). The LIKE +
+  -- "no non-digit after ORG" check is semantically identical to ^ORG\d+$.
   SELECT org_id INTO v_max_id
   FROM organizaciones
-  WHERE org_id ~ '^ORG\d+$'
+  WHERE org_id LIKE 'ORG%'
+    AND length(org_id) > 3
+    AND substring(org_id FROM 4) !~ '[^0-9]'
   ORDER BY length(org_id) DESC, org_id DESC
   LIMIT 1;
 
@@ -195,18 +202,10 @@ BEGIN
 
   RETURN jsonb_build_object('org_id', v_org_id, 'usuario_id', v_uid);
 END;
-$$;
+$fn_provisionar$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 5. Permission hardening (Fix 1 — CRITICAL)
---    REVOKE from PUBLIC first (PostgreSQL grants EXECUTE to PUBLIC by default on
---    new functions, which allows anon/authenticated to call it via PostgREST and
---    bypass REPORTE_SECRET entirely). Then grant only to service_role.
--- ─────────────────────────────────────────────────────────────────────────────
-REVOKE EXECUTE ON FUNCTION provisionar_cliente_atomico(
-  TEXT, tipo_org, TEXT, INTEGER, INTEGER, TEXT, TEXT, TEXT
-) FROM PUBLIC;
-
-GRANT EXECUTE ON FUNCTION provisionar_cliente_atomico(
-  TEXT, tipo_org, TEXT, INTEGER, INTEGER, TEXT, TEXT, TEXT
-) TO service_role;
+-- NOTE: the REVOKE/GRANT permission hardening for provisionar_cliente_atomico
+-- lives in migration 20260624000065. It was moved out of this file because the
+-- supabase CLI migration splitter merges this CREATE FUNCTION with trailing
+-- statements in the same file (SQLSTATE 42601: "multiple commands in a prepared
+-- statement"). Keeping the function as the last statement here avoids that.
