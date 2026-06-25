@@ -1632,3 +1632,84 @@ describe('parseFincaUmbrales (T-16)', () => {
     expect(parseFincaUmbrales(fincaWithNullConfig)).toBeNull()
   })
 })
+
+// ─── T1.13 — EventHandler Sigatoka path: table-first resolution ──────────────
+// These tests verify the threshold resolution contract that EventHandler must
+// follow (T1.14). The pure helper functions are tested directly here; the
+// EventHandler's finalizarMuestreoSigatoka integration is verified via the
+// dual-read contract.
+
+import {
+  resolveUmbrales,
+  toUmbralesSeveridad,
+  type UmbralAlertaRow,
+} from '../../src/pipeline/handlers/umbralesAlerta.js'
+
+describe('EventHandler Sigatoka threshold resolution contract (T1.13)', () => {
+  const makeRow = (overrides: Partial<UmbralAlertaRow>): UmbralAlertaRow => ({
+    id: 'r1',
+    org_id: 'ORG001',
+    finca_id: null,
+    finca_scope: '*',
+    pest_type: 'sigatoka_negra',
+    campo: 'ee3a6Severo',
+    operador: 'gt',
+    valor: 10,
+    enabled: true,
+    ...overrides,
+  })
+
+  it('uses table values when getUmbralesAlerta returns rows', () => {
+    // Simulate: getUmbralesAlerta returns rows → resolveUmbrales → toUmbralesSeveridad
+    const rows: UmbralAlertaRow[] = [
+      makeRow({ campo: 'ee3a6Severo', valor: 12 }),
+      makeRow({ campo: 'ee2Avanzado', valor: 7 }),
+      makeRow({ campo: 'hojasFuncionalesMin', operador: 'lt', valor: 8 }),
+    ]
+    const resolved = resolveUmbrales(rows)
+    const umbrales = toUmbralesSeveridad(resolved!)
+    // Table values win
+    expect(umbrales.ee3a6Severo).toBe(12)
+    expect(umbrales.ee2Avanzado).toBe(7)
+    expect(umbrales.hojasFuncionalesMin).toBe(8)
+  })
+
+  it('dual-read fallback: when getUmbralesAlerta returns empty, falls back to parseFincaUmbrales result', () => {
+    // Simulate: table empty → fallback → parseFincaUmbrales(finca.config)
+    const fincaConfig = {
+      sigatoka_umbrales: { ee3a6Severo: 11, ee2Avanzado: 4, ee2Leve: 25, hojasFuncionalesMin: 10 },
+    }
+    const fallback = parseFincaUmbrales(fincaConfig)
+    expect(fallback).not.toBeNull()
+    expect(fallback!.ee3a6Severo).toBe(11)
+    // If table is empty, EventHandler should use parseFincaUmbrales result
+    const emptyResolved = resolveUmbrales([])
+    expect(emptyResolved).toBeNull()
+    // null → use fallback (dual-read logic in T1.14)
+  })
+
+  it('ee2Leve enabled=false row → Infinity → comparison in buildWhatsappSummary never fires', () => {
+    const rows: UmbralAlertaRow[] = [
+      makeRow({ campo: 'ee3a6Severo', valor: 10 }),
+      makeRow({ campo: 'ee2Leve', valor: 30, enabled: false }),
+    ]
+    const resolved = resolveUmbrales(rows)!
+    const umbrales = toUmbralesSeveridad(resolved)
+    // ee2Leve should be Infinity — alert never fires
+    expect(umbrales.ee2Leve).toBe(Infinity)
+    // buildWhatsappSummary: peorH > Infinity is always false
+    expect(99 > umbrales.ee2Leve).toBe(false)
+  })
+
+  it('toUmbralesSeveridad Infinity sentinels make comparisons always false (never fires)', () => {
+    // Verify: comparison `peorX > Infinity` and `peorX < -Infinity` both always false
+    const rows: UmbralAlertaRow[] = [makeRow({ campo: 'ee3a6Severo', valor: 10 })]
+    const resolved = resolveUmbrales(rows)!
+    const umbrales = toUmbralesSeveridad(resolved)
+    // unconfigured gt fields → Infinity
+    expect(100 > umbrales.ee2Avanzado).toBe(false)
+    expect(100 > umbrales.ee2Leve).toBe(false)
+    // unconfigured lt field → -Infinity
+    expect(0 < umbrales.hojasFuncionalesMin).toBe(false)
+  })
+})

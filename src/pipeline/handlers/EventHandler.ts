@@ -28,6 +28,8 @@ import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
 import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones, parseFincaUmbrales } from './SigatokaHandler.js'
+import { getUmbralesAlerta } from '../supabaseQueries.js'
+import { resolveUmbrales, toUmbralesSeveridad } from './umbralesAlerta.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
@@ -240,7 +242,7 @@ export async function handleEvento(
         sigatoka.plantas11sem = mapearSectoresALotesFilas(sigatoka.plantas11sem, lotesRef)
         sigatoka.plantas00sem = mapearSectoresALotesFilas(sigatoka.plantas00sem ?? [], lotesRef)
         await finalizarMuestreoSigatoka(sigatoka, {
-          from: msg.from, fincaId: usuario.finca_id!, usuarioId: usuario.id, mensajeId,
+          from: msg.from, fincaId: usuario.finca_id!, orgId: usuario.org_id ?? '', usuarioId: usuario.id, mensajeId,
           imagenPath, caption: msg.texto ?? null,
           datosExtra: { classifier_source: esSigatoka ? 'sp-03g_binary' : 'sp-03c_direct' },
           traceId, costCtx,
@@ -266,7 +268,7 @@ export async function handleEvento(
           sigatoka.plantas11sem = mapearSectoresALotesFilas(sigatoka.plantas11sem, lotesRef)
           sigatoka.plantas00sem = mapearSectoresALotesFilas(sigatoka.plantas00sem ?? [], lotesRef)
           await finalizarMuestreoSigatoka(sigatoka, {
-            from: msg.from, fincaId: usuario.finca_id!, usuarioId: usuario.id, mensajeId,
+            from: msg.from, fincaId: usuario.finca_id!, orgId: usuario.org_id ?? '', usuarioId: usuario.id, mensajeId,
             imagenPath, caption: msg.texto ?? null,
             datosExtra: { texto_ocr_origen: ocr.texto_completo_visible },
             traceId, costCtx,
@@ -840,6 +842,7 @@ async function finalizarMuestreoSigatoka(
   ctx: {
     from: string
     fincaId: string
+    orgId: string
     usuarioId: string
     mensajeId: string
     imagenPath: string | null
@@ -872,17 +875,28 @@ async function finalizarMuestreoSigatoka(
 
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
 
-  // T-17: Read per-farm Sigatoka thresholds from fincas.config.sigatoka_umbrales (D29).
-  // Falls back to UMBRALES_SEVERIDAD_DEFAULT when absent or invalid (P1 — never fabricate).
+  // T1.14: Dual-read threshold resolution (design §4.1, §7).
+  // Table-first: read from umbrales_alerta (resolveUmbrales + toUmbralesSeveridad adapter).
+  // Fallback: when table has no rows AND ALERT_THRESHOLDS_DUAL_READ=true, fall back to
+  // parseFincaUmbrales(fincas.config) — keeps existing fincas alerting during cutover window.
+  // Cutover invariant (PR#4): dual-read is removed; table is the only source.
   let umbralesFinca = undefined
   try {
-    const fincaData = await getFincaById(ctx.fincaId)
-    const parsed = parseFincaUmbrales(fincaData?.config ?? null)
-    if (parsed !== null) {
-      umbralesFinca = parsed
+    const tableRows = await getUmbralesAlerta(ctx.orgId, ctx.fincaId, 'sigatoka_negra')
+    const resolved = resolveUmbrales(tableRows)
+    if (resolved !== null) {
+      umbralesFinca = toUmbralesSeveridad(resolved)
+    } else if (process.env['ALERT_THRESHOLDS_DUAL_READ'] === 'true') {
+      // Dual-read fallback during cutover window: table has no rows yet → use fincas.config
+      const fincaData = await getFincaById(ctx.fincaId)
+      const parsed = parseFincaUmbrales(fincaData?.config ?? null)
+      if (parsed !== null) umbralesFinca = parsed
+    }
+    if (process.env['SIGATOKA_UMBRAL_EE2_LEVE']) {
+      console.warn('[EventHandler] SIGATOKA_UMBRAL_EE2_LEVE env var is deprecated — configure ee2Leve via umbrales_alerta table instead')
     }
   } catch (err) {
-    console.warn('[EventHandler] parseFincaUmbrales: error leyendo finca config, usando defaults:', err)
+    console.warn('[EventHandler] Error resolving umbrales, using buildWhatsappSummary defaults:', err)
   }
 
   await _sender!.enviarTexto(ctx.from, buildWhatsappSummary(sigatoka, umbralesFinca))
