@@ -816,7 +816,11 @@ export function resolverUmbralEnv(raw: string | undefined, fallback: number): nu
 export const UMBRALES_SEVERIDAD_DEFAULT: UmbralesSeveridad = {
   ee3a6Severo: 10,
   ee2Avanzado: 5,
-  ee2Leve: resolverUmbralEnv(process.env['SIGATOKA_UMBRAL_EE2_LEVE'], 30),
+  // SILENCED BY DEFAULT (101 > the max possible H of 100, so it never fires): ee2Leve
+  // was a placeholder (30) with no agronomic backing. Shipping it would alert paying
+  // clients on an unvalidated signal (P7, D29). It stays off until a finca/org configures
+  // a real value (see SDD configurable-alert-thresholds) or the env override sets one.
+  ee2Leve: resolverUmbralEnv(process.env['SIGATOKA_UMBRAL_EE2_LEVE'], 101),
   hojasFuncionalesMin: 9,
 }
 
