@@ -89,3 +89,19 @@ export async function requireFincaAccessAsync(c: Context, requestedFincaId: stri
 export function getUserSupabase(c: Context): SupabaseClient | null {
   return c.get('userSupabase') ?? null
 }
+
+/**
+ * T1.16 — Org-level access guard for GET/PUT /api/org/:orgId/alertas/config.
+ * Closes the D31 cross-tenant hole for org-scoped endpoints (H7, design §8).
+ *   - 'director': global access (back-office internal).
+ *   - 'admin_org': only their own org_id.
+ *   - All other roles: denied (propietario/agricultor have no org-level config access).
+ *   - Unauthenticated (no authedUser): returns false → caller returns 401.
+ */
+export async function requireOrgAccessAsync(c: Context, requestedOrgId: string): Promise<boolean> {
+  const user = c.get('authedUser')
+  if (!user) return false
+  if (user.rol === 'director') return true
+  if (user.rol === 'admin_org') return user.org_id === requestedOrgId
+  return false
+}
