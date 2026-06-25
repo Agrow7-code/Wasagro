@@ -6,10 +6,11 @@
 
 Wasagro es un sistema operativo de campo agrícola AI-first. Captura datos en fincas de exportación (cacao/banano) en Ecuador/Guatemala via WhatsApp (voz, texto, imagen), los estructura con IA, y genera reportes y alertas.
 
-- **Horizonte actual: H0-R** — producto funcional para la primera finca pagante.
+- **Horizonte actual: H0-R → producción.** Wasagro **dejó de ser MVP**: está recibiendo prospectos reales y en conversaciones comerciales activas. El estándar es **production-readiness**, no "mínimo viable" — flujos, procesos, diseño y arquitectura a la altura de recibir clientes pagantes. Postura completa y backlog: Engram `wasagro/production-readiness-posture` + auditoría `wasagro/readiness-audit`.
+- **Estándar de entrega (no-MVP):** ningún cliente/prospecto ve datos **mock** (vista no migrada → tras flag `demo` o no se muestra); cada cambio se entrega **production-grade** (aislamiento cross-tenant D31, datos reales, tests, P4). "Anda en la demo" ≠ listo.
 - **Métrica Norte:** eventos de campo correctamente estructurados por semana por finca activa (accuracy ≥ 85%).
 - **Modelo de negocio:** B2B enterprise — exportadora paga, agricultor usa gratis.
-- **Por qué H0-R:** las primeras pruebas con usuarios reales mostraron que H0 (escrito sin probar) no creaba valor. El problema ya está confirmado; el objetivo ahora es entregar producto que funcione en campo, no "validar el problema".
+- **Por qué:** H0 (escrito sin probar) no creaba valor; H0-R entregó producto que funciona en campo. Hoy, con prospectos activos, el foco es estar **LISTOS para clientes reales** — el problema ya está confirmado, no se "valida" más.
 
 ## SSOT — Dónde vive cada cosa
 
