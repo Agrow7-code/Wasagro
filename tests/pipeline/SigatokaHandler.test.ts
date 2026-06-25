@@ -394,8 +394,10 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
     expect(msg).toMatch(/1-3/)
   })
 
-  it('alerta cuando EE2 leve (1-3) supera el umbral', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]))
+  it('alerta cuando EE2 leve (1-3) supera el umbral configurado', () => {
+    // El default está silenciado (placeholder D29); con un umbral configurado, dispara.
+    const umbrales: UmbralesSeveridad = { ...UMBRALES_SEVERIDAD_DEFAULT, ee2Leve: 30 }
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]), umbrales)
     expect(msg).toMatch(/⚠️.*EE2 \(1-3\)/)
   })
 
@@ -420,7 +422,8 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
   })
 
   it('estado general ATENCIÓN cuando EE2 (1-3) alto pero sin severos', () => {
-    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0, J_calculado: 0, M_calculado: 11 })]))
+    const umbrales: UmbralesSeveridad = { ...UMBRALES_SEVERIDAD_DEFAULT, ee2Leve: 30 }
+    const msg = buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47, I_calculado: 0, J_calculado: 0, M_calculado: 11 })]), umbrales)
     expect(msg).toMatch(/ATENCIÓN/)
     expect(msg).not.toMatch(/CRÍTICO/)
   })
@@ -514,10 +517,12 @@ describe('umbrales de severidad Sigatoka — configurables (#1)', () => {
     expect(resolverUmbralEnv('-5', 30)).toBe(30)
   })
 
-  it('el default de EE2 leve sigue siendo 30 (sin env override)', () => {
-    // Mantiene el comportamiento histórico: H>30 dispara la alerta de EE2 (1-3).
-    expect(UMBRALES_SEVERIDAD_DEFAULT.ee2Leve).toBe(30)
-    expect(buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]))).toMatch(/⚠️.*EE2 \(1-3\)/)
+  it('el default de EE2 leve está silenciado (placeholder D29 sin respaldo, P7)', () => {
+    // ee2Leve era un placeholder (30) sin respaldo agronómico. Hasta que el cliente lo
+    // configure (SDD configurable-alert-thresholds), el default NO dispara la alerta —
+    // no se le envía un aviso sin respaldo a un cliente pagante.
+    expect(UMBRALES_SEVERIDAD_DEFAULT.ee2Leve).toBe(101)
+    expect(buildWhatsappSummary(muestreo([fullCol({ H_calculado: 47 })]))).not.toMatch(/EE2 \(1-3\) — infección/)
   })
 
   it('un umbral EE2 leve más alto (override por finca) silencia la alerta que el default dispararía', () => {
