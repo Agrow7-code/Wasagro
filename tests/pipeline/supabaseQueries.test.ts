@@ -22,6 +22,12 @@ import {
   provisionarClienteAtomico,
   // trial + farm-seed helpers (PR-D)
   startTrial,
+  // T1.11/T1.12 — configurable alert thresholds persistence
+  getUmbralesAlerta,
+  upsertUmbralAlerta,
+  getDecisionMakersByOrg,
+  getDecisionAlerta,
+  upsertDecisionAlerta,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -417,5 +423,148 @@ describe('SDR supabaseQueries', () => {
 
       await expect(updateFincaCoordenadas('F001', -1.2345, -79.5678, mock as any)).rejects.toThrow()
     })
+  })
+})
+
+// ─── T1.11 — configurable alert thresholds persistence tests ─────────────────
+
+describe('getUmbralesAlerta', () => {
+  it('returns combined org-default and per-finca rows for a pest_type', async () => {
+    const rows = [
+      { org_id: 'ORG001', finca_id: null, pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', valor: 10, enabled: true },
+      { org_id: 'ORG001', finca_id: 'F001', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', valor: 15, enabled: true },
+    ]
+    const mock = crearSupabaseMock()
+    // Simulate the chained query returning rows
+    const thenableMock = { ...mock._chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data: rows, error: null }).then(resolve) }
+    mock.from.mockReturnValue(thenableMock)
+
+    const result = await getUmbralesAlerta('ORG001', 'F001', 'sigatoka_negra', mock as any)
+    expect(Array.isArray(result)).toBe(true)
+  })
+
+  it('returns empty array when no rows exist (silent path)', async () => {
+    const mock = crearSupabaseMock()
+    const thenableMock = { ...mock._chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data: [], error: null }).then(resolve) }
+    mock.from.mockReturnValue(thenableMock)
+
+    const result = await getUmbralesAlerta('ORG001', 'F001', 'sigatoka_negra', mock as any)
+    expect(result).toEqual([])
+  })
+
+  it('throws when Supabase returns an error', async () => {
+    const dbError = new Error('DB fail')
+    const mock = crearSupabaseMock()
+    const thenableMock = {
+      ...mock._chain,
+      then: (resolve: (v: unknown) => void) =>
+        Promise.resolve({ data: null, error: dbError }).then(resolve),
+    }
+    mock.from.mockReturnValue(thenableMock)
+
+    // getUmbralesAlerta throws when error is truthy
+    await expect(getUmbralesAlerta('ORG001', 'F001', 'sigatoka_negra', mock as any)).rejects.toThrow()
+  })
+})
+
+describe('upsertUmbralAlerta', () => {
+  it('calls upsert with onConflict targeting the generated column constraint (H8)', async () => {
+    const upsertMock = vi.fn().mockResolvedValue({ error: null })
+    const mock = { from: vi.fn().mockReturnValue({ upsert: upsertMock }) }
+
+    await upsertUmbralAlerta(
+      { org_id: 'ORG001', finca_id: 'F001', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', operador: 'gt', valor: 12, enabled: true },
+      mock as any,
+    )
+
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ org_id: 'ORG001', campo: 'ee3a6Severo' }),
+      expect.objectContaining({ onConflict: 'org_id,finca_scope,pest_type,campo' }),
+    )
+  })
+
+  it('throws when Supabase returns an error', async () => {
+    const upsertMock = vi.fn().mockResolvedValue({ error: new Error('conflict') })
+    const mock = { from: vi.fn().mockReturnValue({ upsert: upsertMock }) }
+
+    await expect(upsertUmbralAlerta(
+      { org_id: 'ORG001', finca_id: null, pest_type: 'moniliasis', campo: 'pct_afectado', operador: 'gt', valor: 20, enabled: true },
+      mock as any,
+    )).rejects.toThrow()
+  })
+})
+
+describe('getDecisionMakersByOrg', () => {
+  it('returns decision-makers (director/admin_org) with onboarding_completo', async () => {
+    const users = [
+      { id: 'u1', phone: '593987000001', nombre: 'Director A', rol: 'director' },
+      { id: 'u2', phone: '593987000002', nombre: 'Admin B', rol: 'admin_org' },
+    ]
+    const mock = crearSupabaseMock()
+    const thenableMock = { ...mock._chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data: users, error: null }).then(resolve) }
+    mock.from.mockReturnValue(thenableMock)
+
+    const result = await getDecisionMakersByOrg('ORG001', mock as any)
+    expect(Array.isArray(result)).toBe(true)
+  })
+
+  it('returns an empty array when no decision-makers exist', async () => {
+    const mock = crearSupabaseMock()
+    const thenableMock = { ...mock._chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data: [], error: null }).then(resolve) }
+    mock.from.mockReturnValue(thenableMock)
+
+    const result = await getDecisionMakersByOrg('ORG_EMPTY', mock as any)
+    expect(result).toEqual([])
+  })
+
+  it('deduplicates users by phone', async () => {
+    const users = [
+      { id: 'u1', phone: '593987000001', nombre: 'Director A', rol: 'director' },
+      { id: 'u1b', phone: '593987000001', nombre: 'Director A dup', rol: 'director' },
+      { id: 'u2', phone: '593987000002', nombre: 'Admin B', rol: 'admin_org' },
+    ]
+    const mock = crearSupabaseMock()
+    const thenableMock = { ...mock._chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data: users, error: null }).then(resolve) }
+    mock.from.mockReturnValue(thenableMock)
+
+    const result = await getDecisionMakersByOrg('ORG001', mock as any)
+    const phones = result.map(r => r.phone)
+    expect(phones).toHaveLength(new Set(phones).size)
+  })
+})
+
+describe('getDecisionAlerta', () => {
+  it('returns the decision_alerta row when it exists', async () => {
+    const row = { id: 'da-1', org_id: 'ORG001', finca_id: 'F001', pest_type: 'sigatoka_negra', status: 'asked', ask_count: 1, asked_at: new Date().toISOString() }
+    const mock = crearSupabaseMock()
+    mock._chain.maybeSingle.mockResolvedValue({ data: row, error: null })
+
+    const result = await getDecisionAlerta('ORG001', 'F001', 'sigatoka_negra', mock as any)
+    expect(result?.status).toBe('asked')
+  })
+
+  it('returns null when no row exists', async () => {
+    const mock = crearSupabaseMock()
+    mock._chain.maybeSingle.mockResolvedValue({ data: null, error: null })
+
+    const result = await getDecisionAlerta('ORG001', 'F001', 'moniliasis', mock as any)
+    expect(result).toBeNull()
+  })
+})
+
+describe('upsertDecisionAlerta', () => {
+  it('calls upsert with correct UNIQUE constraint columns', async () => {
+    const upsertMock = vi.fn().mockResolvedValue({ error: null })
+    const mock = { from: vi.fn().mockReturnValue({ upsert: upsertMock }) }
+
+    await upsertDecisionAlerta(
+      { org_id: 'ORG001', finca_id: 'F001', pest_type: 'sigatoka_negra', status: 'asked', ask_count: 1, asked_at: new Date().toISOString() },
+      mock as any,
+    )
+
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ org_id: 'ORG001', status: 'asked' }),
+      expect.objectContaining({ onConflict: 'org_id,finca_id,pest_type' }),
+    )
   })
 })
