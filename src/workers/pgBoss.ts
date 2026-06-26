@@ -11,6 +11,7 @@ import { buildFeedbackRecibo } from '../pipeline/feedbackBuilder.js'
 import { normalizarPlaga } from '../pipeline/plagaNormalizer.js'
 import { canonicalPestType } from '../pipeline/handlers/umbralesAlerta.js'
 import { entregarAlertaPlaga } from '../pipeline/alertaEntrega.js'
+import { isAlertDeliveryEnabled } from './alertDeliveryGate.js'
 
 let boss: PgBoss
 
@@ -214,18 +215,24 @@ async function procesarIntencionWorker(
       '',
     )
 
-    // T2.4 / T2.6 / T2.8 — PR#2: Real alert delivery — runs AFTER persistence (P7 fix #2).
+    // T2.4 / T2.6 / T2.8 — PR#2: Alert delivery capability (tested, wired, but gated OFF).
     //
-    // §6.3 Quarantine bypass: if alerta_cuarentena=true, entregarAlertaPlaga short-circuits
-    //       BEFORE the resolver — always fires, no config needed (P7, ADR-G).
-    //       Quarantine fires even without orgId (finca-scoped delivery, fix #6).
-    // §6.2 Non-Sigatoka delivery: resolveUmbrales → fireAlerts → deliver to finca admins.
-    //       Skipped when orgId is absent (cannot resolve org-scoped thresholds).
-    // §6.4 M12 founder-shadow: DISABLED — is_first_alert always false until PR#3
-    //       implements decision_alerta.ask_count gating (fix #3).
+    // Live delivery gated OFF until PR#3 wires it at the confirmation point
+    // (event_id idempotency + decision_alerta). Do not enable in prod until then.
     //
-    // Best-effort: delivery errors are caught and logged; they never block confirmation flow.
-    if (ext.alerta_urgente && plagaPestType) {
+    // WHY GATED: at this point in the flow the farmer has NOT confirmed yet —
+    // eventos_campo has no row, so there is no event_id to key idempotency on.
+    // Code after this block (sesiones_activas UPDATE ~line 303, lotes query) can throw,
+    // triggering a pgBoss retry (retryLimit=3) which would re-deliver the alert.
+    // PR#3 will call entregarAlertaPlaga from EventHandler (confirmation point) where
+    // the event IS persisted and event_id is available for the dedup guard.
+    //
+    // §6.3 Quarantine bypass, §6.2 Non-Sigatoka delivery, §6.4 M12 founder-shadow
+    // are fully implemented and tested in alertaEntrega.ts — this gate is the only
+    // thing standing between the tested capability and a double-send risk in prod.
+    //
+    // To enable for testing: ALERT_DELIVERY_ENABLED=true (never set in prod until PR#3).
+    if (isAlertDeliveryEnabled() && ext.alerta_urgente && plagaPestType) {
       const sender = crearSenderWhatsApp()
       const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
 
