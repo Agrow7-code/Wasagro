@@ -270,6 +270,82 @@ export function toUmbralesSeveridad(resolved: ResolvedUmbrales): UmbralesSeverid
   }
 }
 
+// ─── shouldOutreach ───────────────────────────────────────────────────────────
+
+/**
+ * Configuration for the outreach decision policy (design §4.2).
+ * Defaults: cooldownDays=7, maxAsks=3. Can be overridden via env or test injection.
+ */
+export interface OutreachConfig {
+  /** Days to wait before re-asking after a prior ask. */
+  cooldownDays: number
+  /** Maximum number of times to ask before escalating to founder and going silent. */
+  maxAsks: number
+}
+
+/** Result of the outreach policy evaluation. */
+export interface OutreachDecision {
+  /** What the system should do next. */
+  action: 'ask' | 're-ask' | 'silent' | 'escalate'
+  /** Human-readable reason (for logging / founder-alert copy). */
+  reason: string
+}
+
+/**
+ * T3.2 — Pure decision function: given a DecisionAlertaRow (or null) and the
+ * current timestamp, returns whether / how to outreach this org/finca/pest combo.
+ *
+ * Policy (design §4.2):
+ *   - null / not_asked                                → ask
+ *   - decided / opted_out                             → silent forever
+ *   - asked + now − asked_at ≤ cooldownDays           → silent (within cooldown)
+ *   - asked + past cooldown + ask_count < maxAsks     → re-ask
+ *   - asked + ask_count >= maxAsks                    → escalate once then silent
+ *
+ * Pure: no I/O. Accepts a light row interface so the tests don't need a full
+ * DecisionAlertaRow import (we duck-type what we need).
+ */
+export function shouldOutreach(
+  state: {
+    status: 'not_asked' | 'asked' | 'decided' | 'opted_out'
+    asked_at?: string | null
+    ask_count: number
+  } | null,
+  now: Date,
+  config: OutreachConfig,
+): OutreachDecision {
+  if (state === null || state.status === 'not_asked') {
+    return { action: 'ask', reason: 'no prior decision' }
+  }
+
+  if (state.status === 'decided') {
+    return { action: 'silent', reason: 'decided — re-config only via web or keyword' }
+  }
+
+  if (state.status === 'opted_out') {
+    return { action: 'silent', reason: 'opted_out — re-config only via web or keyword' }
+  }
+
+  // status === 'asked'
+  if (state.ask_count >= config.maxAsks) {
+    return { action: 'escalate', reason: `max asks reached (${state.ask_count}/${config.maxAsks})` }
+  }
+
+  // Check cooldown window
+  const askedAt = state.asked_at ? new Date(state.asked_at) : null
+  if (askedAt !== null) {
+    const msSinceAsk = now.getTime() - askedAt.getTime()
+    const msPerDay = 24 * 60 * 60 * 1000
+    const daysSinceAsk = msSinceAsk / msPerDay
+    if (daysSinceAsk <= config.cooldownDays) {
+      return { action: 'silent', reason: `within cooldown (${daysSinceAsk.toFixed(1)}d / ${config.cooldownDays}d)` }
+    }
+  }
+  // asked_at null → treat as past cooldown (conservative: ask again)
+  // ask_count < maxAsks (checked above)
+  return { action: 're-ask', reason: `past cooldown, ask_count=${state.ask_count}` }
+}
+
 // ─── fireAlerts ───────────────────────────────────────────────────────────────
 
 /**
