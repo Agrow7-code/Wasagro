@@ -9,6 +9,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 
 // The canonical list of valid sesiones_activas.status values after
 // migration 067 (pending_sigatoka_aclaracion) and migration 068
@@ -68,5 +70,26 @@ describe('sesiones_activas CHECK constraint — migration 068 contract', () => {
 
   it('contains exactly 10 valid statuses (no unintended additions)', () => {
     expect(VALID_STATUSES).toHaveLength(10)
+  })
+})
+
+// ─── Fix 3: RLS policy contract — migration 075 ───────────────────────────────
+
+describe('RLS policy migration 075 contract', () => {
+  const migrationPath = join(process.cwd(), 'supabase/migrations/20260625000075_rls-policies-umbrales-alerta.sql')
+
+  it('migration file exists', () => {
+    expect(() => readFileSync(migrationPath, 'utf-8')).not.toThrow()
+  })
+
+  it('contains CREATE POLICY for umbrales_alerta (service_role only)', () => {
+    const sql = readFileSync(migrationPath, 'utf-8')
+    expect(sql).toContain('ON umbrales_alerta')
+    expect(sql).toContain("auth.role() = 'service_role'")
+  })
+
+  it('contains CREATE POLICY for decision_alerta (service_role only)', () => {
+    const sql = readFileSync(migrationPath, 'utf-8')
+    expect(sql).toContain('ON decision_alerta')
   })
 })
