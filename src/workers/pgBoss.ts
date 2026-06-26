@@ -5,10 +5,12 @@ import { langfuse } from '../integrations/langfuse.js'
 import { crearLLM } from '../integrations/llm/index.js'
 import type { IWasagroLLM, CostContext } from '../integrations/llm/IWasagroLLM.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/EventoCampo.js'
-import { marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
+import { marcarIntencionCompletada, marcarIntencionFallida, getAdminsByFinca, getDecisionMakersByOrg, getUmbralesAlerta } from '../pipeline/supabaseQueries.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
 import { buildFeedbackRecibo } from '../pipeline/feedbackBuilder.js'
 import { normalizarPlaga } from '../pipeline/plagaNormalizer.js'
+import { canonicalPestType } from '../pipeline/handlers/umbralesAlerta.js'
+import { entregarAlertaPlaga } from '../pipeline/alertaEntrega.js'
 
 let boss: PgBoss
 
@@ -164,6 +166,10 @@ async function procesarIntencionWorker(
     }
 
     // Normalizar nombre de plaga al canónico del cultivo (determinista, no depende del LLM)
+    let alertaCuarentena = false
+    let plagaNombreComun: string | null = null
+    let plagaPestType: string | null = null
+
     if (ext.tipo_evento === 'plaga') {
       const c = ext.campos_extraidos as Record<string, unknown>
       const normalizado = normalizarPlaga(
@@ -177,6 +183,9 @@ async function procesarIntencionWorker(
           nombre_comun: normalizado.nombre_comun,
           nombre_cientifico: normalizado.nombre_cientifico,
         }
+        alertaCuarentena = normalizado.alerta_cuarentena
+        plagaNombreComun = normalizado.nombre_comun
+        plagaPestType = canonicalPestType(normalizado.nombre_comun)
         if (normalizado.alerta_cuarentena) {
           ext.alerta_urgente = true
         }
@@ -193,6 +202,54 @@ async function procesarIntencionWorker(
         level: 'WARNING',
         input: { finca_id: data.fincaId, campos: ext.campos_extraidos },
       })
+
+      // T2.4 / T2.6 / T2.8 — PR#2: Real alert delivery (previously only logged to LangFuse).
+      //
+      // §6.3 Quarantine bypass: if alerta_cuarentena=true, entregarAlertaPlaga short-circuits
+      //       BEFORE the resolver — always fires, no config needed (P7, ADR-G).
+      // §6.2 Non-Sigatoka delivery: resolveUmbrales → fireAlerts → deliver to finca admins.
+      // §6.4 M12 founder-shadow: first alert per (finca, pest) goes through founder preview
+      //       when ALERT_FOUNDER_SHADOW=true (opt-in off by default, no client surprise).
+      //
+      // Best-effort: delivery errors are caught and logged; they never block confirmation flow.
+      if (plagaPestType && data.orgId) {
+        const sender = crearSenderWhatsApp()
+        const founderShadow = process.env['ALERT_FOUNDER_SHADOW'] === 'true'
+        const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
+
+        const deliveryResult = await entregarAlertaPlaga(
+          {
+            finca_id: data.fincaId,
+            org_id: data.orgId,
+            pest_type: plagaPestType,
+            pest_nombre_comun: plagaNombreComun ?? plagaPestType,
+            is_quarantine: alertaCuarentena,
+            campos_extraidos: ext.campos_extraidos as Record<string, unknown>,
+            traceId: data.traceId,
+            // M12: track first alert via decision_alerta absence (no ask_count row yet = first).
+            // For now we don't do a DB lookup here; the pgBoss path treats absence of a prior
+            // fired alert record as "first". PR#3 will refine this with decision_alerta.ask_count.
+            is_first_alert: founderShadow,
+          },
+          {
+            sender,
+            getAdminsByFinca,
+            getDecisionMakersByOrg,
+            getUmbralesAlerta: (orgId, fincaId, pestType) =>
+              getUmbralesAlerta(orgId, fincaId, pestType),
+            founderPhone,
+            founderShadow,
+          },
+        ).catch((deliveryErr: unknown) => {
+          console.error('[pgBoss] entregarAlertaPlaga failed (non-blocking):', deliveryErr)
+          return null
+        })
+
+        langfuse.trace({ id: data.traceId }).event({
+          name: 'alerta_plaga_delivery',
+          output: deliveryResult ?? { alert_sent: false, error: 'delivery_threw' },
+        })
+      }
     }
 
     // No guardar en DB todavía — esperamos confirmación del agricultor
