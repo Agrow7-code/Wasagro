@@ -1,10 +1,10 @@
 # Apply Progress: configurable-alert-thresholds — PR#1 + PR#2
 
 **Branch**: `feat/alert-thresholds-pr2`
-**Latest batch**: PR#2 remediation (adversarial review fixes — all 8 MUST-FIX items)
+**Latest batch**: PR#2 remediation + delivery gate (ALERT_DELIVERY_ENABLED, commit `3f59582`)
 **Date**: 2026-06-26
 **tsc --noEmit exit**: 0 (zero errors, exactOptionalPropertyTypes enforced)
-**Vitest PR#2 tests**: 54 passed / 0 failed (2 test files: 34 umbralesAlerta + 20 alertaEntrega)
+**Vitest PR#2 tests**: 62 passed / 0 failed (3 test files: 34 umbralesAlerta + 20 alertaEntrega + 8 alertaGate)
 
 ---
 
@@ -143,6 +143,7 @@
 | `cc6b877` | fix(delivery): idempotency guard, cross-tenant filter, no-recipients, M12 disable, PII masking, quarantine partial failure |
 | `0670b16` | fix(pgBoss): move alert delivery after persistence (P7), fix is_first_alert=false (M12), quarantine without orgId |
 | `1bfe091` | test(delivery): idempotency, cross-tenant, no-recipients, M12 disabled, quarantine partial failure, orgId-less quarantine |
+| `3f59582` | fix(thresholds): gate live pest-alert delivery behind ALERT_DELIVERY_ENABLED until PR#3 |
 
 ---
 
@@ -163,13 +164,19 @@
 
 ## Deferred to PR#3 / PR#4
 
-- **T3.x** (PR#3): proactive outreach to decision-makers, `decision_alerta` gating/cooldown, `pending_alert_config` session reducer, opt-out keyword handler, M12 `is_first_alert` via `decision_alerta.ask_count`.
+- **T3.x** (PR#3):
+  - **CRITICAL first step**: wire `entregarAlertaPlaga` at the EventHandler confirmation point (where `eventos_campo` is inserted), pass `eventId` + `markAlertaEntregada` for real idempotency via `alerta_plaga_entregada_at`
+  - Implement M12 `is_first_alert` via `decision_alerta.ask_count` read
+  - Proactive outreach to decision-makers, `decision_alerta` gating/cooldown
+  - `pending_alert_config` session reducer, opt-out keyword handler
+  - **Flip `ALERT_DELIVERY_ENABLED=true` in prod env ONLY after all the above are done** (currently inert; Sigatoka alerts via PR#1 dual-read are unaffected)
 - **T4.x** (PR#4): cutover — remove dual-read, deprecate `SIGATOKA_UMBRAL_EE2_LEVE`, stop writing `sigatoka_umbrales` to `fincas.config`.
 
 ---
 
 ## Risks / Notes
 
+- **ALERT_DELIVERY_ENABLED**: DEFAULT OFF in prod. Non-Sigatoka delivery is fully inert until PR#3 wires it at the confirmation point. Sigatoka alerts via PR#1 dual-read are UNAFFECTED and keep working (they go through EventHandler, not this pgBoss path). Gate lives in `src/workers/alertDeliveryGate.ts`.
 - **Dual-read flag**: `ALERT_THRESHOLDS_DUAL_READ=true` required in prod during cutover window.
 - **M12 is_first_alert**: Fully disabled in PR#2. `is_first_alert: false` unconditionally in pgBoss + `isFirstAlert = false` constant in alertaEntrega. PR#3 will implement via `decision_alerta.ask_count`.
 - **Idempotency guard**: fail-open on DB error (log + proceed) — one missed mark is safer than one dropped quarantine alert (P7). The `markAlertaEntregada` dep is optional; when not injected, guard is skipped.
