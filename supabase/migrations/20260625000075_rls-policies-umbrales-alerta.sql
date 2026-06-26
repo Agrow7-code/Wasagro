@@ -1,17 +1,11 @@
--- Fix 3: RLS policies for umbrales_alerta and decision_alerta.
--- Both tables have RLS ENABLED (migration 069/070) but no policies → deny-all via PostgREST.
--- The backend uses service_role for all access, so a service_role-only policy
--- is the correct pattern (same as sigatoka_correcciones in migration 061).
--- Model: migration 20260610000061_add-sigatoka-correcciones.sql
-
+-- Fix 3: RLS policy for umbrales_alerta.
+-- Table has RLS ENABLED (migration 069) but no policy → deny-all via PostgREST.
+-- Backend uses service_role for all access, so a service_role-only policy is the correct
+-- pattern (same as sigatoka_correcciones, migration 061). One CREATE POLICY per file: the
+-- supabase CLI splitter merges adjacent multi-line-paren statements (SQLSTATE 42601), so
+-- the decision_alerta policy lives in migration 076.
 CREATE POLICY umbrales_alerta_service_only
 ON umbrales_alerta
-FOR ALL
-USING (auth.role() = 'service_role')
-WITH CHECK (auth.role() = 'service_role');
-
-CREATE POLICY decision_alerta_service_only
-ON decision_alerta
 FOR ALL
 USING (auth.role() = 'service_role')
 WITH CHECK (auth.role() = 'service_role');

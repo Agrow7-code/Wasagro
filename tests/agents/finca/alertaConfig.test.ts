@@ -57,6 +57,59 @@ function crearApp() {
   return app
 }
 
+// ─── Fix 5: pest_type normalization + bounds ──────────────────────────────────
+
+describe('PUT /api/finca/:id/alertas/config — pest_type normalization and bounds', () => {
+  it('accepts canonical pest_type (sigatoka_negra) and succeeds', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/finca/F001/alertas/config', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer valid-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pest_type: 'sigatoka_negra',
+        rules: [{ campo: 'ee3a6Severo', operador: 'gt', valor: 10, enabled: true }],
+      }),
+    })
+    // Authorized user, valid canonical pest_type — should succeed
+    expect(res.status).toBe(200)
+  })
+
+  it('normalizes non-canonical pest_type casing before catalog lookup (Fix 5)', async () => {
+    // 'Sigatoka_Negra' → canonicalPestType → 'sigatoka_negra' → catalog hit
+    const app = crearApp()
+    const res = await app.request('/api/finca/F001/alertas/config', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer valid-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pest_type: 'Sigatoka_Negra',
+        rules: [{ campo: 'ee3a6Severo', operador: 'gt', valor: 10, enabled: true }],
+      }),
+    })
+    // Should NOT be 400 (unknown pest_type) — normalization must happen before catalog lookup
+    expect(res.status).not.toBe(400)
+    expect(res.status).toBe(200)
+  })
+
+  it('returns 400 when rules array exceeds max length', async () => {
+    const app = crearApp()
+    // More than 50 rules should be rejected
+    const rules = Array.from({ length: 51 }, (_, i) => ({
+      campo: 'ee3a6Severo',
+      operador: 'gt',
+      valor: i + 1,
+      enabled: true,
+    }))
+    const res = await app.request('/api/finca/F001/alertas/config', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer valid-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pest_type: 'sigatoka_negra', rules }),
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ─── Fix 9: strict 200 assertion for authorized GET ───────────────────────────
+
 // ─── GET /api/finca/:id/alertas/config ────────────────────────────────────────
 
 describe('GET /api/finca/:id/alertas/config', () => {
@@ -94,8 +147,8 @@ describe('GET /api/finca/:id/alertas/config', () => {
     const res = await app.request('/api/finca/F001/alertas/config', {
       headers: { Authorization: 'Bearer valid-jwt' },
     })
-    // Should return 200 for authorized user
-    expect([200, 403]).toContain(res.status)
+    // Must return exactly 200 for authorized user — a broken guard returning 403 must fail this test
+    expect(res.status).toBe(200)
   })
 })
 
@@ -122,7 +175,8 @@ describe('PUT /api/finca/:id/alertas/config', () => {
         rules: [{ campo: 'ee3a6Severo', operador: 'gt', valor: -5, enabled: true }],
       }),
     })
-    expect([400, 403]).toContain(res.status)
+    // Authorized user — Zod rejects negative valor before any auth issue
+    expect(res.status).toBe(400)
   })
 
   it('returns 400 when operador is not in allowed list', async () => {
@@ -135,7 +189,8 @@ describe('PUT /api/finca/:id/alertas/config', () => {
         rules: [{ campo: 'ee3a6Severo', operador: 'eq', valor: 10, enabled: true }],
       }),
     })
-    expect([400, 403]).toContain(res.status)
+    // Authorized user — Zod rejects invalid operador before any auth issue
+    expect(res.status).toBe(400)
   })
 })
 

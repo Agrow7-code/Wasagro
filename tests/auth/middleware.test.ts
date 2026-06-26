@@ -43,9 +43,9 @@ function crearApp() {
   })
   app.get('/api/test-org/:org_id', async (c) => {
     const org_id = c.req.param('org_id')
-    if (!await requireOrgAccessAsync(c, org_id)) {
-      return c.json({ error: 'Sin acceso a org' }, 403)
-    }
+    const access = await requireOrgAccessAsync(c, org_id)
+    if (access === 'unauthorized') return c.json({ error: 'Token requerido' }, 401)
+    if (access === 'forbidden') return c.json({ error: 'Sin acceso a org' }, 403)
     return c.json({ ok: true, org_id })
   })
   return app
