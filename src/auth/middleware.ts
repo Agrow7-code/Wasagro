@@ -89,3 +89,30 @@ export async function requireFincaAccessAsync(c: Context, requestedFincaId: stri
 export function getUserSupabase(c: Context): SupabaseClient | null {
   return c.get('userSupabase') ?? null
 }
+
+/**
+ * T1.16 / Fix 6 — Org-level access guard for GET/PUT /api/org/:orgId/alertas/config.
+ * Closes the D31 cross-tenant hole for org-scoped endpoints (H7, design §8).
+ *   - 'director': global access (back-office internal).
+ *   - 'admin_org': only their own org_id.
+ *   - All other roles: denied (propietario/agricultor have no org-level config access).
+ *
+ * Returns:
+ *   'ok'            — access granted
+ *   'unauthorized'  — no authedUser (caller should return 401)
+ *   'forbidden'     — authenticated but insufficient access (caller should return 403)
+ *
+ * Note: in normal request flow, authMiddleware already rejects unauthenticated requests
+ * with 401 before reaching any route handler. The 'unauthorized' return is a fail-safe
+ * for callers that bypass the middleware or call this function directly.
+ */
+export async function requireOrgAccessAsync(
+  c: Context,
+  requestedOrgId: string,
+): Promise<'ok' | 'unauthorized' | 'forbidden'> {
+  const user = c.get('authedUser')
+  if (!user) return 'unauthorized'
+  if (user.rol === 'director') return 'ok'
+  if (user.rol === 'admin_org') return user.org_id === requestedOrgId ? 'ok' : 'forbidden'
+  return 'forbidden'
+}

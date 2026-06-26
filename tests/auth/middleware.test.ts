@@ -23,7 +23,7 @@ vi.mock('../../src/auth/jwtService.js', () => ({
 }))
 
 import { Hono } from 'hono'
-import { authMiddleware, requireFincaAccessAsync, getUserSupabase } from '../../src/auth/middleware.js'
+import { authMiddleware, requireFincaAccessAsync, requireOrgAccessAsync, getUserSupabase } from '../../src/auth/middleware.js'
 import { createUserScopedClient } from '../../src/integrations/supabase.js'
 
 function crearApp() {
@@ -40,6 +40,13 @@ function crearApp() {
       return c.json({ error: 'Sin acceso' }, 403)
     }
     return c.json({ ok: true, finca_id })
+  })
+  app.get('/api/test-org/:org_id', async (c) => {
+    const org_id = c.req.param('org_id')
+    const access = await requireOrgAccessAsync(c, org_id)
+    if (access === 'unauthorized') return c.json({ error: 'Token requerido' }, 401)
+    if (access === 'forbidden') return c.json({ error: 'Sin acceso a org' }, 403)
+    return c.json({ ok: true, org_id })
   })
   return app
 }
@@ -178,5 +185,70 @@ describe('requireFincaAccessAsync', () => {
       headers: { Authorization: 'Bearer valid-jwt' },
     })
     expect(res.status).toBe(200)
+  })
+})
+
+// ─── T1.15 — requireOrgAccessAsync tests ─────────────────────────────────────
+
+describe('requireOrgAccessAsync', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('allows director access to any org (global back-office)', async () => {
+    const { verificarJWT } = await import('../../src/auth/jwtService.js')
+    vi.mocked(verificarJWT).mockResolvedValueOnce({
+      sub: 'dir-001',
+      phone: '593987654321',
+      rol: 'director',
+      finca_id: null,
+      org_id: null,
+    } as any)
+
+    const app = crearApp()
+    const res = await app.request('/api/test-org/ORG-B', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('allows admin_org access to its own org', async () => {
+    const { verificarJWT } = await import('../../src/auth/jwtService.js')
+    vi.mocked(verificarJWT).mockResolvedValueOnce({
+      sub: 'admin-001',
+      phone: '593987654321',
+      rol: 'admin_org',
+      finca_id: 'F001',
+      org_id: 'ORG-A',
+    } as any)
+
+    const app = crearApp()
+    const res = await app.request('/api/test-org/ORG-A', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('denies admin_org access to a different org (cross-tenant D31)', async () => {
+    const { verificarJWT } = await import('../../src/auth/jwtService.js')
+    vi.mocked(verificarJWT).mockResolvedValueOnce({
+      sub: 'admin-002',
+      phone: '593900000000',
+      rol: 'admin_org',
+      finca_id: 'F500',
+      org_id: 'ORG-B',
+    } as any)
+
+    const app = crearApp()
+    const res = await app.request('/api/test-org/ORG-A', {
+      headers: { Authorization: 'Bearer valid-jwt' },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('returns 401 when not authenticated', async () => {
+    const app = crearApp()
+    const res = await app.request('/api/test-org/ORG-A')
+    expect(res.status).toBe(401)
   })
 })

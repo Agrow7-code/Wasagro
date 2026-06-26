@@ -1,13 +1,14 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../../integrations/supabase.js'
-import { requireFincaAccessAsync, getUserSupabase } from '../../auth/middleware.js'
-import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos, guardarCorreccionesSigatoka, getEventosByFincaRango, type CorreccionSigatokaInsert } from '../../pipeline/supabaseQueries.js'
+import { requireFincaAccessAsync, requireOrgAccessAsync, getUserSupabase } from '../../auth/middleware.js'
+import { getEventosRevisionSigatoka, getEventoSigatokaById, actualizarEventoDatos, guardarCorreccionesSigatoka, getEventosByFincaRango, getUmbralesAlerta, upsertUmbralAlerta, type CorreccionSigatokaInsert } from '../../pipeline/supabaseQueries.js'
 import { resumirEventos } from './dashboardResumen.js'
 import { getSignedUrlEvento } from '../../integrations/supabaseStorage.js'
 import { contarCeldasIlegibles, aplicarAclaraciones, aplicarCorrecciones } from '../../pipeline/handlers/SigatokaHandler.js'
 import { langfuse } from '../../integrations/langfuse.js'
 import { AclaracionCeldaSchema, type SigatokaMuestreo, type CeldaMuestra } from '../../types/dominio/SigatokaMuestreo.js'
+import { PEST_ALERT_FIELDS, canonicalPestType } from '../../pipeline/handlers/umbralesAlerta.js'
 
 export const fincaRouter = new Hono()
 
@@ -382,4 +383,162 @@ fincaRouter.delete('/lotes/:lote_id', async (c) => {
   const { error } = await supabase.rpc('eliminar_lote', { p_lote_id: lote_id })
   if (error) return c.json({ error: error.message }, 500)
   return c.json({ ok: true })
+})
+
+// ─── Alert threshold config endpoints (T1.18, design §8) ─────────────────────
+
+// Zod schema for a single rule in a PUT request body.
+const AlertRuleSchema = z.object({
+  // campo and pest_type are bounded to prevent absurdly large payloads (Fix 5).
+  campo: z.string().min(1).max(64),
+  operador: z.enum(['gt', 'gte', 'lt', 'lte']),
+  valor: z.number().positive().finite(),
+  enabled: z.boolean(),
+})
+
+const AlertConfigPutSchema = z.object({
+  pest_type: z.string().min(1).max(64),
+  // Bound rules array: max 50 rules per PUT (pest catalog has at most ~20 campos). Fix 5.
+  rules: z.array(AlertRuleSchema).max(50),
+})
+
+/**
+ * GET /api/finca/:finca_id/alertas/config
+ * Returns all umbrales_alerta rows for the finca, annotated with source
+ * (finca = per-finca override, org = org default) and enabled flag.
+ * Shows enabled=false as disabled (never as magic value 101 — H5).
+ * Auth: requireFincaAccessAsync.
+ */
+fincaRouter.get('/:finca_id/alertas/config', async (c) => {
+  const finca_id = c.req.param('finca_id')
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+
+  const { data: fincaRow } = await supabase
+    .from('fincas')
+    .select('org_id')
+    .eq('finca_id', finca_id)
+    .maybeSingle()
+
+  if (!fincaRow) return c.json({ error: 'Finca no encontrada' }, 404)
+
+  const rows = await getUmbralesAlerta(fincaRow.org_id, finca_id, '')
+  // annotate source
+  const annotated = rows.map(r => ({
+    ...r,
+    source: r.finca_id ? 'finca' : 'org',
+  }))
+  return c.json({ config: annotated })
+})
+
+/**
+ * PUT /api/finca/:finca_id/alertas/config
+ * Upserts per-finca umbrales_alerta rows. Validates campo against catalog,
+ * positive-finite valor, and allowed operador. Stamps updated_by.
+ * Auth: requireFincaAccessAsync.
+ */
+fincaRouter.put('/:finca_id/alertas/config', async (c) => {
+  const finca_id = c.req.param('finca_id')
+  if (!await requireFincaAccessAsync(c, finca_id)) return c.json({ error: 'Sin acceso a esta finca' }, 403)
+
+  const user = c.get('authedUser')
+  const rawBody = await c.req.json().catch(() => null)
+  const parsed = AlertConfigPutSchema.safeParse(rawBody)
+  if (!parsed.success) return c.json({ error: 'Datos inválidos', details: parsed.error.issues }, 400)
+
+  const { rules } = parsed.data
+  // Fix 5: normalize pest_type before catalog lookup — 'Sigatoka_Negra' → 'sigatoka_negra'
+  const pest_type = canonicalPestType(parsed.data.pest_type)
+
+  // Validate campo against catalog
+  const catalogFields = PEST_ALERT_FIELDS[pest_type]
+  if (!catalogFields) return c.json({ error: `pest_type desconocido: ${pest_type}` }, 400)
+  const validCampos = new Set(catalogFields.map(f => f.campo))
+
+  const { data: fincaRow } = await supabase
+    .from('fincas')
+    .select('org_id')
+    .eq('finca_id', finca_id)
+    .maybeSingle()
+  if (!fincaRow) return c.json({ error: 'Finca no encontrada' }, 404)
+
+  for (const rule of rules) {
+    if (!validCampos.has(rule.campo)) {
+      return c.json({ error: `campo desconocido para ${pest_type}: ${rule.campo}` }, 400)
+    }
+    await upsertUmbralAlerta({
+      org_id: fincaRow.org_id,
+      finca_id,
+      pest_type,
+      campo: rule.campo,
+      operador: rule.operador,
+      valor: rule.valor,
+      enabled: rule.enabled,
+      updated_by: user.id,
+    })
+  }
+
+  return c.json({ ok: true, updated: rules.length })
+})
+
+/**
+ * GET /api/finca/org/:org_id/alertas/config
+ * Returns org-default umbrales_alerta rows (finca_id = NULL).
+ * Auth: requireOrgAccessAsync.
+ */
+fincaRouter.get('/org/:org_id/alertas/config', async (c) => {
+  const org_id = c.req.param('org_id')
+  const orgAccess = await requireOrgAccessAsync(c, org_id)
+  if (orgAccess === 'unauthorized') return c.json({ error: 'Token requerido' }, 401)
+  if (orgAccess === 'forbidden') return c.json({ error: 'Sin acceso a esta organización' }, 403)
+
+  const { data, error } = await supabase
+    .from('umbrales_alerta')
+    .select('id, org_id, finca_id, finca_scope, pest_type, campo, operador, valor, enabled')
+    .eq('org_id', org_id)
+    .is('finca_id', null)
+  if (error) return c.json({ error: error.message }, 500)
+
+  return c.json({ config: (data ?? []).map(r => ({ ...r, source: 'org' })) })
+})
+
+/**
+ * PUT /api/finca/org/:org_id/alertas/config
+ * Upserts org-default rows (finca_id = NULL). Validates same way as per-finca.
+ * Auth: requireOrgAccessAsync.
+ */
+fincaRouter.put('/org/:org_id/alertas/config', async (c) => {
+  const org_id = c.req.param('org_id')
+  const orgAccess = await requireOrgAccessAsync(c, org_id)
+  if (orgAccess === 'unauthorized') return c.json({ error: 'Token requerido' }, 401)
+  if (orgAccess === 'forbidden') return c.json({ error: 'Sin acceso a esta organización' }, 403)
+
+  const user = c.get('authedUser')
+  const rawBody = await c.req.json().catch(() => null)
+  const parsed = AlertConfigPutSchema.safeParse(rawBody)
+  if (!parsed.success) return c.json({ error: 'Datos inválidos', details: parsed.error.issues }, 400)
+
+  const { rules } = parsed.data
+  // Fix 5: normalize pest_type before catalog lookup
+  const pest_type = canonicalPestType(parsed.data.pest_type)
+  const catalogFields = PEST_ALERT_FIELDS[pest_type]
+  if (!catalogFields) return c.json({ error: `pest_type desconocido: ${pest_type}` }, 400)
+  const validCampos = new Set(catalogFields.map(f => f.campo))
+
+  for (const rule of rules) {
+    if (!validCampos.has(rule.campo)) {
+      return c.json({ error: `campo desconocido para ${pest_type}: ${rule.campo}` }, 400)
+    }
+    await upsertUmbralAlerta({
+      org_id,
+      finca_id: null,
+      pest_type,
+      campo: rule.campo,
+      operador: rule.operador,
+      valor: rule.valor,
+      enabled: rule.enabled,
+      updated_by: user.id,
+    })
+  }
+
+  return c.json({ ok: true, updated: rules.length })
 })

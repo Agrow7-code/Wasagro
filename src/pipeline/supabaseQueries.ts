@@ -982,3 +982,173 @@ export async function provisionarClienteAtomico(
   const row = data as { usuario_id: string; org_id: string }
   return { orgId: row.org_id, usuarioId: row.usuario_id }
 }
+
+// ─── Configurable alert thresholds (T1.12, design §2.1-2.3, §5) ───────────────
+
+import type { UmbralAlertaRow } from './handlers/umbralesAlerta.js'
+
+/** Insert/update payload for umbrales_alerta. App never writes finca_scope (GENERATED). */
+export interface UpsertUmbralAlertaArgs {
+  org_id: string
+  finca_id: string | null
+  pest_type: string
+  campo: string
+  operador: 'gt' | 'gte' | 'lt' | 'lte'
+  valor: number
+  enabled: boolean
+  updated_by?: string
+}
+
+export interface DecisionAlertaRow {
+  id?: string
+  org_id: string
+  finca_id: string
+  pest_type: string
+  status: 'not_asked' | 'asked' | 'decided' | 'opted_out'
+  asked_at?: string | null
+  ask_count: number
+  updated_at?: string
+}
+
+export interface DecisionMakerRow {
+  id: string
+  phone: string
+  nombre: string | null
+  rol: string
+}
+
+/**
+ * Fetches all umbrales_alerta rows for a given (org, finca, pest_type).
+ * Returns BOTH org-default (finca_id IS NULL) and per-finca rows in one query so
+ * resolveUmbrales() can apply the precedence logic client-side (design §3.1).
+ */
+export async function getUmbralesAlerta(
+  orgId: string,
+  fincaId: string,
+  pestType: string,
+  client: SupabaseClient = defaultClient,
+): Promise<UmbralAlertaRow[]> {
+  // Fix 1: .in('finca_id', [fincaId, null]) never matches NULL rows because SQL
+  // `col IN (..., NULL)` uses `=` which is UNKNOWN for NULLs.  Use .or() so that
+  // org-default rows (finca_id IS NULL) are actually returned and resolveUmbrales
+  // sees them.
+  let q = client
+    .from('umbrales_alerta')
+    .select('id, org_id, finca_id, finca_scope, pest_type, campo, operador, valor, enabled')
+    .eq('org_id', orgId)
+    .or(`finca_id.eq.${fincaId},finca_id.is.null`)
+  if (pestType) q = (q as any).eq('pest_type', pestType)
+  const { data, error } = await q
+  if (error) throw error
+  return (data ?? []) as UmbralAlertaRow[]
+}
+
+/**
+ * Idempotent upsert for a single umbrales_alerta row.
+ * Uses onConflict on the real UNIQUE constraint (H8 — finca_scope generated column
+ * makes NULL finca_id safe for PostgREST upsert resolution).
+ * App code never writes finca_scope (it is GENERATED ALWAYS AS).
+ */
+export async function upsertUmbralAlerta(
+  args: UpsertUmbralAlertaArgs,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const row: Record<string, unknown> = {
+    org_id: args.org_id,
+    finca_id: args.finca_id,
+    pest_type: args.pest_type,
+    campo: args.campo,
+    operador: args.operador,
+    valor: args.valor,
+    enabled: args.enabled,
+  }
+  if (args.updated_by) row['updated_by'] = args.updated_by
+
+  // Fix 4: finca_scope is GENERATED ALWAYS — PostgREST rejects generated columns
+  // in onConflict column lists. Use the named UNIQUE constraint instead (H8).
+  const { error } = await client
+    .from('umbrales_alerta')
+    .upsert(row, { onConflict: 'uq_umbrales_alerta_scope' })
+  if (error) throw error
+}
+
+/**
+ * Resolves org decision-makers for alert outreach (PR#3): only admin_org and director
+ * with onboarding_completo for THIS org (queried by org_id).
+ *
+ * Fix 8 — director org_id design choice:
+ * All users (including directors) have org_id NOT NULL (migration 007).
+ * Directors with org_id = ORG001 will NOT appear in the decision-maker list for ORG002.
+ * This is intentional: per-org field alert decisions go to the org's own admin_org.
+ * Wasagro's internal director (Henry) is not a per-org decision-maker for field alerts
+ * — he monitors via the back-office D28 dashboard, not via WhatsApp field outreach.
+ * If a director must receive per-org alerts, they should be enrolled as admin_org for
+ * that org, or this function must be extended for PR#3.
+ *
+ * NOT propietario/administrador (would fan out per finca, H7, design §5).
+ * Deduplicates by phone so a user with two roles only gets one message.
+ * Never throws — returns empty array on DB error (R4: zero decision-makers → no outreach, P2/P7).
+ */
+export async function getDecisionMakersByOrg(
+  orgId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<DecisionMakerRow[]> {
+  try {
+    const { data, error } = await client
+      .from('usuarios')
+      .select('id, phone, nombre, rol')
+      .eq('org_id', orgId)
+      .eq('onboarding_completo', true)
+      .in('rol', ['director', 'admin_org'])
+    if (error) throw error
+
+    // Deduplicate by phone
+    const seen = new Set<string>()
+    const deduped: DecisionMakerRow[] = []
+    for (const row of (data ?? []) as DecisionMakerRow[]) {
+      if (!seen.has(row.phone)) {
+        seen.add(row.phone)
+        deduped.push(row)
+      }
+    }
+    return deduped
+  } catch (err) {
+    console.error('[getDecisionMakersByOrg] Error fetching decision-makers:', err)
+    return []
+  }
+}
+
+/**
+ * Fetches the decision_alerta row for (org, finca, pest). Returns null when
+ * no row exists (treat as 'not_asked' → outreach allowed).
+ */
+export async function getDecisionAlerta(
+  orgId: string,
+  fincaId: string,
+  pestType: string,
+  client: SupabaseClient = defaultClient,
+): Promise<DecisionAlertaRow | null> {
+  const { data, error } = await client
+    .from('decision_alerta')
+    .select('id, org_id, finca_id, pest_type, status, asked_at, ask_count, updated_at')
+    .eq('org_id', orgId)
+    .eq('finca_id', fincaId)
+    .eq('pest_type', pestType)
+    .maybeSingle()
+  if (error) throw error
+  return (data ?? null) as DecisionAlertaRow | null
+}
+
+/**
+ * Idempotent upsert for decision_alerta. Uses the real UNIQUE constraint
+ * (org_id, finca_id, pest_type). First answer wins (idempotent on conflict).
+ */
+export async function upsertDecisionAlerta(
+  args: Omit<DecisionAlertaRow, 'id' | 'updated_at'>,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const { error } = await client
+    .from('decision_alerta')
+    .upsert(args, { onConflict: 'org_id,finca_id,pest_type' })
+  if (error) throw error
+}
