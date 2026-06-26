@@ -1,11 +1,31 @@
 /**
- * T1.10 — Pure domain logic for configurable alert thresholds.
+ * T1.10 / T2.2 — Pure domain logic for configurable alert thresholds.
  * No I/O. All functions are pure over injected data.
- * Design: §3 (Threshold Resolution), §3.1-3.3.
+ * Design: §3 (Threshold Resolution), §3.1-3.3, §6.1 (Generic fireAlerts).
  */
 import type { UmbralesSeveridad } from './SigatokaHandler.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/** A single fired alert produced by fireAlerts (design §6.1). */
+export interface FiredAlert {
+  finca_id: string
+  pest_type: string
+  campo: string
+  /** Observed value that crossed the threshold. */
+  value: number
+  /** The threshold value from the resolved rule. */
+  threshold: number
+  operador: 'gt' | 'gte' | 'lt' | 'lte'
+}
+
+/** Input context for fireAlerts — the (finca, pest) context + observations. */
+export interface PestObservation {
+  finca_id: string
+  pest_type: string
+  /** Mapped observations: campo → numeric value (output of extractObservation). */
+  observations: Record<string, number>
+}
 
 /** Row shape from the umbrales_alerta table (design §2.1). */
 export interface UmbralAlertaRow {
@@ -248,4 +268,51 @@ export function toUmbralesSeveridad(resolved: ResolvedUmbrales): UmbralesSeverid
     ee2Leve:            get('ee2Leve', Infinity),
     hojasFuncionalesMin: get('hojasFuncionalesMin', -Infinity),
   }
+}
+
+// ─── fireAlerts ───────────────────────────────────────────────────────────────
+
+/**
+ * T2.2 — Generic per-pest alert firing predicate (design §6.1).
+ * Pure — no I/O.
+ *
+ * For each campo in `resolved`, checks whether the corresponding observed value
+ * (from `ctx.observations`) crosses the rule using the rule's operador.
+ * Rules without an observed value are skipped silently (not logged — the absence
+ * of a campo in the observation set is a normal case, not a warning).
+ *
+ * Returns FiredAlert[] (possibly empty). Sigatoka keeps its rich rendering via
+ * buildWhatsappSummary; only the firing DECISION is now generic here (design §6.1).
+ */
+export function fireAlerts(
+  resolved: ResolvedUmbrales,
+  ctx: PestObservation,
+): FiredAlert[] {
+  const fired: FiredAlert[] = []
+
+  for (const [campo, rule] of Object.entries(resolved)) {
+    const observed = ctx.observations[campo]
+    if (observed === undefined) continue
+
+    let crosses = false
+    switch (rule.operador) {
+      case 'gt':  crosses = observed >  rule.valor; break
+      case 'gte': crosses = observed >= rule.valor; break
+      case 'lt':  crosses = observed <  rule.valor; break
+      case 'lte': crosses = observed <= rule.valor; break
+    }
+
+    if (crosses) {
+      fired.push({
+        finca_id:  ctx.finca_id,
+        pest_type: ctx.pest_type,
+        campo,
+        value:     observed,
+        threshold: rule.valor,
+        operador:  rule.operador,
+      })
+    }
+  }
+
+  return fired
 }
