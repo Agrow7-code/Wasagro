@@ -37,6 +37,7 @@ function crearThenable(result: unknown) {
     neq: vi.fn().mockReturnThis(),
     gt: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
@@ -55,6 +56,7 @@ function crearSupabaseMock() {
     neq: vi.fn().mockReturnThis(),
     gt: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
@@ -443,6 +445,46 @@ describe('getUmbralesAlerta', () => {
     expect(Array.isArray(result)).toBe(true)
   })
 
+  it('returns org-default (finca_id NULL) rows — SQL NULL-safe via finca_scope OR (Fix 1)', async () => {
+    // This test verifies Fix 1: the query uses .or('finca_id.eq.F001,finca_id.is.null')
+    // NOT .in('finca_id', ['F001', null]), which would never match NULL rows in SQL.
+    const orgDefaultRow = { org_id: 'ORG001', finca_id: null, finca_scope: '*', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', valor: 10, enabled: true }
+    const orMock = vi.fn().mockReturnThis()
+    const thenFn = (resolve: (v: unknown) => unknown) => Promise.resolve({ data: [orgDefaultRow], error: null }).then(resolve)
+    const chainMock = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      or: orMock,
+      then: thenFn,
+    }
+    const mock = { from: vi.fn().mockReturnValue(chainMock) }
+
+    const result = await getUmbralesAlerta('ORG001', 'F001', 'sigatoka_negra', mock as any)
+    // Must have used .or() — not .in('finca_id', ...) which never matches NULLs
+    expect(orMock).toHaveBeenCalled()
+    const orArg: string = orMock.mock.calls[0][0]
+    expect(orArg).toContain('finca_id.is.null')
+    // The org-default row IS returned
+    expect(result).toHaveLength(1)
+    expect(result[0].finca_id).toBeNull()
+  })
+
+  it('resolveUmbrales picks per-finca over org-default when both exist', async () => {
+    // Verifies the full org-default → per-finca precedence end-to-end
+    const { resolveUmbrales } = await import('../../src/pipeline/handlers/umbralesAlerta.js')
+    const rows = [
+      // org-default: ee3a6Severo at 10
+      { id: 'r1', org_id: 'ORG001', finca_id: null, finca_scope: '*', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', operador: 'gt' as const, valor: 10, enabled: true },
+      // per-finca override: ee3a6Severo at 15
+      { id: 'r2', org_id: 'ORG001', finca_id: 'F001', finca_scope: 'F001', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', operador: 'gt' as const, valor: 15, enabled: true },
+    ]
+    const resolved = resolveUmbrales(rows)
+    expect(resolved).not.toBeNull()
+    // Per-finca (15) wins over org-default (10)
+    expect(resolved!['ee3a6Severo'].valor).toBe(15)
+    expect(resolved!['ee3a6Severo'].source).toBe('finca')
+  })
+
   it('returns empty array when no rows exist (silent path)', async () => {
     const mock = crearSupabaseMock()
     const thenableMock = { ...mock._chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data: [], error: null }).then(resolve) }
@@ -468,7 +510,9 @@ describe('getUmbralesAlerta', () => {
 })
 
 describe('upsertUmbralAlerta', () => {
-  it('calls upsert with onConflict targeting the generated column constraint (H8)', async () => {
+  it('calls upsert with named constraint uq_umbrales_alerta_scope (Fix 4 — generated cols need named constraint)', async () => {
+    // Fix 4: onConflict must reference the named UNIQUE constraint, not column list,
+    // because finca_scope is GENERATED ALWAYS and PostgREST rejects generated cols in onConflict.
     const upsertMock = vi.fn().mockResolvedValue({ error: null })
     const mock = { from: vi.fn().mockReturnValue({ upsert: upsertMock }) }
 
@@ -479,7 +523,7 @@ describe('upsertUmbralAlerta', () => {
 
     expect(upsertMock).toHaveBeenCalledWith(
       expect.objectContaining({ org_id: 'ORG001', campo: 'ee3a6Severo' }),
-      expect.objectContaining({ onConflict: 'org_id,finca_scope,pest_type,campo' }),
+      expect.objectContaining({ onConflict: 'uq_umbrales_alerta_scope' }),
     )
   })
 

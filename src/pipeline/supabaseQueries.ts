@@ -1028,12 +1028,17 @@ export async function getUmbralesAlerta(
   pestType: string,
   client: SupabaseClient = defaultClient,
 ): Promise<UmbralAlertaRow[]> {
-  const { data, error } = await client
+  // Fix 1: .in('finca_id', [fincaId, null]) never matches NULL rows because SQL
+  // `col IN (..., NULL)` uses `=` which is UNKNOWN for NULLs.  Use .or() so that
+  // org-default rows (finca_id IS NULL) are actually returned and resolveUmbrales
+  // sees them.
+  let q = client
     .from('umbrales_alerta')
     .select('id, org_id, finca_id, finca_scope, pest_type, campo, operador, valor, enabled')
     .eq('org_id', orgId)
-    .eq('pest_type', pestType)
-    .in('finca_id', [fincaId, null])
+    .or(`finca_id.eq.${fincaId},finca_id.is.null`)
+  if (pestType) q = (q as any).eq('pest_type', pestType)
+  const { data, error } = await q
   if (error) throw error
   return (data ?? []) as UmbralAlertaRow[]
 }
@@ -1059,14 +1064,27 @@ export async function upsertUmbralAlerta(
   }
   if (args.updated_by) row['updated_by'] = args.updated_by
 
+  // Fix 4: finca_scope is GENERATED ALWAYS — PostgREST rejects generated columns
+  // in onConflict column lists. Use the named UNIQUE constraint instead (H8).
   const { error } = await client
     .from('umbrales_alerta')
-    .upsert(row, { onConflict: 'org_id,finca_scope,pest_type,campo' })
+    .upsert(row, { onConflict: 'uq_umbrales_alerta_scope' })
   if (error) throw error
 }
 
 /**
- * Resolves org decision-makers: only director and admin_org with onboarding_completo.
+ * Resolves org decision-makers for alert outreach (PR#3): only admin_org and director
+ * with onboarding_completo for THIS org (queried by org_id).
+ *
+ * Fix 8 — director org_id design choice:
+ * All users (including directors) have org_id NOT NULL (migration 007).
+ * Directors with org_id = ORG001 will NOT appear in the decision-maker list for ORG002.
+ * This is intentional: per-org field alert decisions go to the org's own admin_org.
+ * Wasagro's internal director (Henry) is not a per-org decision-maker for field alerts
+ * — he monitors via the back-office D28 dashboard, not via WhatsApp field outreach.
+ * If a director must receive per-org alerts, they should be enrolled as admin_org for
+ * that org, or this function must be extended for PR#3.
+ *
  * NOT propietario/administrador (would fan out per finca, H7, design §5).
  * Deduplicates by phone so a user with two roles only gets one message.
  * Never throws — returns empty array on DB error (R4: zero decision-makers → no outreach, P2/P7).
