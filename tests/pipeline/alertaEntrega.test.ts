@@ -1,9 +1,7 @@
 /**
  * T2.3 / T2.5 / T2.7 — Tests for the alert delivery orchestration.
- * Written FIRST (TDD RED phase). Covers:
- *   T2.3 — quarantine bypass: alerta_cuarentena pests always fire, no config needed
- *   T2.5 — non-Sigatoka real-time delivery: configured pest crossing threshold → WhatsApp
- *   T2.7 — M12 founder-shadow: first alert per (finca, pest) routed via founder preview
+ * Remediation batch: idempotency (#1), cross-tenant (#4), no-recipients (#5),
+ * missing-orgId quarantine (#6), M12 disabled (#3), enviarTexto partial failure (#8).
  *
  * Design: §6.2, §6.3, §6.4
  */
@@ -33,7 +31,7 @@ function makeSender(): IWhatsAppSender & { calls: Array<{ to: string; msg: strin
   }
 }
 
-// Helper: minimal admin rows
+// Helper: minimal admin rows (full AdminRow shape with org_id for cross-tenant check)
 const adminA: AdminRow = { id: 'u1', phone: '5930001111', nombre: 'Ana', rol: 'administrador', org_id: 'ORG001', finca_id: 'F001', email: null, onboarding_completo: true, consentimiento_datos: true, status: 'active' }
 const adminB: AdminRow = { id: 'u2', phone: '5930002222', nombre: 'Bob', rol: 'propietario', org_id: 'ORG001', finca_id: 'F001', email: null, onboarding_completo: true, consentimiento_datos: true, status: 'active' }
 
@@ -157,6 +155,103 @@ describe('T2.3 quarantine bypass', () => {
     expect(result.alert_sent).toBe(false)
     expect(result.reason).toBe('unconfigured')
     expect(sender.calls).toHaveLength(0)
+  })
+
+  // Fix #5 — quarantine with 0 recipients returns alert_sent:false, reason:'no_recipients'
+  it('quarantine: no admins AND no decision-makers → alert_sent:false, reason:no_recipients', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    getAdminsByFinca.mockResolvedValue([])
+    getDecisionMakersByOrg.mockResolvedValue([])
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moko_bacteriano',
+      pest_nombre_comun: 'Moko bacteriano',
+      is_quarantine: true,
+      campos_extraidos: {},
+      traceId: 'trace-q5',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    expect(result.alert_sent).toBe(false)
+    expect(result.reason).toBe('no_recipients')
+    expect(sender.calls).toHaveLength(0)
+  })
+
+  // Fix #6 — quarantine fires without orgId (finca-scoped delivery)
+  it('quarantine fires without orgId — finca-scoped delivery (no getDecisionMakersByOrg called)', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: '', // no org available
+      pest_type: 'moko_bacteriano',
+      pest_nombre_comun: 'Moko bacteriano',
+      is_quarantine: true,
+      campos_extraidos: {},
+      traceId: 'trace-q6',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    // Should fire to finca admins even without org
+    expect(result.alert_sent).toBe(true)
+    expect(result.reason).toBe('quarantine')
+    // getDecisionMakersByOrg must NOT be called when org_id is empty
+    expect(getDecisionMakersByOrg).not.toHaveBeenCalled()
+    // Finca admins still receive the alert
+    expect(sender.calls.map(c => c.to)).toContain(adminA.phone)
+  })
+
+  // Fix #8 — enviarTexto throwing mid-loop: remaining recipients still sent, partial failure reflected
+  it('quarantine: enviarTexto throws for first recipient — remaining still sent', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    // Two admins, one decision-maker. enviarTexto throws on first call only.
+    let callCount = 0
+    const throwingSender = {
+      calls: [] as Array<{ to: string; msg: string }>,
+      enviarTexto: vi.fn(async (to: string, msg: string) => {
+        callCount++
+        if (callCount === 1) throw new Error('simulated send failure')
+        throwingSender.calls.push({ to, msg })
+      }),
+      enviarTemplate: vi.fn(async () => {}),
+    }
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moko_bacteriano',
+      pest_nombre_comun: 'Moko bacteriano',
+      is_quarantine: true,
+      campos_extraidos: {},
+      traceId: 'trace-q7',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender: throwingSender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+    }
+
+    // Should not throw despite partial failure
+    const result = await entregarAlertaPlaga(ctx, deps)
+    // The alert was attempted — partial success still marks alert_sent:true
+    expect(result.alert_sent).toBe(true)
+    // At least 2 sends were attempted (3 targets: adminA, adminB, dmC); first failed, rest succeeded
+    expect(throwingSender.calls.length).toBeGreaterThanOrEqual(2)
   })
 })
 
@@ -302,12 +397,16 @@ describe('T2.5 non-Sigatoka delivery', () => {
     })
   })
 
-  it('alert delivery dedupes — same phone appears only once even if in admins AND decision-makers', async () => {
+  // Fix T2.5 dedup: non-quarantine path only calls getAdminsByFinca (not getDecisionMakersByOrg).
+  // Dedup test for non-quarantine should only use admins list (design §5 ADR-F).
+  it('alert delivery dedupes — same phone appears only once when duplicated in admins list', async () => {
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
-    // Same phone in both admins and decision-makers
+    // Two admin rows with the same phone (same person with two role records)
     const samePhone = '5930001111'
-    getAdminsByFinca.mockResolvedValue([{ ...adminA, phone: samePhone }])
-    getDecisionMakersByOrg.mockResolvedValue([{ ...dmC, phone: samePhone }])
+    getAdminsByFinca.mockResolvedValue([
+      { ...adminA, phone: samePhone },
+      { ...adminB, phone: samePhone },
+    ])
     getUmbralesAlerta.mockResolvedValue([
       {
         id: 'r4', org_id: 'ORG001', finca_id: null, finca_scope: '*',
@@ -334,12 +433,50 @@ describe('T2.5 non-Sigatoka delivery', () => {
     await entregarAlertaPlaga(ctx, deps)
     const callsToSamePhone = sender.calls.filter(c => c.to === samePhone)
     expect(callsToSamePhone).toHaveLength(1)
+    // Non-quarantine path must NOT call getDecisionMakersByOrg (design §5 ADR-F)
+    expect(getDecisionMakersByOrg).not.toHaveBeenCalled()
+  })
+
+  // Fix #5 — non-quarantine: no admins after org filter → alert_sent:false, reason:no_recipients
+  it('no admins after cross-tenant org filter → alert_sent:false, reason:no_recipients', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    // Admin belongs to different org (cross-tenant contamination scenario)
+    getAdminsByFinca.mockResolvedValue([{ ...adminA, org_id: 'ORG999' }])
+    getUmbralesAlerta.mockResolvedValue([
+      {
+        id: 'r6', org_id: 'ORG001', finca_id: null, finca_scope: '*',
+        pest_type: 'moniliasis', campo: 'pct_afectado', operador: 'gt', valor: 10, enabled: true,
+      },
+    ])
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moniliasis',
+      pest_nombre_comun: 'Moniliasis',
+      is_quarantine: false,
+      campos_extraidos: { pct_afectado: 25 },
+      traceId: 'trace-m6',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    expect(result.alert_sent).toBe(false)
+    expect(result.reason).toBe('no_recipients')
+    expect(sender.calls).toHaveLength(0)
   })
 })
 
-// ─── T2.7 — M12 founder-shadow (first alert per finca+pest) ───────────────────
+// ─── T2.7 — M12 founder-shadow (DISABLED until PR#3) ─────────────────────────
+// Fix #3: is_first_alert is always false in the implementation (M12 deferred to PR#3).
+// Tests verify the DISABLED behavior: no preview ever, even with founderShadow=true + is_first_alert=true.
 
-describe('T2.7 M12 founder-shadow', () => {
+describe('T2.7 M12 founder-shadow (disabled until PR#3)', () => {
   let sender: ReturnType<typeof makeSender>
   let getAdminsByFinca: Mock
   let getDecisionMakersByOrg: Mock
@@ -357,7 +494,9 @@ describe('T2.7 M12 founder-shadow', () => {
     ])
   })
 
-  it('ALERT_FOUNDER_SHADOW=true + first alert → founder receives preview before client', async () => {
+  // M12 is fully disabled: even with founderShadow=true + is_first_alert=true, no preview.
+  // The implementation forces is_first_alert=false (// M12 deferred to PR#3).
+  it('ALERT_FOUNDER_SHADOW=true + is_first_alert=true → NO preview (M12 disabled until PR#3)', async () => {
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
     const founderPhone = '5930009999'
     const ctx: AlertaEntregaContext = {
@@ -368,7 +507,7 @@ describe('T2.7 M12 founder-shadow', () => {
       is_quarantine: false,
       campos_extraidos: { pct_afectado: 25 },
       traceId: 'trace-s1',
-      is_first_alert: true, // signal that this is the first alert for (finca, pest)
+      is_first_alert: true, // caller sets this; implementation ignores it until PR#3
     }
     const deps: AlertaEntregaDeps = {
       sender,
@@ -381,10 +520,10 @@ describe('T2.7 M12 founder-shadow', () => {
 
     const result = await entregarAlertaPlaga(ctx, deps)
     expect(result.alert_sent).toBe(true)
-    // Founder should have received a preview message
+    // M12 disabled: founder must NOT receive a preview (is_first_alert always false internally)
     const founderCalls = sender.calls.filter(c => c.to === founderPhone)
-    expect(founderCalls.length).toBeGreaterThan(0)
-    // Client admin should also receive the alert
+    expect(founderCalls).toHaveLength(0)
+    // Client admin still receives the alert
     const clientCalls = sender.calls.filter(c => c.to === adminA.phone)
     expect(clientCalls.length).toBeGreaterThan(0)
   })
@@ -442,5 +581,148 @@ describe('T2.7 M12 founder-shadow', () => {
     await entregarAlertaPlaga(ctx, deps)
     const founderCalls = sender.calls.filter(c => c.to === founderPhone)
     expect(founderCalls).toHaveLength(0)
+  })
+})
+
+// ─── Idempotency guard (#1) ────────────────────────────────────────────────────
+
+describe('Idempotency guard (#1)', () => {
+  let sender: ReturnType<typeof makeSender>
+  let getAdminsByFinca: Mock
+  let getDecisionMakersByOrg: Mock
+  let getUmbralesAlerta: Mock
+
+  beforeEach(() => {
+    sender = makeSender()
+    getAdminsByFinca = vi.fn().mockResolvedValue([adminA])
+    getDecisionMakersByOrg = vi.fn().mockResolvedValue([])
+    getUmbralesAlerta = vi.fn().mockResolvedValue([
+      {
+        id: 'r7', org_id: 'ORG001', finca_id: null, finca_scope: '*',
+        pest_type: 'moniliasis', campo: 'pct_afectado', operador: 'gt', valor: 10, enabled: true,
+      },
+    ])
+  })
+
+  it('markAlertaEntregada returns false → alert skipped (already_sent), no enviarTexto', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    const markAlertaEntregada = vi.fn().mockResolvedValue(false) // already marked
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moniliasis',
+      pest_nombre_comun: 'Moniliasis',
+      is_quarantine: false,
+      campos_extraidos: { pct_afectado: 25 },
+      traceId: 'trace-idem1',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+      markAlertaEntregada,
+      eventId: 'evt-001',
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    expect(result.alert_sent).toBe(false)
+    expect(result.reason).toBe('already_sent')
+    expect(sender.calls).toHaveLength(0)
+  })
+
+  it('markAlertaEntregada returns true → alert proceeds normally (fresh delivery)', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    const markAlertaEntregada = vi.fn().mockResolvedValue(true) // fresh
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moniliasis',
+      pest_nombre_comun: 'Moniliasis',
+      is_quarantine: false,
+      campos_extraidos: { pct_afectado: 25 },
+      traceId: 'trace-idem2',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+      markAlertaEntregada,
+      eventId: 'evt-002',
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    expect(result.alert_sent).toBe(true)
+    expect(sender.calls.length).toBeGreaterThan(0)
+  })
+
+  it('retry simulation: second call with same eventId skips re-send', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    // First call: fresh (returns true). Second call (retry): already sent (returns false).
+    const markAlertaEntregada = vi.fn()
+      .mockResolvedValueOnce(true)   // first call: fresh
+      .mockResolvedValueOnce(false)  // second call: already marked
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moniliasis',
+      pest_nombre_comun: 'Moniliasis',
+      is_quarantine: false,
+      campos_extraidos: { pct_afectado: 25 },
+      traceId: 'trace-idem3',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined,
+      markAlertaEntregada,
+      eventId: 'evt-003',
+    }
+
+    const first = await entregarAlertaPlaga(ctx, deps)
+    expect(first.alert_sent).toBe(true)
+
+    const retry = await entregarAlertaPlaga(ctx, deps)
+    expect(retry.alert_sent).toBe(false)
+    expect(retry.reason).toBe('already_sent')
+
+    // enviarTexto called only once across both attempts
+    expect(sender.calls).toHaveLength(1)
+  })
+
+  it('quarantine bypass ignores idempotency guard (always fires)', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    // markAlertaEntregada returns false — but quarantine should still fire
+    const markAlertaEntregada = vi.fn().mockResolvedValue(false)
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moko_bacteriano',
+      pest_nombre_comun: 'Moko bacteriano',
+      is_quarantine: true, // bypass
+      campos_extraidos: {},
+      traceId: 'trace-idem4',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca: vi.fn().mockResolvedValue([adminA]),
+      getDecisionMakersByOrg: vi.fn().mockResolvedValue([]),
+      getUmbralesAlerta,
+      founderPhone: undefined,
+      markAlertaEntregada,
+      eventId: 'evt-004',
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    // Quarantine always fires regardless of idempotency marker
+    expect(result.alert_sent).toBe(true)
+    expect(result.reason).toBe('quarantine')
+    // markAlertaEntregada must NOT have been called for quarantine (H3/ADR-G)
+    expect(markAlertaEntregada).not.toHaveBeenCalled()
   })
 })
