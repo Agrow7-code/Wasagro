@@ -5,10 +5,13 @@ import { langfuse } from '../integrations/langfuse.js'
 import { crearLLM } from '../integrations/llm/index.js'
 import type { IWasagroLLM, CostContext } from '../integrations/llm/IWasagroLLM.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/EventoCampo.js'
-import { marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
+import { marcarIntencionCompletada, marcarIntencionFallida, getAdminsByFinca, getDecisionMakersByOrg, getUmbralesAlerta } from '../pipeline/supabaseQueries.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
 import { buildFeedbackRecibo } from '../pipeline/feedbackBuilder.js'
 import { normalizarPlaga } from '../pipeline/plagaNormalizer.js'
+import { canonicalPestType } from '../pipeline/handlers/umbralesAlerta.js'
+import { entregarAlertaPlaga } from '../pipeline/alertaEntrega.js'
+import { isAlertDeliveryEnabled } from './alertDeliveryGate.js'
 
 let boss: PgBoss
 
@@ -164,6 +167,10 @@ async function procesarIntencionWorker(
     }
 
     // Normalizar nombre de plaga al canónico del cultivo (determinista, no depende del LLM)
+    let alertaCuarentena = false
+    let plagaNombreComun: string | null = null
+    let plagaPestType: string | null = null
+
     if (ext.tipo_evento === 'plaga') {
       const c = ext.campos_extraidos as Record<string, unknown>
       const normalizado = normalizarPlaga(
@@ -177,6 +184,9 @@ async function procesarIntencionWorker(
           nombre_comun: normalizado.nombre_comun,
           nombre_cientifico: normalizado.nombre_cientifico,
         }
+        alertaCuarentena = normalizado.alerta_cuarentena
+        plagaNombreComun = normalizado.nombre_comun
+        plagaPestType = canonicalPestType(normalizado.nombre_comun)
         if (normalizado.alerta_cuarentena) {
           ext.alerta_urgente = true
         }
@@ -193,6 +203,8 @@ async function procesarIntencionWorker(
         level: 'WARNING',
         input: { finca_id: data.fincaId, campos: ext.campos_extraidos },
       })
+      // Alert delivery is deferred to AFTER marcarIntencionCompletada below (P7 fix #2):
+      // we must not notify about field data that hasn't been recorded yet.
     }
 
     // No guardar en DB todavía — esperamos confirmación del agricultor
@@ -202,6 +214,72 @@ async function procesarIntencionWorker(
       ext as unknown as Record<string, unknown>,
       '',
     )
+
+    // T2.4 / T2.6 / T2.8 — PR#2: Alert delivery capability (tested, wired, but gated OFF).
+    //
+    // Live delivery gated OFF until PR#3 wires it at the confirmation point
+    // (event_id idempotency + decision_alerta). Do not enable in prod until then.
+    //
+    // WHY GATED: at this point in the flow the farmer has NOT confirmed yet —
+    // eventos_campo has no row, so there is no event_id to key idempotency on.
+    // Code after this block (sesiones_activas UPDATE ~line 303, lotes query) can throw,
+    // triggering a pgBoss retry (retryLimit=3) which would re-deliver the alert.
+    // PR#3 will call entregarAlertaPlaga from EventHandler (confirmation point) where
+    // the event IS persisted and event_id is available for the dedup guard.
+    //
+    // §6.3 Quarantine bypass, §6.2 Non-Sigatoka delivery, §6.4 M12 founder-shadow
+    // are fully implemented and tested in alertaEntrega.ts — this gate is the only
+    // thing standing between the tested capability and a double-send risk in prod.
+    //
+    // To enable for testing: ALERT_DELIVERY_ENABLED=true (never set in prod until PR#3).
+    if (isAlertDeliveryEnabled() && ext.alerta_urgente && plagaPestType) {
+      const sender = crearSenderWhatsApp()
+      const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
+
+      // Fix #6: quarantine must fire even without orgId (finca-scoped delivery).
+      // Non-quarantine requires orgId to resolve org-scoped thresholds.
+      const shouldDeliver = alertaCuarentena || Boolean(data.orgId)
+
+      if (!shouldDeliver) {
+        console.error('[pgBoss] alerta_urgente: non-quarantine pest with no orgId — cannot resolve thresholds, skipping delivery', {
+          finca_id: data.fincaId, pest_type: plagaPestType, traceId: data.traceId,
+        })
+      } else {
+        const deliveryResult = await entregarAlertaPlaga(
+          {
+            finca_id: data.fincaId,
+            // When orgId is absent (quarantine finca-only path), pass empty string.
+            // entregarAlertaPlaga handles quarantine without orgId (finca admins only).
+            org_id: data.orgId ?? '',
+            pest_type: plagaPestType,
+            pest_nombre_comun: plagaNombreComun ?? plagaPestType,
+            is_quarantine: alertaCuarentena,
+            campos_extraidos: ext.campos_extraidos as Record<string, unknown>,
+            traceId: data.traceId,
+            // M12 deferred to PR#3 (needs decision_alerta.ask_count); always false until then.
+            is_first_alert: false,
+          },
+          {
+            sender,
+            getAdminsByFinca,
+            getDecisionMakersByOrg,
+            getUmbralesAlerta: (orgId, fincaId, pestType) =>
+              getUmbralesAlerta(orgId, fincaId, pestType),
+            founderPhone,
+            // M12 deferred to PR#3 — keep founderShadow wired but is_first_alert=false makes it inert.
+            founderShadow: process.env['ALERT_FOUNDER_SHADOW'] === 'true',
+          },
+        ).catch((deliveryErr: unknown) => {
+          console.error('[pgBoss] entregarAlertaPlaga failed (non-blocking):', deliveryErr)
+          return null
+        })
+
+        langfuse.trace({ id: data.traceId }).event({
+          name: 'alerta_plaga_delivery',
+          output: deliveryResult ?? { alert_sent: false, error: 'delivery_threw' },
+        })
+      }
+    }
 
     generation.end({
       output: { status: 'pending_confirmation', todas_completas },

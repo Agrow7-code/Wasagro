@@ -10,8 +10,11 @@ import {
   extractObservation,
   resolveUmbrales,
   toUmbralesSeveridad,
+  fireAlerts,
   PEST_ALERT_FIELDS,
   type UmbralAlertaRow,
+  type ResolvedUmbrales,
+  type FiredAlert,
 } from '../../src/pipeline/handlers/umbralesAlerta.js'
 
 // ─── canonicalPestType ────────────────────────────────────────────────────────
@@ -194,6 +197,104 @@ describe('toUmbralesSeveridad', () => {
     expect(umb.ee2Avanzado).toBe(Infinity)
     expect(umb.hojasFuncionalesMin).toBe(-Infinity)
     expect(umb.ee2Leve).toBe(Infinity)
+  })
+})
+
+// ─── T2.1 fireAlerts ─────────────────────────────────────────────────────────
+
+describe('fireAlerts', () => {
+  const makeResolved = (overrides: Partial<ResolvedUmbrales> = {}): ResolvedUmbrales => ({
+    ee3a6Severo: { campo: 'ee3a6Severo', operador: 'gt', valor: 10, source: 'org' },
+    hojasFuncionalesMin: { campo: 'hojasFuncionalesMin', operador: 'lt', valor: 9, source: 'org' },
+    ...overrides,
+  })
+
+  it('fires when campo value exceeds gt rule', () => {
+    const resolved = makeResolved()
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: { ee3a6Severo: 15 } })
+    expect(alerts.some(a => a.campo === 'ee3a6Severo')).toBe(true)
+  })
+
+  it('fires when value is below lt rule', () => {
+    const resolved = makeResolved()
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: { hojasFuncionalesMin: 7 } })
+    expect(alerts.some(a => a.campo === 'hojasFuncionalesMin')).toBe(true)
+  })
+
+  it('does not fire when value is below gt threshold', () => {
+    const resolved = makeResolved()
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: { ee3a6Severo: 5 } })
+    expect(alerts.some(a => a.campo === 'ee3a6Severo')).toBe(false)
+  })
+
+  it('does not fire when value is above lt threshold', () => {
+    const resolved = makeResolved()
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: { hojasFuncionalesMin: 12 } })
+    expect(alerts.some(a => a.campo === 'hojasFuncionalesMin')).toBe(false)
+  })
+
+  it('does not fire for a campo not in observations', () => {
+    const resolved = makeResolved()
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: {} })
+    expect(alerts).toHaveLength(0)
+  })
+
+  it('gte fires when value equals threshold', () => {
+    const resolved: ResolvedUmbrales = {
+      pct_afectado: { campo: 'pct_afectado', operador: 'gte', valor: 20, source: 'org' },
+    }
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'moniliasis', observations: { pct_afectado: 20 } })
+    expect(alerts.some(a => a.campo === 'pct_afectado')).toBe(true)
+  })
+
+  it('gt does not fire when value equals threshold (strict)', () => {
+    const resolved: ResolvedUmbrales = {
+      ee3a6Severo: { campo: 'ee3a6Severo', operador: 'gt', valor: 10, source: 'org' },
+    }
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: { ee3a6Severo: 10 } })
+    expect(alerts.some(a => a.campo === 'ee3a6Severo')).toBe(false)
+  })
+
+  it('lte fires when value equals threshold', () => {
+    const resolved: ResolvedUmbrales = {
+      hojasFuncionalesMin: { campo: 'hojasFuncionalesMin', operador: 'lte', valor: 9, source: 'org' },
+    }
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: { hojasFuncionalesMin: 9 } })
+    expect(alerts.some(a => a.campo === 'hojasFuncionalesMin')).toBe(true)
+  })
+
+  it('returns FiredAlert with finca_id, pest_type, campo, value, threshold', () => {
+    const resolved: ResolvedUmbrales = {
+      pct_afectado: { campo: 'pct_afectado', operador: 'gt', valor: 20, source: 'org' },
+    }
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'moniliasis', observations: { pct_afectado: 25 } })
+    expect(alerts).toHaveLength(1)
+    const alert = alerts[0] as FiredAlert
+    expect(alert.finca_id).toBe('F001')
+    expect(alert.pest_type).toBe('moniliasis')
+    expect(alert.campo).toBe('pct_afectado')
+    expect(alert.value).toBe(25)
+    expect(alert.threshold).toBe(20)
+  })
+
+  it('empty resolved → no fires', () => {
+    const alerts = fireAlerts({}, { finca_id: 'F001', pest_type: 'moniliasis', observations: { pct_afectado: 99 } })
+    expect(alerts).toHaveLength(0)
+  })
+
+  it('Sigatoka peorJ/I/H/M shape maps correctly via extractObservation sourceKeys', () => {
+    // Sigatoka uses peorJ as a sourceKey for ee3a6Severo
+    const campos = extractObservation('sigatoka_negra', { peorJ: 15, peorI: 7, peorM: 6 })
+    const resolved: ResolvedUmbrales = {
+      ee3a6Severo: { campo: 'ee3a6Severo', operador: 'gt', valor: 10, source: 'org' },
+      ee2Avanzado: { campo: 'ee2Avanzado', operador: 'gt', valor: 5, source: 'org' },
+      hojasFuncionalesMin: { campo: 'hojasFuncionalesMin', operador: 'lt', valor: 9, source: 'org' },
+    }
+    const alerts = fireAlerts(resolved, { finca_id: 'F001', pest_type: 'sigatoka_negra', observations: campos })
+    const alertCampos = alerts.map(a => a.campo)
+    expect(alertCampos).toContain('ee3a6Severo')
+    expect(alertCampos).toContain('ee2Avanzado')
+    expect(alertCampos).toContain('hojasFuncionalesMin')
   })
 })
 
