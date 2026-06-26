@@ -202,34 +202,55 @@ async function procesarIntencionWorker(
         level: 'WARNING',
         input: { finca_id: data.fincaId, campos: ext.campos_extraidos },
       })
+      // Alert delivery is deferred to AFTER marcarIntencionCompletada below (P7 fix #2):
+      // we must not notify about field data that hasn't been recorded yet.
+    }
 
-      // T2.4 / T2.6 / T2.8 — PR#2: Real alert delivery (previously only logged to LangFuse).
-      //
-      // §6.3 Quarantine bypass: if alerta_cuarentena=true, entregarAlertaPlaga short-circuits
-      //       BEFORE the resolver — always fires, no config needed (P7, ADR-G).
-      // §6.2 Non-Sigatoka delivery: resolveUmbrales → fireAlerts → deliver to finca admins.
-      // §6.4 M12 founder-shadow: first alert per (finca, pest) goes through founder preview
-      //       when ALERT_FOUNDER_SHADOW=true (opt-in off by default, no client surprise).
-      //
-      // Best-effort: delivery errors are caught and logged; they never block confirmation flow.
-      if (plagaPestType && data.orgId) {
-        const sender = crearSenderWhatsApp()
-        const founderShadow = process.env['ALERT_FOUNDER_SHADOW'] === 'true'
-        const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
+    // No guardar en DB todavía — esperamos confirmación del agricultor
+    const { todas_completas, intenciones, transaccion_original } = await marcarIntencionCompletada(
+      data.sessionId,
+      jobId,
+      ext as unknown as Record<string, unknown>,
+      '',
+    )
 
+    // T2.4 / T2.6 / T2.8 — PR#2: Real alert delivery — runs AFTER persistence (P7 fix #2).
+    //
+    // §6.3 Quarantine bypass: if alerta_cuarentena=true, entregarAlertaPlaga short-circuits
+    //       BEFORE the resolver — always fires, no config needed (P7, ADR-G).
+    //       Quarantine fires even without orgId (finca-scoped delivery, fix #6).
+    // §6.2 Non-Sigatoka delivery: resolveUmbrales → fireAlerts → deliver to finca admins.
+    //       Skipped when orgId is absent (cannot resolve org-scoped thresholds).
+    // §6.4 M12 founder-shadow: DISABLED — is_first_alert always false until PR#3
+    //       implements decision_alerta.ask_count gating (fix #3).
+    //
+    // Best-effort: delivery errors are caught and logged; they never block confirmation flow.
+    if (ext.alerta_urgente && plagaPestType) {
+      const sender = crearSenderWhatsApp()
+      const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
+
+      // Fix #6: quarantine must fire even without orgId (finca-scoped delivery).
+      // Non-quarantine requires orgId to resolve org-scoped thresholds.
+      const shouldDeliver = alertaCuarentena || Boolean(data.orgId)
+
+      if (!shouldDeliver) {
+        console.error('[pgBoss] alerta_urgente: non-quarantine pest with no orgId — cannot resolve thresholds, skipping delivery', {
+          finca_id: data.fincaId, pest_type: plagaPestType, traceId: data.traceId,
+        })
+      } else {
         const deliveryResult = await entregarAlertaPlaga(
           {
             finca_id: data.fincaId,
-            org_id: data.orgId,
+            // When orgId is absent (quarantine finca-only path), pass empty string.
+            // entregarAlertaPlaga handles quarantine without orgId (finca admins only).
+            org_id: data.orgId ?? '',
             pest_type: plagaPestType,
             pest_nombre_comun: plagaNombreComun ?? plagaPestType,
             is_quarantine: alertaCuarentena,
             campos_extraidos: ext.campos_extraidos as Record<string, unknown>,
             traceId: data.traceId,
-            // M12: track first alert via decision_alerta absence (no ask_count row yet = first).
-            // For now we don't do a DB lookup here; the pgBoss path treats absence of a prior
-            // fired alert record as "first". PR#3 will refine this with decision_alerta.ask_count.
-            is_first_alert: founderShadow,
+            // M12 deferred to PR#3 (needs decision_alerta.ask_count); always false until then.
+            is_first_alert: false,
           },
           {
             sender,
@@ -238,7 +259,8 @@ async function procesarIntencionWorker(
             getUmbralesAlerta: (orgId, fincaId, pestType) =>
               getUmbralesAlerta(orgId, fincaId, pestType),
             founderPhone,
-            founderShadow,
+            // M12 deferred to PR#3 — keep founderShadow wired but is_first_alert=false makes it inert.
+            founderShadow: process.env['ALERT_FOUNDER_SHADOW'] === 'true',
           },
         ).catch((deliveryErr: unknown) => {
           console.error('[pgBoss] entregarAlertaPlaga failed (non-blocking):', deliveryErr)
@@ -251,14 +273,6 @@ async function procesarIntencionWorker(
         })
       }
     }
-
-    // No guardar en DB todavía — esperamos confirmación del agricultor
-    const { todas_completas, intenciones, transaccion_original } = await marcarIntencionCompletada(
-      data.sessionId,
-      jobId,
-      ext as unknown as Record<string, unknown>,
-      '',
-    )
 
     generation.end({
       output: { status: 'pending_confirmation', todas_completas },
