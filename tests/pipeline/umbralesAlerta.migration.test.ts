@@ -73,23 +73,31 @@ describe('sesiones_activas CHECK constraint — migration 068 contract', () => {
   })
 })
 
-// ─── Fix 3: RLS policy contract — migration 075 ───────────────────────────────
+// ─── Fix 3: RLS policy contract — migrations 075 + 076 ───────────────────────
+// Split into two files (one CREATE POLICY each) to avoid Supabase CLI splitter
+// merging adjacent multi-line-paren statements (SQLSTATE 42601).
 
-describe('RLS policy migration 075 contract', () => {
-  const migrationPath = join(process.cwd(), 'supabase/migrations/20260625000075_rls-policies-umbrales-alerta.sql')
+describe('RLS policy migrations 075 + 076 contract', () => {
+  const path075 = join(process.cwd(), 'supabase/migrations/20260625000075_rls-policies-umbrales-alerta.sql')
+  const path076 = join(process.cwd(), 'supabase/migrations/20260625000076_rls-policies-decision-alerta.sql')
 
-  it('migration file exists', () => {
-    expect(() => readFileSync(migrationPath, 'utf-8')).not.toThrow()
+  it('migration 075 exists', () => {
+    expect(() => readFileSync(path075, 'utf-8')).not.toThrow()
   })
 
-  it('contains CREATE POLICY for umbrales_alerta (service_role only)', () => {
-    const sql = readFileSync(migrationPath, 'utf-8')
+  it('migration 075 contains CREATE POLICY for umbrales_alerta (service_role only)', () => {
+    const sql = readFileSync(path075, 'utf-8')
     expect(sql).toContain('ON umbrales_alerta')
     expect(sql).toContain("auth.role() = 'service_role'")
   })
 
-  it('contains CREATE POLICY for decision_alerta (service_role only)', () => {
-    const sql = readFileSync(migrationPath, 'utf-8')
+  it('migration 076 exists', () => {
+    expect(() => readFileSync(path076, 'utf-8')).not.toThrow()
+  })
+
+  it('migration 076 contains CREATE POLICY for decision_alerta (service_role only)', () => {
+    const sql = readFileSync(path076, 'utf-8')
     expect(sql).toContain('ON decision_alerta')
+    expect(sql).toContain("auth.role() = 'service_role'")
   })
 })
