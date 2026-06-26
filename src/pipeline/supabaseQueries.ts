@@ -519,6 +519,13 @@ export interface AdminRow {
   phone: string
   nombre: string | null
   rol: string
+  /** org_id included so delivery can assert cross-tenant safety (D31). */
+  org_id: string
+  finca_id: string
+  email: string | null
+  onboarding_completo: boolean
+  consentimiento_datos: boolean
+  status: string
 }
 
 export async function getAdminsByFinca(
@@ -527,7 +534,7 @@ export async function getAdminsByFinca(
 ): Promise<AdminRow[]> {
   const { data, error } = await client
     .from('usuarios')
-    .select('id, phone, nombre, rol')
+    .select('id, phone, nombre, rol, org_id, finca_id, email, onboarding_completo, consentimiento_datos, status')
     .eq('finca_id', fincaId)
     .eq('onboarding_completo', true)
     .in('rol', ['propietario', 'administrador', 'gerente'])
