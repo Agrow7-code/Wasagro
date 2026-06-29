@@ -1159,3 +1159,39 @@ export async function upsertDecisionAlerta(
     .upsert(args, { onConflict: 'org_id,finca_id,pest_type' })
   if (error) throw error
 }
+
+/**
+ * Idempotency guard for entregarAlertaPlaga (design §6.2 / remediation #1).
+ *
+ * Attempts to SET alerta_plaga_entregada_at = NOW() on the eventos_campo row
+ * ONLY when the column is currently NULL (meaning "not yet delivered").
+ *
+ * Returns:
+ *   true  — row was updated (this is a fresh delivery; proceed to send)
+ *   false — row was already marked (retry path; skip re-send)
+ *
+ * On DB error: logs and returns true (fail-open — one missed idempotency mark is
+ * safer than silently dropping a real pest alert, P4/P7). Caller should handle
+ * the DB error case conservatively.
+ *
+ * Migration: 20260626000077_add-alerta-plaga-entregada-at.sql (already applied to prod).
+ */
+export async function markAlertaEntregada(
+  eventId: string,
+  client: SupabaseClient = defaultClient,
+): Promise<boolean> {
+  const { data, error } = await client
+    .from('eventos_campo')
+    .update({ alerta_plaga_entregada_at: new Date().toISOString() })
+    .eq('id', eventId)
+    .is('alerta_plaga_entregada_at', null)
+    .select('id')
+
+  if (error) {
+    console.error('[markAlertaEntregada] DB error — failing open (proceeding with delivery):', { eventId, error })
+    return true
+  }
+
+  // If no row was updated, it means alerta_plaga_entregada_at was already set
+  return Array.isArray(data) && data.length > 0
+}
