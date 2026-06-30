@@ -832,12 +832,12 @@ import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
  * Cacao  → kg_mazorca_sana, incidencia_enfermedades
  * Unknown crop → no-op log (P4)
  *
- * NOTE on Sigatoka thresholds: per-farm Sigatoka umbrales are stored in
- * fincas.config.sigatoka_umbrales (written by seedFincaConfig, read by
- * EventHandler via parseFincaUmbrales). We do NOT seed umbrales_metrica
- * for Sigatoka because (a) the DB CHECK only allows bajo/medio/alto/critico
- * and there is no valid band for the EE2-leve alert threshold, and (b)
- * EventHandler does not read from umbrales_metrica for Sigatoka (Fix 1).
+ * NOTE on Sigatoka thresholds (post-PR#4 cutover): per-farm/org Sigatoka umbrales
+ * now live ONLY in the `umbrales_alerta` table (seeded by seedUmbralesAlertaDefaults,
+ * read by EventHandler via getUmbralesAlerta + resolveUmbrales). The old
+ * fincas.config.sigatoka_umbrales path (seedFincaConfig + parseFincaUmbrales) is
+ * DEPRECATED dead code. We do NOT use umbrales_metrica for Sigatoka (its DB CHECK
+ * only allows bajo/medio/alto/critico — no valid band for the alert thresholds).
  *
  * Idempotent: upsert uses onConflict:'nombre,finca_id' backed by migration
  * 20260624000064_metricas-finca-unique-nombre-finca.sql (Fix 2).
@@ -888,9 +888,12 @@ export async function seedMetricasPlantilla(
 }
 
 /**
- * Seeds `fincas.config.sigatoka_umbrales` for banano farms.
- * Reads the current config JSONB, merges the sigatoka_umbrales key, writes back.
- * No-op for non-banano crops. Best-effort (P4): never re-throws.
+ * @deprecated PR#4 cutover — DEAD CODE, no call sites. Sigatoka thresholds now live in
+ * the `umbrales_alerta` table; use `seedUmbralesAlertaDefaults` instead. Kept only until
+ * its tests are removed in a cleanup PR; do NOT wire into new finca-creation paths.
+ *
+ * Seeds `fincas.config.sigatoka_umbrales` for banano farms (legacy path).
+ * Best-effort (P4): never re-throws.
  */
 export async function seedFincaConfig(
   fincaId: string,
@@ -927,6 +930,51 @@ export async function seedFincaConfig(
     }
   } catch (err) {
     console.error('[seedFincaConfig] Error inesperado:', err)
+  }
+}
+
+/**
+ * PR#4 CUTOVER — Seeds org-default `umbrales_alerta` rows for newly onboarded banano orgs.
+ *
+ * Replaces seedFincaConfig as the Sigatoka threshold seed path now that
+ * `umbrales_alerta` is the single source of truth (dual-read removed in PR#4).
+ *
+ * Inserts 4 org-default rows (finca_id=null) for `sigatoka_negra`, mirroring the
+ * values backfilled by migration 073 for pre-existing orgs:
+ *   ee3a6Severo  gt  10  enabled=true   (J — 10% threshold)
+ *   ee2Avanzado  gt   5  enabled=true   (I — 5% threshold)
+ *   hojasFuncionalesMin lt 9 enabled=true  (M — 9 leaves minimum)
+ *   ee2Leve      gt  30  enabled=false  (H — silenced placeholder, D29/P7)
+ *
+ * Idempotent: upsert uses the named unique constraint `uq_umbrales_alerta_scope`
+ * (same as upsertUmbralAlerta, Fix 4). Re-running is a no-op.
+ * Best-effort (P4): never re-throws — logs on error.
+ * No-op for non-banano crops (cacao has no Sigatoka alerts).
+ */
+export async function seedUmbralesAlertaDefaults(
+  orgId: string,
+  cultivo: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const cultivoNorm = cultivo.toLowerCase().trim()
+  if (cultivoNorm !== 'banano') return
+
+  const rows = [
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'ee3a6Severo',        operador: 'gt' as const, valor: 10, enabled: true  },
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'ee2Avanzado',        operador: 'gt' as const, valor: 5,  enabled: true  },
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'hojasFuncionalesMin',operador: 'lt' as const, valor: 9,  enabled: true  },
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'ee2Leve',            operador: 'gt' as const, valor: 30, enabled: false },
+  ]
+
+  try {
+    const { error } = await client
+      .from('umbrales_alerta')
+      .upsert(rows, { onConflict: 'uq_umbrales_alerta_scope' })
+    if (error) {
+      console.error('[seedUmbralesAlertaDefaults] Error sembrando org-defaults en umbrales_alerta:', error)
+    }
+  } catch (err) {
+    console.error('[seedUmbralesAlertaDefaults] Error inesperado:', err)
   }
 }
 

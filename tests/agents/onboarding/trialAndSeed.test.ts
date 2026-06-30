@@ -16,7 +16,7 @@ vi.mock('../../../src/integrations/langfuse.js', () => ({
 }))
 
 // We test the side-effects that handleOnboardingAdmin triggers after
-// finca creation: startTrial, seedMetricasPlantilla, seedFincaConfig.
+// finca creation: startTrial, seedMetricasPlantilla, seedUmbralesAlertaDefaults.
 // Those functions live in supabaseQueries — mock the whole module.
 vi.mock('../../../src/pipeline/supabaseQueries.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/pipeline/supabaseQueries.js')>()
@@ -34,10 +34,10 @@ vi.mock('../../../src/pipeline/supabaseQueries.js', async (importOriginal) => {
     updateFincaCoordenadas: vi.fn().mockResolvedValue(undefined),
     getFincasDisponibles: vi.fn().mockResolvedValue([]),
     getJefeByFinca: vi.fn().mockResolvedValue(null),
-    // The three functions under test for T-14/T-15
+    // PR#4: seedFincaConfig replaced by seedUmbralesAlertaDefaults
     startTrial: vi.fn().mockResolvedValue(undefined),
     seedMetricasPlantilla: vi.fn().mockResolvedValue(undefined),
-    seedFincaConfig: vi.fn().mockResolvedValue(undefined),
+    seedUmbralesAlertaDefaults: vi.fn().mockResolvedValue(undefined),
   }
 })
 
@@ -193,7 +193,10 @@ describe('OnboardingHandler — trial start and farm seed wiring (T-14)', () => 
     )
   })
 
-  it('calls seedFincaConfig with the finca cultivo_principal after onboarding completes', async () => {
+  it('calls seedUmbralesAlertaDefaults with org_id + cultivo_principal after onboarding completes (PR#4)', async () => {
+    // PR#4 cutover: OnboardingHandler now calls seedUmbralesAlertaDefaults(org_id, cultivo)
+    // instead of seedFincaConfig(finca_id, cultivo). The new seed writes to umbrales_alerta
+    // (the new SSOT) rather than fincas.config.sigatoka_umbrales (dual-read removed).
     const sq = supabaseQueriesMod as Record<string, ReturnType<typeof vi.fn>>
     sq['getUserByPhone'].mockResolvedValue(makeUsuario())
     sq['getOrCreateSession'].mockResolvedValue(makeSession())
@@ -214,8 +217,9 @@ describe('OnboardingHandler — trial start and farm seed wiring (T-14)', () => 
 
     await handleOnboardingAdmin(makeMsg() as any, makeUsuario() as any, 'msg-1', 'trace-1')
 
-    expect(sq['seedFincaConfig']).toHaveBeenCalledWith(
-      expect.stringContaining('F'), // fincaId
+    // seedUmbralesAlertaDefaults(org_id, cultivo) — org-scoped seed, not finca-scoped
+    expect(sq['seedUmbralesAlertaDefaults']).toHaveBeenCalledWith(
+      'ORG001', // org_id from makeUsuario()
       'banano',
     )
   })
@@ -238,7 +242,7 @@ describe('OnboardingHandler — trial start and farm seed wiring (T-14)', () => 
 
     expect(sq['startTrial']).not.toHaveBeenCalled()
     expect(sq['seedMetricasPlantilla']).not.toHaveBeenCalled()
-    expect(sq['seedFincaConfig']).not.toHaveBeenCalled()
+    expect(sq['seedUmbralesAlertaDefaults']).not.toHaveBeenCalled()
   })
 
   it('seed failure does not break onboarding (best-effort, P4)', async () => {

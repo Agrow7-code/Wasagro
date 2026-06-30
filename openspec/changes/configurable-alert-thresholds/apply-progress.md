@@ -1,9 +1,9 @@
-# Apply Progress: configurable-alert-thresholds — PR#1 + PR#2 + PR#3a + PR#3b
+# Apply Progress: configurable-alert-thresholds — PR#1 + PR#2 + PR#3a + PR#3b + PR#4
 
-**Branch**: `feat/alert-thresholds-pr3b` (PR#3b: correct delivery wiring + remediation)
-**Latest batch**: PR#3b remediation — 7 remaining fixes (3 commits, 2026-06-30)
+**Branch**: `feat/alert-thresholds-pr4` (PR#4: cutover — umbrales_alerta as sole SSOT)
+**Latest batch**: PR#4 complete — 4 commits (2026-06-30)
 **tsc --noEmit exit**: 0 (zero errors, exactOptionalPropertyTypes enforced)
-**Vitest affected tests**: 73 passed / 0 failed (3 test files; 22 alertaEntrega, 8 alertDeliveryConfirmation, 43 supabaseQueries)
+**Vitest unit tests**: 1055 passed / 0 failed (68 unit test files; 9 integration files skip — pre-existing SUPABASE_URL missing, unrelated)
 
 ---
 
@@ -256,10 +256,41 @@
 | `f1431c8` | fix(event-handler): log no-eventId + getDecisionAlerta failure (remediation Fix3 Fix4) |
 | `6a7e64c` | test(queries): markAlertaEntregada unit tests (remediation Fix5) |
 
-## Deferred to PR#4
+## PR#4 Task Status (feat/alert-thresholds-pr4 — 4 commits, 2026-06-30)
 
-- **T4.x** (PR#4): cutover — remove dual-read, deprecate `SIGATOKA_UMBRAL_EE2_LEVE`, stop writing `sigatoka_umbrales` to `fincas.config`, remove dead pgBoss delivery path.
-- **Flip `ALERT_DELIVERY_ENABLED=true` in prod**: deploy action after PR#3b passes sdd-verify + agrónomo sign-off on quarantine copy (D29 flag in alertaEntrega.ts).
+- [x] **T4.1** Remove dual-read fallback (`ALERT_THRESHOLDS_DUAL_READ` branch) from `EventHandler.finalizarMuestreoSigatoka`. `umbrales_alerta` is now the sole source. Fail-safe preserved: `resolveUmbrales([]) → null → UMBRALES_SEVERIDAD_DEFAULT`. Commit: `97afdc5`
+- [x] **T4.2** Deprecate `SIGATOKA_UMBRAL_EE2_LEVE` env var — no longer read in `UMBRALES_SEVERIDAD_DEFAULT`. `ee2Leve` hardcoded to 101 (silenced) with deprecation note. Commit: `97afdc5`
+- [x] **T4.3** Replace `seedFincaConfig` (writes to `fincas.config.sigatoka_umbrales`) with `seedUmbralesAlertaDefaults` (writes org-default rows to `umbrales_alerta`). New function added to `supabaseQueries.ts`, `OnboardingHandler.ts` updated to call it. Commit: `31cd106`, `df8dae5`
+- [x] **T4.4** Dead pgBoss delivery path verified already removed in PR#3b (commit `c4612b9`). Confirmed: only the confirmation-point path remains in pgBoss.ts. No action needed.
+- [x] **T4.5** Tests: RED → GREEN for `seedUmbralesAlertaDefaults` (5 new tests in farmSeed.test.ts) + post-cutover regression invariant (6 tests: org-default-only finca fires J/I/M). `trialAndSeed.test.ts` updated for new function. Commit: `3ced122`, `df8dae5`
+- [x] **T4.6** `tsc --noEmit` exit 0. `parseFincaUmbrales` import removed from EventHandler (no longer used there). Commit: `97afdc5`
+
+## Commit SHAs (PR#4)
+
+| SHA | Description |
+|-----|-------------|
+| `3ced122` | test(thresholds): RED tests for PR#4 cutover — seedUmbralesAlertaDefaults + org-default invariant |
+| `31cd106` | feat(thresholds): seedUmbralesAlertaDefaults — umbrales_alerta org-default seed (PR#4) |
+| `df8dae5` | feat(onboarding): replace seedFincaConfig with seedUmbralesAlertaDefaults (PR#4 cutover) |
+| `97afdc5` | feat(thresholds): remove dual-read fallback + deprecate SIGATOKA_UMBRAL_EE2_LEVE (PR#4 cutover) |
+
+## Deferred to deploy (NOT PR#4 scope)
+
+- **Flip `ALERT_DELIVERY_ENABLED=true` in prod**: deploy action after sdd-verify passes + agrónomo sign-off on quarantine copy (D29 flag in alertaEntrega.ts).
+- **Env var cleanup**: Remove `ALERT_THRESHOLDS_DUAL_READ` and `SIGATOKA_UMBRAL_EE2_LEVE` from Railway prod env (they are inert now but safe to leave).
+- **`fincas.config.sigatoka_umbrales` column**: Can be left as-is (dead data, no reads). Optional cleanup migration can be added later — not part of PR#4 scope.
+
+---
+
+## PR#4 Risks / Notes
+
+- **Regression safety verified**: Empty `umbrales_alerta` table → `resolveUmbrales([]) → null → UMBRALES_SEVERIDAD_DEFAULT`. J/I/M never silent. Tested in farmSeed.test.ts post-cutover invariant suite.
+- **New org coverage**: Any banano org onboarded after migration 073 now gets org-default rows via `seedUmbralesAlertaDefaults` at onboarding completion. The seed is org-scoped (finca_id=null), matching migration 073 exactly.
+- **`fincas.config.sigatoka_umbrales`**: Dead data — no reads after PR#4. Leave as-is; cleanup migration is optional.
+- **`ALERT_THRESHOLDS_DUAL_READ`**: Env var is now completely inert — the branch that read it is gone. Safe to remove from Railway but not required.
+- **`SIGATOKA_UMBRAL_EE2_LEVE`**: Deprecated. No longer read anywhere. Safe to remove from Railway but not required.
+- **seedFincaConfig**: Still exists in supabaseQueries.ts (not deleted — existing tests in farmSeed.test.ts cover it and it may be used by other tooling). Its call site in OnboardingHandler is replaced; it is now dead code. Can be removed in a future cleanup PR.
+- **M12 re-enable**: Still deferred. Needs delivered-history check.
 
 ---
 
