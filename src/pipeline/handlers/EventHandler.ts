@@ -1040,13 +1040,10 @@ async function finalizarMuestreoSigatoka(
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
 
   // PR#4 cutover: umbrales_alerta is the single source of truth for Sigatoka thresholds.
-  // Dual-read (fincas.config.sigatoka_umbrales fallback) has been removed.
   // Resolution precedence: per-finca rows → org-default rows → UMBRALES_SEVERIDAD_DEFAULT.
   // The fail-safe (UMBRALES_SEVERIDAD_DEFAULT) is EXPLICIT: thresholds are NEVER silent.
   // J>10, I>5, M<9 always fire — even if getUmbralesAlerta returns [] (no rows configured).
   // New orgs get org-default rows seeded by seedUmbralesAlertaDefaults at onboarding.
-  // Note: SIGATOKA_UMBRAL_EE2_LEVE env var is DEPRECATED — has no effect (PR#4, D34).
-  //   Configure ee2Leve per org/finca via the alert config endpoints or umbrales_alerta table.
   let umbralesFinca = UMBRALES_SEVERIDAD_DEFAULT
   if (!ctx.orgId) {
     // Legacy user without org_id: getUmbralesAlerta can't resolve org-default rows, so we

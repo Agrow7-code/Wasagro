@@ -824,7 +824,6 @@ export async function marcarIntencionFallida(
 // All functions are best-effort (P4): they wrap in try/catch and never re-throw,
 // so a seed failure never breaks onboarding or event processing.
 
-import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
 
 /**
  * Seeds default `metricas_finca` rows for a newly created farm.
@@ -832,12 +831,11 @@ import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
  * Cacao  → kg_mazorca_sana, incidencia_enfermedades
  * Unknown crop → no-op log (P4)
  *
- * NOTE on Sigatoka thresholds (post-PR#4 cutover): per-farm/org Sigatoka umbrales
- * now live ONLY in the `umbrales_alerta` table (seeded by seedUmbralesAlertaDefaults,
- * read by EventHandler via getUmbralesAlerta + resolveUmbrales). The old
- * fincas.config.sigatoka_umbrales path (seedFincaConfig + parseFincaUmbrales) is
- * DEPRECATED dead code. We do NOT use umbrales_metrica for Sigatoka (its DB CHECK
- * only allows bajo/medio/alto/critico — no valid band for the alert thresholds).
+ * NOTE on Sigatoka thresholds (PR#4): per-farm/org Sigatoka umbrales live ONLY in
+ * the `umbrales_alerta` table (seeded by seedUmbralesAlertaDefaults, read by
+ * EventHandler via getUmbralesAlerta + resolveUmbrales). We do NOT use
+ * umbrales_metrica for Sigatoka (its DB CHECK only allows bajo/medio/alto/critico —
+ * no valid band for the alert thresholds).
  *
  * Idempotent: upsert uses onConflict:'nombre,finca_id' backed by migration
  * 20260624000064_metricas-finca-unique-nombre-finca.sql (Fix 2).
@@ -887,51 +885,6 @@ export async function seedMetricasPlantilla(
   }
 }
 
-/**
- * @deprecated PR#4 cutover — DEAD CODE, no call sites. Sigatoka thresholds now live in
- * the `umbrales_alerta` table; use `seedUmbralesAlertaDefaults` instead. Kept only until
- * its tests are removed in a cleanup PR; do NOT wire into new finca-creation paths.
- *
- * Seeds `fincas.config.sigatoka_umbrales` for banano farms (legacy path).
- * Best-effort (P4): never re-throws.
- */
-export async function seedFincaConfig(
-  fincaId: string,
-  cultivo: string,
-  client: SupabaseClient = defaultClient,
-): Promise<void> {
-  const cultivoNorm = cultivo.toLowerCase().trim()
-  if (cultivoNorm !== 'banano') return
-
-  try {
-    // Read current config so we can merge without overwriting other keys
-    const { data: fincaRow, error: errRead } = await client
-      .from('fincas')
-      .select('config')
-      .eq('finca_id', fincaId)
-      .maybeSingle()
-    if (errRead) {
-      console.error('[seedFincaConfig] Error leyendo fincas.config:', errRead)
-      return
-    }
-
-    const currentConfig = (fincaRow as { config?: Record<string, unknown> } | null)?.config ?? {}
-    const mergedConfig: Record<string, unknown> = {
-      ...currentConfig,
-      sigatoka_umbrales: UMBRALES_SEVERIDAD_DEFAULT,
-    }
-
-    const { error: errWrite } = await client
-      .from('fincas')
-      .update({ config: mergedConfig })
-      .eq('finca_id', fincaId)
-    if (errWrite) {
-      console.error('[seedFincaConfig] Error escribiendo fincas.config:', errWrite)
-    }
-  } catch (err) {
-    console.error('[seedFincaConfig] Error inesperado:', err)
-  }
-}
 
 /**
  * PR#4 CUTOVER — Seeds org-default `umbrales_alerta` rows for newly onboarded banano orgs.
