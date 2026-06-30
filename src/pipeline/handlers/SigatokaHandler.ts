@@ -833,10 +833,12 @@ export const UMBRALES_SEVERIDAD_DEFAULT: UmbralesSeveridad = {
 export const UMBRAL_EE2_LEVE = UMBRALES_SEVERIDAD_DEFAULT.ee2Leve
 
 /**
+ * @deprecated PR#4 cutover — DEAD CODE in the hot path. EventHandler now reads Sigatoka
+ * thresholds from the `umbrales_alerta` table (getUmbralesAlerta + resolveUmbrales), not
+ * from fincas.config. Kept only until its tests are removed; do NOT re-wire it.
+ *
  * Parses a raw finca.config value for a valid UmbralesSeveridad object.
- * Returns null if the config is absent, the key is missing, or any numeric
- * field is not a finite positive number (fail-safe — never fabricates thresholds, P1).
- * Used by EventHandler to pass per-farm umbrales to buildWhatsappSummary (D29).
+ * Returns null if the config is absent/invalid (fail-safe — never fabricates thresholds, P1).
  */
 export function parseFincaUmbrales(config: unknown): UmbralesSeveridad | null {
   if (config == null || typeof config !== 'object') return null

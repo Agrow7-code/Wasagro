@@ -1048,6 +1048,12 @@ async function finalizarMuestreoSigatoka(
   // Note: SIGATOKA_UMBRAL_EE2_LEVE env var is DEPRECATED — has no effect (PR#4, D34).
   //   Configure ee2Leve per org/finca via the alert config endpoints or umbrales_alerta table.
   let umbralesFinca = UMBRALES_SEVERIDAD_DEFAULT
+  if (!ctx.orgId) {
+    // Legacy user without org_id: getUmbralesAlerta can't resolve org-default rows, so we
+    // fall back to UMBRALES_SEVERIDAD_DEFAULT (J/I/M still fire). Log it so the silent
+    // table-bypass is observable (P4) instead of invisible.
+    console.warn('[finalizarMuestreoSigatoka] org_id ausente — usando UMBRALES_SEVERIDAD_DEFAULT', { fincaId: ctx.fincaId })
+  }
   try {
     const tableRows = await getUmbralesAlerta(ctx.orgId, ctx.fincaId, 'sigatoka_negra')
     const resolved = resolveUmbrales(tableRows)

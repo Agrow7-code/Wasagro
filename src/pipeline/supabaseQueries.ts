@@ -832,12 +832,12 @@ import { UMBRALES_SEVERIDAD_DEFAULT } from './handlers/SigatokaHandler.js'
  * Cacao  → kg_mazorca_sana, incidencia_enfermedades
  * Unknown crop → no-op log (P4)
  *
- * NOTE on Sigatoka thresholds: per-farm Sigatoka umbrales are stored in
- * fincas.config.sigatoka_umbrales (written by seedFincaConfig, read by
- * EventHandler via parseFincaUmbrales). We do NOT seed umbrales_metrica
- * for Sigatoka because (a) the DB CHECK only allows bajo/medio/alto/critico
- * and there is no valid band for the EE2-leve alert threshold, and (b)
- * EventHandler does not read from umbrales_metrica for Sigatoka (Fix 1).
+ * NOTE on Sigatoka thresholds (post-PR#4 cutover): per-farm/org Sigatoka umbrales
+ * now live ONLY in the `umbrales_alerta` table (seeded by seedUmbralesAlertaDefaults,
+ * read by EventHandler via getUmbralesAlerta + resolveUmbrales). The old
+ * fincas.config.sigatoka_umbrales path (seedFincaConfig + parseFincaUmbrales) is
+ * DEPRECATED dead code. We do NOT use umbrales_metrica for Sigatoka (its DB CHECK
+ * only allows bajo/medio/alto/critico — no valid band for the alert thresholds).
  *
  * Idempotent: upsert uses onConflict:'nombre,finca_id' backed by migration
  * 20260624000064_metricas-finca-unique-nombre-finca.sql (Fix 2).
@@ -888,9 +888,12 @@ export async function seedMetricasPlantilla(
 }
 
 /**
- * Seeds `fincas.config.sigatoka_umbrales` for banano farms.
- * Reads the current config JSONB, merges the sigatoka_umbrales key, writes back.
- * No-op for non-banano crops. Best-effort (P4): never re-throws.
+ * @deprecated PR#4 cutover — DEAD CODE, no call sites. Sigatoka thresholds now live in
+ * the `umbrales_alerta` table; use `seedUmbralesAlertaDefaults` instead. Kept only until
+ * its tests are removed in a cleanup PR; do NOT wire into new finca-creation paths.
+ *
+ * Seeds `fincas.config.sigatoka_umbrales` for banano farms (legacy path).
+ * Best-effort (P4): never re-throws.
  */
 export async function seedFincaConfig(
   fincaId: string,
