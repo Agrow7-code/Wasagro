@@ -472,14 +472,13 @@ describe('T2.5 non-Sigatoka delivery', () => {
   })
 })
 
-// ─── T2.7 — M12 founder-shadow (DISABLED — deferred) ────────────────────────
-// M12 is disabled because decision_alerta.ask_count is null for web-configured pests
-// (no outreach row), so ask_count=null → is_first_alert=true on EVERY alert for those pests.
-// is_first_alert is ALWAYS false in alertaEntrega regardless of ctx.is_first_alert.
-// Re-enable when a reliable delivered-history check is in place.
-// Tests verify the DISABLED behavior: no founder preview even with founderShadow=true + is_first_alert=true.
+// ─── T2.7 — M12 founder-shadow (ENABLED — chore/alert-thresholds-cleanup-m12) ─
+// M12 re-enabled using haEntregadoAlertaAntes (delivered-history check on
+// alerta_plaga_entregada_at) — works for web-configured pests (no decision_alerta row).
+// is_first_alert = ctx.is_first_alert ?? false in alertaEntrega.
+// Tests verify: first alert routes to founder preview; subsequent alerts don't.
 
-describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
+describe('T2.7 M12 founder-shadow (ENABLED)', () => {
   let sender: ReturnType<typeof makeSender>
   let getAdminsByFinca: Mock
   let getDecisionMakersByOrg: Mock
@@ -497,9 +496,7 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
     ])
   })
 
-  // M12 DISABLED: founderShadow=true + is_first_alert=true → NO preview (is_first_alert is always false).
-  // Reason: web-configured pests have no decision_alerta row → ask_count=null → true on every alert.
-  it('ALERT_FOUNDER_SHADOW=true + is_first_alert=true → NO founder preview (M12 disabled, ctx.is_first_alert ignored)', async () => {
+  it('ALERT_FOUNDER_SHADOW=true + is_first_alert=true → founder receives preview AND client receives alert', async () => {
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
     const founderPhone = '5930009999'
     const ctx: AlertaEntregaContext = {
@@ -510,7 +507,7 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
       is_quarantine: false,
       campos_extraidos: { pct_afectado: 25 },
       traceId: 'trace-s1',
-      is_first_alert: true, // accepted in ctx but IGNORED by alertaEntrega (M12 disabled)
+      is_first_alert: true, // first ever alert for this (finca, pest)
     }
     const deps: AlertaEntregaDeps = {
       sender,
@@ -523,12 +520,12 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
 
     const result = await entregarAlertaPlaga(ctx, deps)
     expect(result.alert_sent).toBe(true)
-    // M12 DISABLED: founder must NOT receive a preview (is_first_alert is always false internally)
+    // M12 ENABLED: founder must receive a preview
     const founderCalls = sender.calls.filter(c => c.to === founderPhone)
-    expect(founderCalls).toHaveLength(0)
-    // Client admin still receives the alert
-    const clientCalls = sender.calls.filter(c => c.to === adminA.phone)
-    expect(clientCalls.length).toBeGreaterThan(0)
+    expect(founderCalls.length).toBeGreaterThan(0)
+    expect(founderCalls[0]!.msg).toContain('[PREVIEW — primera alerta]')
+    // Client admin also receives the alert
+    expect(sender.calls.filter(c => c.to === adminA.phone).length).toBeGreaterThan(0)
   })
 
   it('ALERT_FOUNDER_SHADOW falsy → no founder preview, direct to admins', async () => {
@@ -560,6 +557,7 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
   })
 
   it('is_first_alert=false → no founder preview even if ALERT_FOUNDER_SHADOW=true', async () => {
+    // Subsequent alert: haEntregadoAlertaAntes returned true → EventHandler passes is_first_alert=false
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
     const founderPhone = '5930009999'
     const ctx: AlertaEntregaContext = {
@@ -570,7 +568,7 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
       is_quarantine: false,
       campos_extraidos: { pct_afectado: 25 },
       traceId: 'trace-s3',
-      is_first_alert: false, // ask_count > 0 → not first alert
+      is_first_alert: false, // prior history exists
     }
     const deps: AlertaEntregaDeps = {
       sender,
@@ -588,7 +586,8 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
     expect(sender.calls.filter(c => c.to === adminA.phone).length).toBeGreaterThan(0)
   })
 
-  it('is_first_alert=undefined → treated as false, no founder preview', async () => {
+  it('is_first_alert=undefined → treated as false (ctx.is_first_alert ?? false), no founder preview', async () => {
+    // Safety: quarantine path / legacy callers don't set is_first_alert
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
     const founderPhone = '5930009999'
     const ctx: AlertaEntregaContext = {
@@ -599,7 +598,7 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
       is_quarantine: false,
       campos_extraidos: { pct_afectado: 25 },
       traceId: 'trace-s4',
-      // is_first_alert omitted (pgBoss path, old extraction, M12 inert)
+      // is_first_alert omitted — defaults to false via ?? false
     }
     const deps: AlertaEntregaDeps = {
       sender,
@@ -613,6 +612,35 @@ describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
     await entregarAlertaPlaga(ctx, deps)
     const founderCalls = sender.calls.filter(c => c.to === founderPhone)
     expect(founderCalls).toHaveLength(0)
+  })
+
+  it('ALERT_FOUNDER_SHADOW=true + is_first_alert=true + no founderPhone → client alert unaffected', async () => {
+    // Edge: shadow enabled but no founder phone configured
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moniliasis',
+      pest_nombre_comun: 'Moniliasis',
+      is_quarantine: false,
+      campos_extraidos: { pct_afectado: 25 },
+      traceId: 'trace-s5',
+      is_first_alert: true,
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca,
+      getDecisionMakersByOrg,
+      getUmbralesAlerta,
+      founderPhone: undefined, // not configured
+      founderShadow: true,
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    expect(result.alert_sent).toBe(true)
+    // No founder phone → no preview sent (guard: founderPhone must be truthy)
+    expect(sender.calls).toHaveLength(1) // only client admin
+    expect(sender.calls.filter(c => c.to === adminA.phone).length).toBeGreaterThan(0)
   })
 })
 

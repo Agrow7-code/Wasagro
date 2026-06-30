@@ -1196,3 +1196,44 @@ export async function markAlertaEntregada(
   // If no row was updated, it means alerta_plaga_entregada_at was already set
   return Array.isArray(data) && data.length > 0
 }
+
+/**
+ * M12 delivered-history check: returns true if ANY pest alert has been delivered
+ * before for this (finca, pestType) combination.
+ *
+ * This is the reliable "is_first_alert" signal that works regardless of whether
+ * the pest was configured via the decision_alerta outreach flow (which has no row
+ * for web-configured pests) or directly via the alert config web endpoints.
+ *
+ * Queries eventos_campo for prior rows with alerta_plaga_entregada_at set,
+ * matching finca_id and the pest name stored in datos_evento.plaga_tipo.
+ *
+ * The pestType parameter must be the same nombre_comun value stored in
+ * datos_evento.plaga_tipo at event save time (e.g. "Moniliasis", "Sigatoka negra").
+ *
+ * On DB error: returns false (fail-safe — assumes NOT first alert to avoid
+ * spamming founder on every delivery when history is unavailable, P7).
+ */
+export async function haEntregadoAlertaAntes(
+  fincaId: string,
+  pestType: string,
+  client: SupabaseClient = defaultClient,
+): Promise<boolean> {
+  try {
+    const { count, error } = await client
+      .from('eventos_campo')
+      .select('id', { count: 'exact', head: true })
+      .eq('finca_id', fincaId)
+      .not('alerta_plaga_entregada_at', 'is', null)
+      .filter('datos_evento->>plaga_tipo', 'eq', pestType)
+
+    if (error) {
+      console.warn('[haEntregadoAlertaAntes] DB error — defaulting to true (not first alert, P7):', { fincaId, pestType, error })
+      return true
+    }
+    return (count ?? 0) > 0
+  } catch (err) {
+    console.warn('[haEntregadoAlertaAntes] unexpected error — defaulting to true (not first alert, P7):', { fincaId, pestType, err })
+    return true
+  }
+}

@@ -42,7 +42,8 @@ vi.mock('../../src/pipeline/supabaseQueries.js', () => ({
   getUmbralesAlerta: vi.fn().mockResolvedValue([]),
   upsertUmbralAlerta: vi.fn().mockResolvedValue(undefined),
   upsertDecisionAlerta: vi.fn().mockResolvedValue(undefined),
-  getDecisionAlerta: vi.fn().mockResolvedValue(null), // null → not_asked → is_first_alert=true
+  getDecisionAlerta: vi.fn().mockResolvedValue(null),
+  haEntregadoAlertaAntes: vi.fn().mockResolvedValue(false), // false → no prior history → is_first_alert=true
   getDecisionMakersByOrg: vi.fn().mockResolvedValue([]),
   getAdminsByFinca: vi.fn().mockResolvedValue([]),
   markAlertaEntregada: vi.fn().mockResolvedValue(true), // fresh delivery by default
@@ -237,7 +238,8 @@ describe('PR#3b — delivery wiring at confirmation point', () => {
     vi.mocked(queries.updateSession).mockResolvedValue(undefined)
     vi.mocked(queries.saveEvento).mockResolvedValue('evt-pr3b')
     vi.mocked(queries.getUserByPhone).mockResolvedValue(agricultor)
-    vi.mocked(queries.getDecisionAlerta).mockResolvedValue(null) // null → is_first_alert=true
+    vi.mocked(queries.getDecisionAlerta).mockResolvedValue(null)
+    vi.mocked(queries.haEntregadoAlertaAntes).mockResolvedValue(false) // false → no history → is_first_alert=true
     vi.mocked(queries.markAlertaEntregada).mockResolvedValue(true)
     vi.mocked(alertaEntregaModule.entregarAlertaPlaga).mockResolvedValue({
       alert_sent: true, finca_id: 'F001', pest_type: 'moniliasis', reason: 'threshold_crossed',
@@ -321,35 +323,71 @@ describe('PR#3b — delivery wiring at confirmation point', () => {
     expect(deliverIdx).toBeGreaterThan(saveIdx)
   })
 
-  it('M12 is_first_alert=true when decision_alerta is null (first ever)', async () => {
+  it('M12 is_first_alert=true when haEntregadoAlertaAntes returns false (no prior history)', async () => {
     process.env['ALERT_DELIVERY_ENABLED'] = 'true'
     vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingConfirmation(true))
-    vi.mocked(queries.getDecisionAlerta).mockResolvedValue(null) // null → not_asked → is_first_alert=true
+    // No prior delivered alert for this finca+pest → is first alert
+    vi.mocked(queries.haEntregadoAlertaAntes).mockResolvedValue(false)
 
     await procesarMensajeEntrante(msgSi(), 'trace-m12-first')
     await new Promise(r => setTimeout(r, 10))
 
     expect(alertaEntregaModule.entregarAlertaPlaga).toHaveBeenCalled()
     const [ctx] = vi.mocked(alertaEntregaModule.entregarAlertaPlaga).mock.calls[0]!
-    // is_first_alert must be true when there's no prior decision_alerta row
+    // No prior history → is_first_alert must be true
     expect(ctx.is_first_alert).toBe(true)
   })
 
-  it('M12 is_first_alert=false when decision_alerta.ask_count > 0 (previously outreached)', async () => {
+  it('M12 is_first_alert=false when haEntregadoAlertaAntes returns true (prior alerts exist)', async () => {
     process.env['ALERT_DELIVERY_ENABLED'] = 'true'
     vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingConfirmation(true))
-    vi.mocked(queries.getDecisionAlerta).mockResolvedValue({
-      id: 'da-1', org_id: 'ORG001', finca_id: 'F001', pest_type: 'moniliasis',
-      status: 'asked', asked_at: null, ask_count: 2, updated_at: undefined,
-    })
+    // Prior delivered alerts exist for this finca+pest
+    vi.mocked(queries.haEntregadoAlertaAntes).mockResolvedValue(true)
 
     await procesarMensajeEntrante(msgSi(), 'trace-m12-repeat')
     await new Promise(r => setTimeout(r, 10))
 
     expect(alertaEntregaModule.entregarAlertaPlaga).toHaveBeenCalled()
     const [ctx] = vi.mocked(alertaEntregaModule.entregarAlertaPlaga).mock.calls[0]!
-    // ask_count=2 → not first alert
+    // Prior history → not first alert
     expect(ctx.is_first_alert).toBe(false)
+  })
+
+  it('M12 web-configured pest (no decision_alerta row) → is_first_alert correctly first-then-not', async () => {
+    // This is the critical regression case: web-configured pests never have a decision_alerta row.
+    // The old ask_count=null approach always resolved to is_first_alert=true (every delivery
+    // looked like the first). haEntregadoAlertaAntes uses delivered history instead.
+    process.env['ALERT_DELIVERY_ENABLED'] = 'true'
+    vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingConfirmation(true))
+
+    // First delivery: no prior history → is first alert
+    vi.mocked(queries.haEntregadoAlertaAntes).mockResolvedValue(false)
+    await procesarMensajeEntrante(msgSi(), 'trace-m12-web-first')
+    await new Promise(r => setTimeout(r, 10))
+
+    const firstCalls = vi.mocked(alertaEntregaModule.entregarAlertaPlaga).mock.calls
+    expect(firstCalls.length).toBeGreaterThanOrEqual(1)
+    const [firstCtx] = firstCalls[0]!
+    expect(firstCtx.is_first_alert).toBe(true)
+
+    // Reset for second delivery
+    vi.clearAllMocks()
+    vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingConfirmation(true))
+    vi.mocked(queries.saveEvento).mockResolvedValue('evt-web-second')
+    vi.mocked(queries.markAlertaEntregada).mockResolvedValue(true)
+    vi.mocked(alertaEntregaModule.entregarAlertaPlaga).mockResolvedValue({
+      alert_sent: true, finca_id: 'F001', pest_type: 'moniliasis', reason: 'threshold_crossed',
+    })
+
+    // Second delivery: prior history exists → NOT first alert
+    vi.mocked(queries.haEntregadoAlertaAntes).mockResolvedValue(true)
+    await procesarMensajeEntrante(msgSi(), 'trace-m12-web-second')
+    await new Promise(r => setTimeout(r, 10))
+
+    const secondCalls = vi.mocked(alertaEntregaModule.entregarAlertaPlaga).mock.calls
+    expect(secondCalls.length).toBeGreaterThanOrEqual(1)
+    const [secondCtx] = secondCalls[0]!
+    expect(secondCtx.is_first_alert).toBe(false)
   })
 })
 

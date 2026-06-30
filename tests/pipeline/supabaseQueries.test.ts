@@ -30,6 +30,8 @@ import {
   upsertDecisionAlerta,
   // Fix 5 (remediation) — idempotency guard for pest alert delivery
   markAlertaEntregada,
+  // M12 — delivered-history check for is_first_alert
+  haEntregadoAlertaAntes,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -671,5 +673,99 @@ describe('markAlertaEntregada', () => {
 
     // Fail-open: returns true so the caller proceeds with delivery rather than dropping the alert
     expect(result).toBe(true)
+  })
+})
+
+// ─── M12 — haEntregadoAlertaAntes unit tests ────────────────────────────────
+// Tests the delivered-history check used for is_first_alert (M12 founder-shadow).
+// Returns true when ANY prior alert was delivered for (finca, pest_type).
+// Returns false when no prior delivered alert exists.
+// On DB error: fail-safe returns true (not first alert) to avoid spamming founder (P7).
+
+describe('haEntregadoAlertaAntes', () => {
+  function crearHistorialMock() {
+    // Chain: .from().select().eq().not().filter() → { count, error }
+    const chain: Record<string, ReturnType<typeof vi.fn>> = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      not: vi.fn().mockReturnThis(),
+      filter: vi.fn(),
+    }
+    const mock = { from: vi.fn().mockReturnValue(chain), _chain: chain }
+    return mock
+  }
+
+  it('prior delivered alert exists → returns true (not first alert)', async () => {
+    const mock = crearHistorialMock()
+    // Simulates: count > 0 (one prior delivered alert found)
+    mock._chain.filter.mockResolvedValue({ count: 1, error: null })
+
+    const result = await haEntregadoAlertaAntes('F001', 'Moniliasis', mock as any)
+
+    expect(result).toBe(true)
+    expect(mock.from).toHaveBeenCalledWith('eventos_campo')
+    expect(mock._chain.eq).toHaveBeenCalledWith('finca_id', 'F001')
+    expect(mock._chain.not).toHaveBeenCalledWith('alerta_plaga_entregada_at', 'is', null)
+    expect(mock._chain.filter).toHaveBeenCalledWith('datos_evento->>plaga_tipo', 'eq', 'Moniliasis')
+  })
+
+  it('no prior delivered alert → returns false (is first alert)', async () => {
+    const mock = crearHistorialMock()
+    // Simulates: count = 0 (no prior delivered alert for this finca+pest)
+    mock._chain.filter.mockResolvedValue({ count: 0, error: null })
+
+    const result = await haEntregadoAlertaAntes('F001', 'Moniliasis', mock as any)
+
+    expect(result).toBe(false)
+  })
+
+  it('count null → returns false (treat as no prior alert)', async () => {
+    const mock = crearHistorialMock()
+    // Edge case: count is null (no rows at all)
+    mock._chain.filter.mockResolvedValue({ count: null, error: null })
+
+    const result = await haEntregadoAlertaAntes('F001', 'Moniliasis', mock as any)
+
+    expect(result).toBe(false)
+  })
+
+  it('web-configured pest with multiple prior alerts → returns true', async () => {
+    // This is the critical regression test: web-configured pests have no decision_alerta row.
+    // haEntregadoAlertaAntes must correctly detect repeat alerts for them via delivered history.
+    const mock = crearHistorialMock()
+    mock._chain.filter.mockResolvedValue({ count: 3, error: null })
+
+    const result = await haEntregadoAlertaAntes('F002', 'Sigatoka negra', mock as any)
+
+    // Three prior delivered alerts → NOT the first alert
+    expect(result).toBe(true)
+  })
+
+  it('DB error → fail-safe returns true (not first alert, avoids founder spam, P7)', async () => {
+    const mock = crearHistorialMock()
+    // DB returns error
+    mock._chain.filter.mockResolvedValue({ count: null, error: { message: 'connection timeout' } })
+
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await haEntregadoAlertaAntes('F001', 'Moniliasis', mock as any)
+    consoleSpy.mockRestore()
+
+    // Fail-safe: returns true so is_first_alert=false, founder preview does NOT fire
+    // (better to miss one founder preview than spam on every delivery on DB error, P7)
+    expect(result).toBe(true)
+  })
+
+  it('different pest on same finca → does not interfere', async () => {
+    // A prior "Moniliasis" alert on F001 must not affect "Sigatoka negra" on F001.
+    // Each pest is queried independently with the full filter.
+    const mock = crearHistorialMock()
+    // count=0 → no prior Sigatoka alerts on this finca
+    mock._chain.filter.mockResolvedValue({ count: 0, error: null })
+
+    const result = await haEntregadoAlertaAntes('F001', 'Sigatoka negra', mock as any)
+
+    expect(result).toBe(false)
+    // Verify filter was called with Sigatoka negra, not Moniliasis
+    expect(mock._chain.filter).toHaveBeenCalledWith('datos_evento->>plaga_tipo', 'eq', 'Sigatoka negra')
   })
 })
