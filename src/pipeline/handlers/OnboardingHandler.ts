@@ -16,7 +16,7 @@ import {
   updateFincaCoordenadas,
   startTrial,
   seedMetricasPlantilla,
-  seedFincaConfig,
+  seedUmbralesAlertaDefaults,
 } from '../supabaseQueries.js'
 import {
   reduceOnboardingContext,
@@ -170,9 +170,12 @@ export async function handleOnboardingAdmin(
           console.error('[pipeline] Error sembrando métricas plantilla en onboarding:', err)
           langfuse.trace({ id: traceId }).event({ name: 'seed_metricas_error', level: 'WARNING', input: { error: String(err), finca_id: fincaId } })
         })
-        await seedFincaConfig(fincaId, cultivoPrincipal).catch(err => {
-          console.error('[pipeline] Error sembrando finca config en onboarding:', err)
-          langfuse.trace({ id: traceId }).event({ name: 'seed_config_error', level: 'WARNING', input: { error: String(err), finca_id: fincaId } })
+        // PR#4 cutover: seed into umbrales_alerta (new SSOT) instead of fincas.config.
+        // seedUmbralesAlertaDefaults inserts org-default rows that are idempotent and
+        // match the migration 073 backfill — new banano orgs get J/I/M alerts from day 1.
+        await seedUmbralesAlertaDefaults(usuario.org_id, cultivoPrincipal).catch(err => {
+          console.error('[pipeline] Error sembrando umbrales_alerta defaults en onboarding:', err)
+          langfuse.trace({ id: traceId }).event({ name: 'seed_umbrales_error', level: 'WARNING', input: { error: String(err), org_id: usuario.org_id } })
         })
       } catch (err) {
         console.error('[pipeline] Error creando finca/lotes en onboarding admin:', err)
