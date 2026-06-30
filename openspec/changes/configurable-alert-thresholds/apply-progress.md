@@ -1,10 +1,9 @@
 # Apply Progress: configurable-alert-thresholds — PR#1 + PR#2 + PR#3a + PR#3b
 
-**Branch**: `feat/alert-thresholds-pr3b` (PR#3b: correct delivery wiring)
-**Latest batch**: PR#3b implementation (2 commits — delivery wiring + tests)
-**Date**: 2026-06-29
+**Branch**: `feat/alert-thresholds-pr3b` (PR#3b: correct delivery wiring + remediation)
+**Latest batch**: PR#3b remediation — 7 remaining fixes (3 commits, 2026-06-30)
 **tsc --noEmit exit**: 0 (zero errors, exactOptionalPropertyTypes enforced)
-**Vitest PR#3b tests**: 79 passed / 0 failed (6 test files; 8 new PR#3b tests + M12 updated)
+**Vitest affected tests**: 73 passed / 0 failed (3 test files; 22 alertaEntrega, 8 alertDeliveryConfirmation, 43 supabaseQueries)
 
 ---
 
@@ -217,20 +216,45 @@
 
 ---
 
-## PR#3b Task Status (feat/alert-thresholds-pr3b — 2 commits)
+## PR#3b Task Status (feat/alert-thresholds-pr3b — 5 commits)
 
 - [x] **PR3b-1** Wire `entregarAlertaPlaga` at EventHandler `pending_confirmation` confirmation point (after `saveEvento`, async fire-and-forget). Pass `eventId` + `markAlertaEntregada` for real idempotency. Gate: `isAlertDeliveryEnabled()` controls the new path.
 - [x] **PR3b-2** Real idempotency: `eventId` from `saveEvento` + `markAlertaEntregada` injected into `entregarAlertaPlaga`. pgBoss retry cannot re-deliver (tested).
-- [x] **PR3b-3** M12 `is_first_alert` via `decision_alerta.ask_count`: `getDecisionAlerta` called at confirmation time; `ask_count=0` or null row → `is_first_alert=true`; `ask_count>0` → `false`. `alertaEntrega` unlocked (no longer hardcoded false).
+- [x] **PR3b-3** M12 `is_first_alert` DISABLED (deferred). `decision_alerta.ask_count` is null for web-configured pests → `is_first_alert=true` on every alert for those pests (false positive). `is_first_alert` is always `false` in `alertaEntrega`. `getDecisionAlerta` still called for DB failure observability (Fix 4).
 - [x] **PR3b-4** DM-reply-before-session-open race: corrupted-ctx guard in `handleAlertConfigSession` (line 1120) covers this — missing `pest_type/finca_id/org_id` → session reset + DM prompt. Confirmed by test.
-- [x] **PR3b-5** Code ready for `ALERT_DELIVERY_ENABLED=true`. pgBoss extraction-stage path remains gated OFF permanently (marked dead, remove in PR#4). Gate comment updated.
+- [x] **PR3b-5** Code ready for `ALERT_DELIVERY_ENABLED=true`. pgBoss extraction-stage path permanently removed (commit c4612b9). Gate flip is safe.
 
-## Commit SHAs (PR#3b — 2 commits)
+## PR#3b Remediation Task Status (3 commits, 2026-06-30)
+
+- [x] **Fix 1 (BLOCKER)** Quarantine dedup: idempotency guard now runs for ALL pests including quarantine. Duplicate confirmation returns `already_sent` instead of double-firing. Test: quarantine + `markAlertaEntregada=false` → `already_sent`, 0 sends. Commit: `f1355b7`
+- [x] **Fix 2 (BLOCKER)** M12 disabled: `is_first_alert` always `false` in `alertaEntrega`. `ctx.is_first_alert` accepted in interface but ignored. M12 preview never fires (founderShadow path unreachable). Commit: `f1355b7`
+- [x] **Fix 3 (CRITICAL P4)** `saveEvento` null + `alerta_urgente`: `console.error` logs finca_id, pest, traceId instead of silent drop. Commit: `f1431c8`
+- [x] **Fix 4 (CRITICAL P4)** `getDecisionAlerta` failure logged (org_id, finca_id, pest_type, traceId, err) before defaulting to `false`. Not swallowed silently. Commit: `f1431c8`
+- [x] **Fix 5 (CRITICAL)** `markAlertaEntregada` unit tests: fresh→true+UPDATE+IS NULL guard, already-set→false, DB error→fail-open true. 3 new tests in `supabaseQueries.test.ts`. Commit: `6a7e64c`
+- [x] **Fix 6 (WARNING)** pgBoss OTP logs: already using `maskPhone()` helper — no ad-hoc slicing found. Verified non-issue (was already done in prior remediation). No action needed.
+- [x] **Fix 7 (DOC)** Idempotency fail-open comment: comprehensive comment at `§0 Idempotency guard` block explaining fail-open rationale post-PR#3b. Commit: `f1355b7`
+- [x] **forbidOnly CI** Verified non-issue: Vitest `allowOnly: !isCI`, `CI=true` in Actions blocks `.only`. No action.
+
+## Commit SHAs (PR#3b — original 2 commits)
 
 | SHA | Description |
 |-----|-------------|
 | `ece104a` | feat(thresholds): wire pest-alert delivery at confirmation point (PR#3b) |
 | `7a15240` | test(thresholds): PR#3b confirmation-point delivery + M12 + race guard (8 tests) |
+
+## Commit SHAs (PR#3b — remediation review #1: dead pgBoss path)
+
+| SHA | Description |
+|-----|-------------|
+| `c4612b9` | fix(thresholds): remove dead pgBoss extraction-stage delivery path (PR#3b review #1) |
+
+## Commit SHAs (PR#3b — remediation review #2: remaining 7 fixes)
+
+| SHA | Description |
+|-----|-------------|
+| `f1355b7` | fix(delivery): quarantine dedup + M12 disable (remediation Fix1 Fix2) |
+| `f1431c8` | fix(event-handler): log no-eventId + getDecisionAlerta failure (remediation Fix3 Fix4) |
+| `6a7e64c` | test(queries): markAlertaEntregada unit tests (remediation Fix5) |
 
 ## Deferred to PR#4
 
@@ -243,7 +267,7 @@
 
 - **ALERT_DELIVERY_ENABLED**: DEFAULT OFF in prod. PR#3b is COMPLETE — the confirmation-point delivery is wired and tested. Flip the flag ONLY after sdd-verify passes + agrónomo sign-off on quarantine copy. Gate lives in `src/workers/alertDeliveryGate.ts`.
 - **Dual-read flag**: `ALERT_THRESHOLDS_DUAL_READ=true` required in prod during cutover window.
-- **M12 is_first_alert**: ENABLED from PR#3b. EventHandler reads `decision_alerta.ask_count` at confirmation time; `alertaEntrega` uses `ctx.is_first_alert ?? false`. pgBoss path still passes `is_first_alert=false` (inert for extraction path).
+- **M12 is_first_alert**: DISABLED (remediation Fix 2). `alertaEntrega` always uses `false`. `ctx.is_first_alert` is accepted in the interface but ignored. Re-enable once a reliable delivered-history check is in place (e.g. count of prior `alerta_plaga_entregada_at` rows for finca+pest). Root cause: `ask_count=null` for web-configured pests (no outreach row) → `is_first_alert=true` on every delivery.
 - **Idempotency guard**: fail-open on DB error (log + proceed) — one missed mark is safer than one dropped quarantine alert (P7).
 - **Non-Sigatoka delivery audience**: admins only for configured pests (design §5 ADR-F). Quarantine goes to admins + decision-makers.
 - **forbidOnly CI**: Vitest `allowOnly: !isCI` means `.only` fails in CI. Not a bug. SKIP — verified non-issue.
