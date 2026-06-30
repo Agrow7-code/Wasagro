@@ -28,6 +28,8 @@ import {
   getDecisionMakersByOrg,
   getDecisionAlerta,
   upsertDecisionAlerta,
+  // Fix 5 (remediation) — idempotency guard for pest alert delivery
+  markAlertaEntregada,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -610,5 +612,64 @@ describe('upsertDecisionAlerta', () => {
       expect.objectContaining({ org_id: 'ORG001', status: 'asked' }),
       expect.objectContaining({ onConflict: 'org_id,finca_id,pest_type' }),
     )
+  })
+})
+
+// ─── Fix 5 (remediation) — markAlertaEntregada unit tests ────────────────────
+// Tests the per-event idempotency guard for pest alert delivery.
+// The function does a conditional UPDATE (WHERE alerta_plaga_entregada_at IS NULL):
+//   - Row updated (data.length > 0) → returns true (fresh delivery, proceed to send)
+//   - Row not updated (data.length = 0, already set) → returns false (skip re-send)
+//   - DB error → fail-open returns true (one missed mark beats silently dropping a real alert, P4/P7)
+
+describe('markAlertaEntregada', () => {
+  function crearMarkMock() {
+    // Chain: .from().update().eq().is().select() → { data, error }
+    const chain: Record<string, ReturnType<typeof vi.fn>> = {
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      select: vi.fn(),
+    }
+    const mock = { from: vi.fn().mockReturnValue(chain), _chain: chain }
+    return mock
+  }
+
+  it('fresh event (alerta_plaga_entregada_at null) → returns true + issues UPDATE', async () => {
+    const mock = crearMarkMock()
+    // Simulates one row updated (the event was not yet marked)
+    mock._chain.select.mockResolvedValue({ data: [{ id: 'evt-fresh' }], error: null })
+
+    const result = await markAlertaEntregada('evt-fresh', mock as any)
+
+    expect(result).toBe(true)
+    // Must issue the UPDATE scoped to the event id
+    expect(mock._chain.update).toHaveBeenCalledWith(
+      expect.objectContaining({ alerta_plaga_entregada_at: expect.any(String) }),
+    )
+    expect(mock._chain.eq).toHaveBeenCalledWith('id', 'evt-fresh')
+    // Must only update rows where alerta_plaga_entregada_at IS NULL (idempotency guard)
+    expect(mock._chain.is).toHaveBeenCalledWith('alerta_plaga_entregada_at', null)
+  })
+
+  it('already-set (alerta_plaga_entregada_at not null) → returns false (no re-deliver)', async () => {
+    const mock = crearMarkMock()
+    // UPDATE WHERE IS NULL matched no rows (already marked) → data=[]
+    mock._chain.select.mockResolvedValue({ data: [], error: null })
+
+    const result = await markAlertaEntregada('evt-already', mock as any)
+
+    expect(result).toBe(false)
+  })
+
+  it('DB error → fail-open returns true (one missed mark beats silent drop, P4/P7)', async () => {
+    const mock = crearMarkMock()
+    // DB returns error
+    mock._chain.select.mockResolvedValue({ data: null, error: { message: 'connection timeout' } })
+
+    const result = await markAlertaEntregada('evt-db-err', mock as any)
+
+    // Fail-open: returns true so the caller proceeds with delivery rather than dropping the alert
+    expect(result).toBe(true)
   })
 })
