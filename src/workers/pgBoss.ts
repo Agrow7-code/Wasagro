@@ -5,13 +5,17 @@ import { langfuse } from '../integrations/langfuse.js'
 import { crearLLM } from '../integrations/llm/index.js'
 import type { IWasagroLLM, CostContext } from '../integrations/llm/IWasagroLLM.js'
 import type { EntradaEvento, EventoCampoExtraido } from '../types/dominio/EventoCampo.js'
-import { marcarIntencionCompletada, marcarIntencionFallida, getAdminsByFinca, getDecisionMakersByOrg, getUmbralesAlerta } from '../pipeline/supabaseQueries.js'
+import { marcarIntencionCompletada, marcarIntencionFallida } from '../pipeline/supabaseQueries.js'
 import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
 import { buildFeedbackRecibo } from '../pipeline/feedbackBuilder.js'
 import { normalizarPlaga } from '../pipeline/plagaNormalizer.js'
 import { canonicalPestType } from '../pipeline/handlers/umbralesAlerta.js'
-import { entregarAlertaPlaga } from '../pipeline/alertaEntrega.js'
-import { isAlertDeliveryEnabled } from './alertDeliveryGate.js'
+
+/** Mask a phone number to last 4 digits for log safety (P5/D31). */
+function maskPhone(phone: string): string {
+  if (phone.length <= 4) return '****'
+  return `****${phone.slice(-4)}`
+}
 
 let boss: PgBoss
 
@@ -215,66 +219,11 @@ async function procesarIntencionWorker(
       '',
     )
 
-    // T2.4 / T2.6 / T2.8 — PR#2: Alert delivery capability wired but kept gated at this path.
-    //
-    // PR#3b DONE: canonical delivery now lives in EventHandler (pending_confirmation path)
-    // AFTER eventos_campo is inserted and event_id is available for the idempotency guard.
-    // This pgBoss extraction-stage path remains GATED OFF permanently — do not enable.
-    //
-    // WHY KEPT GATED: at this point the farmer has NOT confirmed yet — eventos_campo has
-    // no row, so there is no event_id to key idempotency on. pgBoss retryLimit=3 would
-    // re-deliver. The EventHandler confirmation path resolves all of this.
-    //
-    // SAFE TO REMOVE in PR#4 (cutover) together with the dual-read branch.
-    // To avoid accidental double-delivery, leave ALERT_DELIVERY_ENABLED default off here.
-    if (isAlertDeliveryEnabled() && ext.alerta_urgente && plagaPestType) {
-      const sender = crearSenderWhatsApp()
-      const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
-
-      // Fix #6: quarantine must fire even without orgId (finca-scoped delivery).
-      // Non-quarantine requires orgId to resolve org-scoped thresholds.
-      const shouldDeliver = alertaCuarentena || Boolean(data.orgId)
-
-      if (!shouldDeliver) {
-        console.error('[pgBoss] alerta_urgente: non-quarantine pest with no orgId — cannot resolve thresholds, skipping delivery', {
-          finca_id: data.fincaId, pest_type: plagaPestType, traceId: data.traceId,
-        })
-      } else {
-        const deliveryResult = await entregarAlertaPlaga(
-          {
-            finca_id: data.fincaId,
-            // When orgId is absent (quarantine finca-only path), pass empty string.
-            // entregarAlertaPlaga handles quarantine without orgId (finca admins only).
-            org_id: data.orgId ?? '',
-            pest_type: plagaPestType,
-            pest_nombre_comun: plagaNombreComun ?? plagaPestType,
-            is_quarantine: alertaCuarentena,
-            campos_extraidos: ext.campos_extraidos as Record<string, unknown>,
-            traceId: data.traceId,
-            // M12 deferred to PR#3 (needs decision_alerta.ask_count); always false until then.
-            is_first_alert: false,
-          },
-          {
-            sender,
-            getAdminsByFinca,
-            getDecisionMakersByOrg,
-            getUmbralesAlerta: (orgId, fincaId, pestType) =>
-              getUmbralesAlerta(orgId, fincaId, pestType),
-            founderPhone,
-            // M12 deferred to PR#3 — keep founderShadow wired but is_first_alert=false makes it inert.
-            founderShadow: process.env['ALERT_FOUNDER_SHADOW'] === 'true',
-          },
-        ).catch((deliveryErr: unknown) => {
-          console.error('[pgBoss] entregarAlertaPlaga failed (non-blocking):', deliveryErr)
-          return null
-        })
-
-        langfuse.trace({ id: data.traceId }).event({
-          name: 'alerta_plaga_delivery',
-          output: deliveryResult ?? { alert_sent: false, error: 'delivery_threw' },
-        })
-      }
-    }
+    // PR#3b: pest-alert delivery moved to EventHandler (pending_confirmation path).
+    // entregarAlertaPlaga fires AFTER the farmer confirms and eventos_campo is inserted,
+    // so event_id is available for the per-event idempotency guard (alerta_plaga_entregada_at).
+    // This extraction-stage path never had an event_id — it has been removed entirely.
+    // ALERT_DELIVERY_ENABLED now gates only the confirmation-point path (safe to flip).
 
     generation.end({
       output: { status: 'pending_confirmation', todas_completas },
@@ -443,11 +392,11 @@ export async function initPgBoss(): Promise<PgBoss> {
       const trace = langfuse.trace({ id: traceId, name: 'otp_whatsapp_send', input: { phone } })
       try {
         await sendOTPViaWhatsApp(phone, code)
-        trace.event({ name: 'otp_whatsapp_sent', output: { phone } })
-        console.log(`[pg-boss] OTP enviado por WhatsApp a ${phone.slice(-4)}***`)
+        trace.event({ name: 'otp_whatsapp_sent', output: { phone: maskPhone(phone) } })
+        console.log(`[pg-boss] OTP enviado por WhatsApp a ${maskPhone(phone)}`)
       } catch (err) {
         trace.event({ name: 'otp_whatsapp_failed', level: 'ERROR', output: { error: String(err), jobId: job.id } })
-        console.error(`[pg-boss] Error enviando OTP a ${phone.slice(-4)}***:`, err)
+        console.error(`[pg-boss] Error enviando OTP a ${maskPhone(phone)}:`, err)
         throw err
       }
     }
