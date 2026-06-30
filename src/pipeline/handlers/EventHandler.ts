@@ -42,9 +42,28 @@ import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/Ca
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
 
 // ─── Config constants for outreach policy (design §4.2) ───────────────────────
+
+/**
+ * Parse an env var as a positive integer with a fallback.
+ * Guards against parseInt returning NaN on bad input (e.g. "abc"),
+ * which would silently disable the cooldown / cap entirely (warning #7).
+ */
+function parseEnvInt(key: string, fallback: number): number {
+  const raw = process.env[key]
+  if (!raw) return fallback
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
 const OUTREACH_CONFIG: OutreachConfig = {
-  cooldownDays: process.env['OUTREACH_COOLDOWN_DAYS'] ? parseInt(process.env['OUTREACH_COOLDOWN_DAYS'], 10) : 7,
-  maxAsks: process.env['OUTREACH_MAX_ASKS'] ? parseInt(process.env['OUTREACH_MAX_ASKS'], 10) : 3,
+  cooldownDays: parseEnvInt('OUTREACH_COOLDOWN_DAYS', 7),
+  maxAsks: parseEnvInt('OUTREACH_MAX_ASKS', 3),
+}
+
+/** Mask a phone number to last 4 digits for log safety (P5/D31). */
+function maskPhone(phone: string): string {
+  if (phone.length <= 4) return '****'
+  return `****${phone.slice(-4)}`
 }
 
 // ─── Dedup store for proactive outreach (per phone+pest+finca+day) ────────────
@@ -1045,10 +1064,23 @@ async function handleAlertOptOutKeyword(
     })
   }
 
+  // Fix #3 — if the DM is currently in a pending_alert_config session, reset it.
+  // Without this, a DM who opts out mid-config stays locked in the config flow.
+  // We reset their session to 'active' so the next message is handled normally.
+  try {
+    const dmSession = await getOrCreateSession(msg.from, 'reporte')
+    if (dmSession.status === 'pending_alert_config') {
+      await updateSession(dmSession.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    }
+  } catch (err) {
+    // Non-fatal: session reset failure is logged but does not block the keyword response (P4)
+    console.warn('[AlertOptOut] failed to reset pending_alert_config session:', { phone: maskPhone(msg.from), err })
+  }
+
   // For org-level opt-out we cannot scope to a single finca — skip decision_alerta upsert
   // (decision_alerta requires finca_id NOT NULL per DDL). Log the action for observability.
   console.info('[AlertOptOut] keyword handler applied', {
-    phone: msg.from,
+    phone: maskPhone(msg.from),
     org_id: usuario.org_id,
     pest_type: pestType,
     enabled,
@@ -1118,13 +1150,15 @@ async function handleAlertConfigSession(
         enabled: row.enabled,
       })
     }
+    // Fix #4: preserve ask_count from ctx (carried from outreach) instead of hardcoding 1,
+    // so the cap-3 anti-spam guard stays accurate across persist/opted_out terminal upserts.
     await upsertDecisionAlerta({
       org_id: ctx.org_id,
       finca_id: ctx.finca_id,
       pest_type: ctx.pest_type,
       status: 'decided',
       asked_at: new Date().toISOString(),
-      ask_count: 1,
+      ask_count: ctx.ask_count ?? 1,
     })
     await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
     await _sender!.enviarTexto(session.phone, '✅ Listo, configuré los umbrales de alerta. Te avisamos cuando los niveles superen lo configurado.')
@@ -1145,13 +1179,14 @@ async function handleAlertConfigSession(
         enabled: false,
       })
     }
+    // Fix #4: preserve ask_count from ctx (same reason as persist path above)
     await upsertDecisionAlerta({
       org_id: ctx.org_id,
       finca_id: ctx.finca_id,
       pest_type: ctx.pest_type,
       status: 'opted_out',
       asked_at: new Date().toISOString(),
-      ask_count: 1,
+      ask_count: ctx.ask_count ?? 1,
     })
     await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
     await _sender!.enviarTexto(session.phone, '✅ Listo, no te enviaremos alertas de esta plaga. Podés activarlas cuando quieras escribiendo "activar alertas [plaga]".')
@@ -1171,13 +1206,19 @@ async function handleAlertConfigSession(
   }
 
   if (result.action === 'abort') {
-    // Two non-numeric replies — abort silently (P2)
+    // Two non-numeric replies — abort (P2: max one re-ask per campo)
     console.warn('[EventHandler] pending_alert_config: aborted after max clarifications', {
-      phone: session.phone,
+      phone: maskPhone(session.phone),
       pest_type: ctx.pest_type,
       finca_id: ctx.finca_id,
     })
     await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    // P4/UX: notify DM instead of going silent — they may retry or use the web UI
+    const webUrl = process.env['DASHBOARD_URL'] ?? 'https://app.wasagro.com'
+    await _sender!.enviarTexto(
+      session.phone,
+      `No pude configurar los umbrales — probá de nuevo más tarde o ingresá desde ${webUrl} 👉`,
+    )
     await actualizarMensaje(mensajeId, { status: 'processed' })
     return
   }
@@ -1231,7 +1272,22 @@ export async function outreachDecisionMakers(
     return false
   }
 
-  // 1. Check decision_alerta state machine
+  // 1a. Fix #1 — check if org has explicitly disabled alerts via keyword opt-out.
+  // The keyword handler sets umbrales_alerta rows to enabled=false (org-level, finca_id=null).
+  // decision_alerta cannot capture this (it requires finca_id NOT NULL), so resolveUmbrales
+  // returns null → we'd otherwise outreach again and again on each event.
+  // Guard: if ANY row exists with enabled=false for this (org, pest) → treat as opted-out.
+  try {
+    const umbralesRows = await getUmbralesAlerta(orgId, fincaId, pestType)
+    // All-disabled: every row is explicitly enabled=false → user opted out via keyword
+    if (umbralesRows.length > 0 && umbralesRows.every(r => !r.enabled)) {
+      return false
+    }
+  } catch {
+    // Non-fatal: if the check fails, continue with normal decision_alerta logic (P4)
+  }
+
+  // 1b. Check decision_alerta state machine
   let decisionState = null
   try {
     decisionState = await getDecisionAlerta(orgId, fincaId, pestType)
@@ -1281,19 +1337,20 @@ export async function outreachDecisionMakers(
   const pendingCampos = enabledFields.map(f => f.campo)
   const firstCampo = pendingCampos[0]!
 
-  // 3. For each decision-maker, check no open session exists, then send + open session
-  let sent = 0
+  const nextAskCount = (decisionState?.ask_count ?? 0) + 1
+
+  // 3. Pre-scan: determine which DMs are reachable (not deferred) before claiming.
+  // We must not upsert decision_alerta to 'asked' if every DM has an open session —
+  // that would increment ask_count without anyone receiving the message.
   const { getOrCreateSession: _getOrCreate, updateSession: _updateSession } = await import('../supabaseQueries.js')
 
+  // Collect reachable DMs (dedup-clean + no session collision)
+  const reachableDMs: typeof decisionMakers = []
   for (const dm of decisionMakers) {
     const phone = dm.phone
+    if (isOutreachDedupHit(phone, pestType, fincaId)) continue
 
-    // Dedup guard (per phone+pest+finca+day)
-    if (isOutreachDedupHit(phone, pestType, fincaId)) {
-      continue
-    }
-
-    // T3.13 — Session collision deferral: skip if the target phone already has an open session
+    // T3.13 — Session collision deferral
     let existingSession = null
     try {
       const { data } = await (await import('../../integrations/supabase.js')).supabase
@@ -1306,18 +1363,52 @@ export async function outreachDecisionMakers(
         .maybeSingle()
       existingSession = data
     } catch {
-      // On error, skip this phone conservatively (P7)
-      continue
+      continue  // On error, skip conservatively (P7)
     }
 
     if (existingSession) {
       console.warn('[outreachDecisionMakers] deferred — target phone has open session', {
-        phone, pestType, fincaId, existingStatus: existingSession.status,
+        phone: maskPhone(phone), pestType, fincaId, existingStatus: existingSession.status,
       })
       continue
     }
 
-    // Build initial ctx for the config conversation
+    reachableDMs.push(dm)
+  }
+
+  if (reachableDMs.length === 0) {
+    return false
+  }
+
+  // 5 (fix) — Claim-before-send: upsert decision_alerta to 'asked' BEFORE sending so a
+  // concurrent replica sees 'asked' and skips outreach (closes the common race window).
+  // We only claim if there is at least one reachable DM (pre-scan confirmed above).
+  // The in-memory dedup set covers the same-process fast-path.
+  try {
+    await upsertDecisionAlerta({
+      org_id: orgId,
+      finca_id: fincaId,
+      pest_type: pestType,
+      status: 'asked',
+      asked_at: now.toISOString(),
+      ask_count: nextAskCount,
+    })
+  } catch (err) {
+    console.warn('[outreachDecisionMakers] failed to claim decision_alerta before send — aborting to avoid double-send:', err)
+    return false
+  }
+
+  // 4. For each reachable DM: SEND FIRST, THEN open session (fix #2).
+  // A failed send must NOT leave a ghost pending_alert_config session.
+  let sent = 0
+  const firstField = enabledFields.find(f => f.campo === firstCampo)
+  const direction = firstField?.operador === 'lt' || firstField?.operador === 'lte' ? 'mínimo' : 'máximo'
+  const intro = `Detectamos ${pestType.replace(/_/g, ' ')} en la finca. Para poder alertarte cuando los niveles son críticos, necesito configurar los umbrales contigo.\n\n¿Cuál es el ${direction} de *${firstField?.label ?? firstCampo}* (${firstField?.unit ?? ''}) para alertar? (referencia: ${firstField?.default ?? '?'}${firstField?.unit ?? ''})`
+
+  for (const dm of reachableDMs) {
+    const phone = dm.phone
+
+    // Build initial ctx for the config conversation, carrying ask_count for fix #4
     const configCtx: PendingAlertConfigCtx = {
       pest_type: pestType,
       finca_id: fincaId,
@@ -1325,49 +1416,35 @@ export async function outreachDecisionMakers(
       pending_campos: pendingCampos,
       collected: {},
       current_campo: firstCampo,
-      turn: 0,  // M11: reset on entry
+      turn: 0,            // M11: reset on entry
+      ask_count: nextAskCount,  // carry through for persist/opted_out upserts (fix #4)
     }
 
-    // Open pending_alert_config session on the decision-maker's phone
-    try {
-      const dmSession = await _getOrCreate(phone, 'reporte')
-      await _updateSession(dmSession.session_id, {
-        status: 'pending_alert_config',
-        clarification_count: 0,  // M11: reset clarification_count on entry
-        contexto_parcial: configCtx as unknown as Record<string, unknown>,
-      })
-    } catch (err) {
-      console.warn('[outreachDecisionMakers] failed to open session for dm:', { phone, err })
-      continue
-    }
-
-    // Send proactive outreach message (Evolution free-form, no 24h limit, D6, ADR-E)
-    const firstField = enabledFields.find(f => f.campo === firstCampo)
-    const direction = firstField?.operador === 'lt' || firstField?.operador === 'lte' ? 'mínimo' : 'máximo'
-    const intro = `Detectamos ${pestType.replace(/_/g, ' ')} en la finca. Para poder alertarte cuando los niveles son críticos, necesito configurar los umbrales contigo.\n\n¿Cuál es el ${direction} de *${firstField?.label ?? firstCampo}* (${firstField?.unit ?? ''}) para alertar? (referencia: ${firstField?.default ?? '?'}${firstField?.unit ?? ''})`
-
+    let sendOk = false
     try {
       await _sender.enviarTexto(phone, intro)
+      sendOk = true
       markOutreachSent(phone, pestType, fincaId)
       sent++
     } catch (err) {
-      console.warn('[outreachDecisionMakers] enviarTexto failed for dm:', { phone, err })
+      console.warn('[outreachDecisionMakers] enviarTexto failed for dm:', { phone: maskPhone(phone), err })
     }
-  }
 
-  // 4. Update decision_alerta state (upsert)
-  if (sent > 0) {
-    try {
-      await upsertDecisionAlerta({
-        org_id: orgId,
-        finca_id: fincaId,
-        pest_type: pestType,
-        status: 'asked',
-        asked_at: now.toISOString(),
-        ask_count: (decisionState?.ask_count ?? 0) + 1,
-      })
-    } catch (err) {
-      console.warn('[outreachDecisionMakers] failed to upsert decision_alerta:', err)
+    // Open pending_alert_config session ONLY after a successful send (fix #2)
+    if (sendOk) {
+      try {
+        const dmSession = await _getOrCreate(phone, 'reporte')
+        await _updateSession(dmSession.session_id, {
+          status: 'pending_alert_config',
+          clarification_count: 0,  // M11: reset clarification_count on entry
+          contexto_parcial: configCtx as unknown as Record<string, unknown>,
+        })
+      } catch (err) {
+        console.warn('[outreachDecisionMakers] failed to open session for dm:', { phone: maskPhone(phone), err })
+        // Session failure after a successful send: the DM got the message but has no session.
+        // Logged for observability (P4). Their next reply will hit the corrupted-ctx guard,
+        // which resets gracefully.
+      }
     }
   }
 

@@ -32,6 +32,13 @@ export interface PendingAlertConfigCtx {
    * After 1 failed attempt (turn=1) the next failure triggers abort (P2).
    */
   turn: number
+  /**
+   * The ask_count from decision_alerta at the time outreach was sent.
+   * Carried forward so that persist/opted_out upserts preserve it instead
+   * of resetting to 1 (fix #4 — anti-spam cap-3 guard).
+   * Defaults to 1 when not set (sessions opened before this field was added).
+   */
+  ask_count?: number
 }
 
 /** Row shape passed to upsertUmbralAlerta for each collected campo. */
@@ -74,13 +81,35 @@ function isOptOutReply(reply: string): boolean {
 // ─── Numeric validation ───────────────────────────────────────────────────────
 
 /**
- * Parses a reply as a positive-finite number.
- * Returns null if the reply is not a valid positive number (negative, zero, NaN, or Inf).
+ * Per-campo sane bounds (P1 — a typo like 99999 would silence a critical alert).
+ * Percentage campos: [0.1, 100] (cannot exceed 100%).
+ * Count campos (hojasFuncionalesMin): [1, 50] (reasonable leaf count range).
+ * Unknown campos fall through to the default check (positive-finite).
  */
-function parsePositiveFinite(reply: string): number | null {
+const CAMPO_BOUNDS: Record<string, { min: number; max: number }> = {
+  ee3a6Severo:          { min: 0.1, max: 100 },
+  ee2Avanzado:          { min: 0.1, max: 100 },
+  ee2Leve:              { min: 0.1, max: 100 },
+  hojasFuncionalesMin:  { min: 1,   max: 50  },
+  pct_afectado:         { min: 0.1, max: 100 },
+}
+
+/**
+ * Parses a reply as a positive-finite number within the per-campo sane bounds.
+ * Returns null if the reply is not a valid positive number, negative, zero, NaN,
+ * Infinity, or outside the sane bounds for the given campo (P1 — typo-guard).
+ */
+function parsePositiveFinite(reply: string, campo?: string | null): number | null {
   const trimmed = reply.trim().replace(',', '.') // handle Spanish decimal comma
   const n = Number(trimmed)
   if (!Number.isFinite(n) || n <= 0) return null
+
+  // Apply per-campo sane bounds when available
+  if (campo) {
+    const bounds = CAMPO_BOUNDS[campo]
+    if (bounds && (n < bounds.min || n > bounds.max)) return null
+  }
+
   return n
 }
 
@@ -126,8 +155,8 @@ export function reduceAlertConfig(
     }
   }
 
-  // 2. Parse numeric
-  const value = parsePositiveFinite(reply)
+  // 2. Parse numeric (pass current_campo for per-campo sane bounds check, P1)
+  const value = parsePositiveFinite(reply, ctx.current_campo)
 
   if (value === null) {
     // Non-numeric reply
