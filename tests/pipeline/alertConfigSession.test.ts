@@ -257,6 +257,7 @@ describe('T3.8/T3.9 — pending_alert_config session handler', () => {
       pending_campos: ['hojasFuncionalesMin'],
       current_campo: 'hojasFuncionalesMin',
       collected: { ee3a6Severo: 15, ee2Avanzado: 8 },
+      ask_count: 2,  // Fix #4: carry ask_count from outreach so it is preserved, not reset to 1
     })
     vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingAlertConfig(ctx))
 
@@ -271,9 +272,9 @@ describe('T3.8/T3.9 — pending_alert_config session handler', () => {
       expect(args.finca_id).toBe('F001')
       expect(args.org_id).toBe('ORG001')
     }
-    // Decision alerta set to decided
+    // Fix #4: ask_count must be preserved from ctx (2), NOT reset to 1
     expect(queries.upsertDecisionAlerta).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'decided', finca_id: 'F001', org_id: 'ORG001', pest_type: 'sigatoka_negra' }),
+      expect.objectContaining({ status: 'decided', finca_id: 'F001', org_id: 'ORG001', pest_type: 'sigatoka_negra', ask_count: 2 }),
     )
     // Session closed (active or completed)
     expect(queries.updateSession).toHaveBeenCalledWith(
@@ -284,7 +285,7 @@ describe('T3.8/T3.9 — pending_alert_config session handler', () => {
     expect(sender.enviarTexto).toHaveBeenCalledWith('593999111000', expect.any(String))
   })
 
-  it('abort action: session closed, decision_alerta NOT updated', async () => {
+  it('abort action: session closed, decision_alerta NOT updated, DM notified (fix #9)', async () => {
     // turn=1 + non-numeric → abort
     const ctx = makePendingCtx({ turn: 1, pending_campos: ['ee3a6Severo'], current_campo: 'ee3a6Severo' })
     vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingAlertConfig(ctx))
@@ -298,10 +299,12 @@ describe('T3.8/T3.9 — pending_alert_config session handler', () => {
       'ses-alert-1',
       expect.objectContaining({ status: expect.stringMatching(/active|completed/) }),
     )
+    // Fix #9: DM notified instead of going silent (P4/UX)
+    expect(sender.enviarTexto).toHaveBeenCalledWith('593999111000', expect.stringMatching(/probá de nuevo|intentá|configurar/i))
   })
 
   it('opted_out action: upsertUmbralAlerta(enabled=false) + upsertDecisionAlerta(opted_out) + confirmation', async () => {
-    const ctx = makePendingCtx()
+    const ctx = makePendingCtx({ ask_count: 3 })  // Fix #4: carry ask_count
     vi.mocked(queries.getOrCreateSession).mockResolvedValue(sessionPendingAlertConfig(ctx))
 
     await procesarMensajeEntrante(msgTexto('no quiero'), 'trace-opt-out')
@@ -312,9 +315,9 @@ describe('T3.8/T3.9 — pending_alert_config session handler', () => {
     for (const [args] of calls) {
       expect(args.enabled).toBe(false)
     }
-    // Decision alerta opted_out
+    // Fix #4: ask_count must be preserved from ctx (3), NOT reset to 1
     expect(queries.upsertDecisionAlerta).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'opted_out' }),
+      expect.objectContaining({ status: 'opted_out', ask_count: 3 }),
     )
     // Confirmation sent
     expect(sender.enviarTexto).toHaveBeenCalledWith('593999111000', expect.any(String))

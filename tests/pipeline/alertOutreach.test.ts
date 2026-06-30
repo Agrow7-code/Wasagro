@@ -396,8 +396,24 @@ describe('T3.10/T3.11 — alert opt-out/opt-in keyword handler', () => {
   })
 
   it('keyword from non-decision-maker (agricultor): not handled by opt-out detector', async () => {
-    const { procesarMensajeEntrante } = await import('../../src/pipeline/procesarMensajeEntrante.js')
+    // Fix #10: provide a complete LLM mock (including clasificarIntenciones) so the
+    // test proves the role-gate by clean execution rather than by crashing before the assertion.
+    const { procesarMensajeEntrante, inicializarPipeline } = await import('../../src/pipeline/procesarMensajeEntrante.js')
     const { getUserByPhone, getMensajeByWamid, registrarMensaje, getOrCreateSession, updateSession } = await import('../../src/pipeline/supabaseQueries.js')
+
+    const llmWithClassify = {
+      clasificarIntenciones: vi.fn().mockResolvedValue({ intenciones: [], requires_clarification: false }),
+      extraerEvento: vi.fn().mockResolvedValue({ eventos: [] }),
+      extraerEventos: vi.fn().mockResolvedValue({ eventos: [] }),
+      onboardarAdmin: vi.fn(),
+      onboardarAgricultor: vi.fn(),
+      corregirTranscripcion: vi.fn().mockResolvedValue('desactivar alertas sigatoka'),
+      analizarImagen: vi.fn(),
+      resumirSemana: vi.fn(),
+      atenderSDR: vi.fn(),
+      interpretarAclaracionSigatoka: vi.fn(),
+    }
+    inicializarPipeline(sender, llmWithClassify as any)
 
     vi.mocked(getMensajeByWamid).mockResolvedValue(null)
     vi.mocked(registrarMensaje).mockResolvedValue('msg-uuid')
@@ -418,8 +434,88 @@ describe('T3.10/T3.11 — alert opt-out/opt-in keyword handler', () => {
 
     await procesarMensajeEntrante(msg, 'trace-non-dm')
 
-    // upsertUmbralAlerta should NOT be called for non-decision-makers
+    // upsertUmbralAlerta must NOT be called for non-decision-makers (role gate works)
     expect(queries.upsertUmbralAlerta).not.toHaveBeenCalled()
+  })
+
+  it('Fix #1 — after keyword opt-out (all rows enabled=false), next event does NOT outreach', async () => {
+    // Scenario: DM sent "desactivar alertas sigatoka" → upsertUmbralAlerta rows with enabled=false.
+    // Next Sigatoka event arrives → outreachDecisionMakers must return false (no re-ask).
+    vi.mocked(queries.getDecisionMakersByOrg).mockResolvedValue([dmA])
+    vi.mocked(queries.getUmbralesAlerta).mockResolvedValue([
+      // All rows explicitly disabled (keyword opt-out effect)
+      { id: 'r1', org_id: 'ORG001', finca_id: null, finca_scope: '*', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', operador: 'gt', valor: 10, enabled: false },
+      { id: 'r2', org_id: 'ORG001', finca_id: null, finca_scope: '*', pest_type: 'sigatoka_negra', campo: 'ee2Avanzado', operador: 'gt', valor: 5, enabled: false },
+    ])
+
+    const sent = await outreachDecisionMakers('ORG001', 'F001', 'sigatoka_negra', new Date())
+
+    expect(sent).toBe(false)
+    expect(sender.enviarTexto).not.toHaveBeenCalled()
+    expect(queries.upsertDecisionAlerta).not.toHaveBeenCalled()
+  })
+
+  it('Fix #1 — partial enabled=false rows do NOT block outreach (only one campo disabled)', async () => {
+    // Only one campo disabled — org still wants alerts for other campos → proceed with outreach.
+    vi.mocked(queries.getDecisionMakersByOrg).mockResolvedValue([dmA])
+    vi.mocked(queries.getUmbralesAlerta).mockResolvedValue([
+      { id: 'r1', org_id: 'ORG001', finca_id: null, finca_scope: '*', pest_type: 'sigatoka_negra', campo: 'ee3a6Severo', operador: 'gt', valor: 10, enabled: true },
+      { id: 'r2', org_id: 'ORG001', finca_id: null, finca_scope: '*', pest_type: 'sigatoka_negra', campo: 'ee2Avanzado', operador: 'gt', valor: 5, enabled: false },
+    ])
+    vi.mocked(queries.getOrCreateSession).mockResolvedValue({
+      session_id: 'ses-dm-partial', phone: dmA.phone, status: 'active',
+      contexto_parcial: {}, clarification_count: 0,
+    } as any)
+
+    const { supabase } = supabaseModule as any
+    supabase._mockMaybeSingle.mockResolvedValue({ data: null, error: null })
+
+    const sent = await outreachDecisionMakers('ORG001', 'F001', 'sigatoka_negra', new Date())
+
+    // Not all disabled → proceed with outreach
+    expect(sent).toBe(true)
+    expect(sender.enviarTexto).toHaveBeenCalled()
+  })
+
+  it('Fix #3 — opt-out keyword resets caller pending_alert_config session', async () => {
+    // Scenario: DM is in pending_alert_config session when they send the opt-out keyword.
+    // The session must be reset to 'active' so the next message is handled normally.
+    const { procesarMensajeEntrante, inicializarPipeline } = await import('../../src/pipeline/procesarMensajeEntrante.js')
+    const { getUserByPhone, getMensajeByWamid, registrarMensaje, getOrCreateSession, updateSession } = await import('../../src/pipeline/supabaseQueries.js')
+
+    inicializarPipeline(sender, {} as any)
+    vi.mocked(getMensajeByWamid).mockResolvedValue(null)
+    vi.mocked(registrarMensaje).mockResolvedValue('msg-uuid')
+    vi.mocked(getUserByPhone).mockResolvedValue(decisionMakerUser)
+
+    // DM has an open pending_alert_config session
+    vi.mocked(getOrCreateSession).mockResolvedValue({
+      session_id: 'ses-pending-cfg', phone: '593999000001', finca_id: 'F001',
+      tipo_sesion: 'reporte', clarification_count: 0,
+      contexto_parcial: {
+        pest_type: 'sigatoka_negra', finca_id: 'F001', org_id: 'ORG001',
+        pending_campos: ['ee3a6Severo'], collected: {}, current_campo: 'ee3a6Severo', turn: 0,
+      },
+      status: 'pending_alert_config', paso_onboarding: null,
+    } as any)
+    vi.mocked(updateSession).mockResolvedValue(undefined)
+
+    const msg = {
+      wamid: 'opt-out-in-session', from: '593999000001', timestamp: new Date(),
+      tipo: 'texto' as const, texto: 'desactivar alertas sigatoka negra', rawPayload: {},
+    }
+
+    await procesarMensajeEntrante(msg, 'trace-opt-out-reset')
+
+    // upsertUmbralAlerta called (keyword opt-out side effect)
+    expect(queries.upsertUmbralAlerta).toHaveBeenCalled()
+    // updateSession called with status:'active' to reset the pending_alert_config session
+    expect(queries.updateSession).toHaveBeenCalledWith(
+      'ses-pending-cfg',
+      expect.objectContaining({ status: 'active', clarification_count: 0 }),
+    )
+    // Confirmation sent to DM
+    expect(sender.enviarTexto).toHaveBeenCalledWith('593999000001', expect.stringMatching(/desactivadas/i))
   })
 })
 

@@ -132,4 +132,48 @@ describe('reduceAlertConfig', () => {
     expect(result.action).toBe('persist')
     expect(result.upsertPayload).toHaveLength(1)
   })
+
+  // Fix #8 — upper-bound validation (P1: a typo like 99999 would silence a critical alert)
+  it('Fix #8 — percentage campo above 100 → clarify (not accepted)', () => {
+    const ctx = baseCtx({ pending_campos: ['ee3a6Severo'], current_campo: 'ee3a6Severo', turn: 0 })
+    const result = reduceAlertConfig(ctx, '99999')
+    expect(result.action).toBe('clarify')
+    expect(result.ctx.turn).toBe(1)
+  })
+
+  it('Fix #8 — percentage campo at exactly 100 → accepted (valid boundary)', () => {
+    const ctx = baseCtx({ pending_campos: ['ee3a6Severo'], current_campo: 'ee3a6Severo' })
+    const result = reduceAlertConfig(ctx, '100')
+    expect(result.action).toBe('persist')
+    expect(result.upsertPayload![0]?.valor).toBe(100)
+  })
+
+  it('Fix #8 — hojasFuncionalesMin above 50 → clarify (count campo, max 50)', () => {
+    const ctx: PendingAlertConfigCtx = {
+      pest_type: 'sigatoka_negra',
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pending_campos: ['hojasFuncionalesMin'],
+      collected: {},
+      current_campo: 'hojasFuncionalesMin',
+      turn: 0,
+    }
+    const result = reduceAlertConfig(ctx, '51')
+    expect(result.action).toBe('clarify')
+  })
+
+  it('Fix #8 — hojasFuncionalesMin within [1,50] → accepted', () => {
+    const ctx: PendingAlertConfigCtx = {
+      pest_type: 'sigatoka_negra',
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pending_campos: ['hojasFuncionalesMin'],
+      collected: {},
+      current_campo: 'hojasFuncionalesMin',
+      turn: 0,
+    }
+    const result = reduceAlertConfig(ctx, '9')
+    expect(result.action).toBe('persist')
+    expect(result.upsertPayload![0]?.valor).toBe(9)
+  })
 })
