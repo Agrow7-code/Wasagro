@@ -1,10 +1,10 @@
-# Apply Progress: configurable-alert-thresholds — PR#1 + PR#2
+# Apply Progress: configurable-alert-thresholds — PR#1 + PR#2 + PR#3a Remediation
 
-**Branch**: `feat/alert-thresholds-pr2`
-**Latest batch**: PR#2 remediation + delivery gate (ALERT_DELIVERY_ENABLED, commit `3f59582`)
-**Date**: 2026-06-26
+**Branch**: `feat/alert-thresholds-pr3` (PR#3a: proactive outreach + session reducer + opt-out)
+**Latest batch**: PR#3a adversarial review remediation (10 fixes, commit `38f6cc5`)
+**Date**: 2026-06-29
 **tsc --noEmit exit**: 0 (zero errors, exactOptionalPropertyTypes enforced)
-**Vitest PR#2 tests**: 62 passed / 0 failed (3 test files: 34 umbralesAlerta + 20 alertaEntrega + 8 alertaGate)
+**Vitest PR#3a tests**: 50 passed / 0 failed (4 test files: alertConfigReducer + alertConfigSession + alertOutreach + decisionAlerta)
 
 ---
 
@@ -147,6 +147,61 @@
 
 ---
 
+## PR#3a Task Status (feat/alert-thresholds-pr3 — 4 commits implementing Half A)
+
+### Implemented (pre-remediation)
+
+- [x] **T3.1** Tests: `decisionAlerta.test.ts` — 11 tests for `shouldOutreach` policy.
+- [x] **T3.2** `umbralesAlerta.ts` — `shouldOutreach()` pure policy function.
+- [x] **T3.3** Tests: `alertConfigReducer.test.ts` — 11 tests for `reduceAlertConfig`.
+- [x] **T3.4** `alertConfigReducer.ts` — pure reducer, opt-out keyword, numeric validation.
+- [x] **T3.5** Tests: `alertOutreach.test.ts` — outreach orchestration tests.
+- [x] **T3.6** `EventHandler.ts` — `outreachDecisionMakers()` helper, decision_alerta gating.
+- [x] **T3.7** `EventHandler.ts` — Sigatoka path calls `outreachDecisionMakers` when umbrales=null.
+- [x] **T3.8** Tests: `alertConfigSession.test.ts` — session handler tests.
+- [x] **T3.9** `EventHandler.ts` — `handleAlertConfigSession()` multi-turn config flow.
+- [x] **T3.10** Tests: opt-out keyword tests.
+- [x] **T3.11** `EventHandler.ts` — `handleAlertOptOutKeyword()`, keyword regex.
+- [x] **T3.12** Tests: session collision deferral tests.
+- [x] **T3.13** `outreachDecisionMakers` — session collision pre-scan + skip.
+- [x] **T3.14** tsc exits 0.
+
+---
+
+## PR#3a Adversarial Review Remediation (2026-06-29 — all 10 MUST-FIX applied)
+
+| Fix | Severity | Status | Commit |
+|-----|----------|--------|--------|
+| #1 keyword opt-out → infinite re-ask: `outreachDecisionMakers` checks all-disabled umbrales rows | CRITICAL | DONE | `b2dac19` |
+| #2 ghost session on send failure: session set AFTER successful `enviarTexto` | BLOCKER | DONE | `b2dac19` |
+| #3 opt-out keyword mid-pending_alert_config: session reset to `active` | BLOCKER | DONE | `b2dac19` |
+| #4 ask_count hardcoded 1 on persist/opted_out: `PendingAlertConfigCtx.ask_count` carried | CRITICAL | DONE | `b2dac19` |
+| #5 double-send race (claim-before-send): pre-scan DMs → claim → send loop | HIGH | DONE | `b2dac19` |
+| #6 PII — mask phones in all EventHandler outreach/opt-out logs | CRITICAL/HIGH | DONE | `b2dac19` |
+| #7 NaN guards: `parseEnvInt()` checks `Number.isFinite` before using env vars | WARNING | DONE | `b2dac19` |
+| #8 threshold upper-bound: `CAMPO_BOUNDS` map + `parsePositiveFinite(reply, campo)` | WARNING | DONE | `b2dac19` |
+| #9 abort is silent: sends DM recovery message with `DASHBOARD_URL` | WARNING | DONE | `b2dac19` |
+| #10 non-DM keyword test crashed before assertion: full LLM mock added | TEST | DONE | `38f6cc5` |
+| forbidOnly CI | SKIP | Verified non-issue (Vitest `allowOnly: !isCI`, CI=true blocks `.only`) | noted |
+
+## Commit SHAs (PR#3a — pre-remediation, 4 commits on feat/alert-thresholds-pr3)
+
+| SHA | Description |
+|-----|-------------|
+| `f62e125` | feat(thresholds): shouldOutreach policy + alertConfigReducer pure logic (T3.1-T3.4) |
+| `10a59be` | test(thresholds): RED tests for outreach, session handler, opt-out, collision (T3.5-T3.13) |
+| `5421280` | feat(thresholds): wire alert-config session reducer + proactive outreach + opt-out (T3.5-T3.14) |
+| `823b4cf` | feat(queries): add markAlertaEntregada idempotency helper (PR#3 prerequisite) |
+
+## Commit SHAs (PR#3a — remediation, 2 commits)
+
+| SHA | Description |
+|-----|-------------|
+| `b2dac19` | fix(thresholds): PII masking + NaN env guards + 8 core bug fixes (remediation #1-9) |
+| `38f6cc5` | test(thresholds): add assertions for all 10 adversarial review fixes |
+
+---
+
 ## Migration filenames (10 total, PR#1 + PR#2 remediation)
 
 - `20260625000068_add-pending-alert-config-status.sql`
@@ -162,27 +217,32 @@
 
 ---
 
-## Deferred to PR#3 / PR#4
+## Deferred to PR#3b / PR#4
 
-- **T3.x** (PR#3):
-  - **CRITICAL first step**: wire `entregarAlertaPlaga` at the EventHandler confirmation point (where `eventos_campo` is inserted), pass `eventId` + `markAlertaEntregada` for real idempotency via `alerta_plaga_entregada_at`
-  - Implement M12 `is_first_alert` via `decision_alerta.ask_count` read
-  - Proactive outreach to decision-makers, `decision_alerta` gating/cooldown
-  - `pending_alert_config` session reducer, opt-out keyword handler
-  - **Flip `ALERT_DELIVERY_ENABLED=true` in prod env ONLY after all the above are done** (currently inert; Sigatoka alerts via PR#1 dual-read are unaffected)
+PR#3a is COMPLETE (all 10 adversarial-review fixes applied, 50 tests green, tsc 0).
+
+- **PR#3b** (next batch):
+  - Wire `entregarAlertaPlaga` at the EventHandler confirmation point (where `eventos_campo` is inserted), pass `eventId` + `markAlertaEntregada` for real idempotency via `alerta_plaga_entregada_at`
+  - Implement M12 `is_first_alert` via `decision_alerta.ask_count` read (currently always false)
+  - Idempotency for session-open: if DM replies before the session is opened (race window from fix #2), handle gracefully
+  - Delivery wiring at confirmation point (not pgBoss extraction time)
+  - **Flip `ALERT_DELIVERY_ENABLED=true` in prod env ONLY after PR#3b is done**
 - **T4.x** (PR#4): cutover — remove dual-read, deprecate `SIGATOKA_UMBRAL_EE2_LEVE`, stop writing `sigatoka_umbrales` to `fincas.config`.
 
 ---
 
 ## Risks / Notes
 
-- **ALERT_DELIVERY_ENABLED**: DEFAULT OFF in prod. Non-Sigatoka delivery is fully inert until PR#3 wires it at the confirmation point. Sigatoka alerts via PR#1 dual-read are UNAFFECTED and keep working (they go through EventHandler, not this pgBoss path). Gate lives in `src/workers/alertDeliveryGate.ts`.
+- **ALERT_DELIVERY_ENABLED**: DEFAULT OFF in prod. Non-Sigatoka delivery is fully inert until PR#3b wires it at the confirmation point. Sigatoka alerts via PR#1 dual-read are UNAFFECTED. Gate lives in `src/workers/alertDeliveryGate.ts`.
 - **Dual-read flag**: `ALERT_THRESHOLDS_DUAL_READ=true` required in prod during cutover window.
-- **M12 is_first_alert**: Fully disabled in PR#2. `is_first_alert: false` unconditionally in pgBoss + `isFirstAlert = false` constant in alertaEntrega. PR#3 will implement via `decision_alerta.ask_count`.
-- **Idempotency guard**: fail-open on DB error (log + proceed) — one missed mark is safer than one dropped quarantine alert (P7). The `markAlertaEntregada` dep is optional; when not injected, guard is skipped.
+- **M12 is_first_alert**: Fully disabled. `is_first_alert: false` unconditionally in pgBoss + `isFirstAlert = false` constant in alertaEntrega. PR#3b will implement via `decision_alerta.ask_count`.
+- **Idempotency guard**: fail-open on DB error (log + proceed) — one missed mark is safer than one dropped quarantine alert (P7).
 - **Non-Sigatoka delivery audience**: admins only for configured pests (design §5 ADR-F). Quarantine goes to admins + decision-makers.
-- **forbidOnly CI**: Vitest `allowOnly: !isCI` means `.only` fails in CI. Not a bug.
-- **Quarantine copy**: "Acción inmediata requerida" at threshold=1 needs agrónomo sign-off before first paying finca (P7/D29). Commented in `buildMensajeAlertaCuarentena`.
+- **forbidOnly CI**: Vitest `allowOnly: !isCI` means `.only` fails in CI. Not a bug. SKIP — verified non-issue.
+- **Quarantine copy**: "Acción inmediata requerida" needs agrónomo sign-off before first paying finca (P7/D29). Commented in `buildMensajeAlertaCuarentena`.
+- **DASHBOARD_URL env**: Used in abort recovery message. Should be set in prod (`https://app.wasagro.com`).
+- **CAMPO_BOUNDS**: ee2Leve placeholder threshold (H>30%) is agrónomically unconfirmed — per D29, must be validated before first paying finca. Upper bound 100% is correct but the default value needs sign-off.
+- **Opt-out keyword org-level limitation**: keyword handler sets org-default rows (finca_id=null) to enabled=false. Cannot set decision_alerta (requires finca_id NOT NULL). outreachDecisionMakers now guards via all-disabled umbrales check.
 
 ---
 
