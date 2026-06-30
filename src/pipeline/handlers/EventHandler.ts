@@ -34,9 +34,14 @@ import {
   upsertDecisionAlerta,
   getDecisionAlerta,
   getDecisionMakersByOrg,
+  getAdminsByFinca,
 } from '../supabaseQueries.js'
 import { resolveUmbrales, toUmbralesSeveridad, shouldOutreach, PEST_ALERT_FIELDS, type OutreachConfig } from './umbralesAlerta.js'
 import { reduceAlertConfig, type PendingAlertConfigCtx } from './alertConfigReducer.js'
+import { entregarAlertaPlaga } from '../alertaEntrega.js'
+import { isAlertDeliveryEnabled } from '../../workers/alertDeliveryGate.js'
+import { markAlertaEntregada } from '../supabaseQueries.js'
+import { normalizarPlaga } from '../plagaNormalizer.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
@@ -678,6 +683,93 @@ export async function handleEvento(
             console.error('[embedding] Error guardando embedding:', err)
             langfuse.trace({ id: traceId }).event({
               name: 'embedding_error',
+              level: 'ERROR',
+              output: { error: String(err), evento_id: eventoId },
+            })
+          })
+        }
+
+        // PR#3b — Canonical pest-alert delivery at confirmation point.
+        // The event is now persisted (eventos_campo row exists) so we have a real
+        // eventId for the idempotency guard. This is the ONLY delivery path for
+        // non-Sigatoka pest alerts; the pgBoss extraction-stage call remains gated OFF.
+        // Runs async (best-effort, P4) — never blocks the farmer's confirmation message.
+
+        // Fix 3 (P4): log when alerta_urgente fired but no eventId (saveEvento returned null).
+        if (ext.alerta_urgente && !eventoId) {
+          const plagaForLog = ext.campos_extraidos['plaga_tipo'] as string | undefined
+          console.error('[EventHandler] alerta_urgente but no event id — pest alert delivery skipped', {
+            finca_id: usuario.finca_id,
+            pest: plagaForLog,
+            traceId,
+          })
+        }
+
+        if (ext.alerta_urgente && eventoId && isAlertDeliveryEnabled() && usuario.finca_id) {
+          const plagaInfo = normalizarPlaga(
+            ext.campos_extraidos['plaga_tipo'] as string | null | undefined,
+            finca?.cultivo_principal,
+          )
+          const pestType = plagaInfo?.plaga_tipo ?? (ext.campos_extraidos['plaga_tipo'] as string | undefined) ?? 'desconocida'
+          const pestNombreComun = plagaInfo?.nombre_comun ?? pestType
+          const isQuarantine = plagaInfo?.alerta_cuarentena ?? false
+          const orgId = usuario.org_id ?? ''
+
+          // M12 is_first_alert: disabled (see alertaEntrega.ts §6.4 comment).
+          // getDecisionAlerta is still called here so we surface DB failures (P4) rather than
+          // silencing them. On error we default to false (same as the disabled state).
+          // Fix 4 (P4): log the DB error before defaulting — never swallow silently.
+          const isFirstAlertPromise = (!isQuarantine && orgId)
+            ? getDecisionAlerta(orgId, usuario.finca_id, pestType)
+                .then(row => (row?.ask_count ?? 0) === 0)
+                .catch((err: unknown) => {
+                  console.error('[EventHandler] getDecisionAlerta failed, defaulting is_first_alert=false:', {
+                    org_id: orgId,
+                    finca_id: usuario.finca_id,
+                    pest_type: pestType,
+                    traceId,
+                    err,
+                  })
+                  return false
+                })
+            : Promise.resolve(false)
+
+          const sender = _sender!
+          const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined
+
+          isFirstAlertPromise.then(isFirstAlert => {
+            return entregarAlertaPlaga(
+              {
+                finca_id: usuario.finca_id!,
+                org_id: orgId,
+                pest_type: pestType,
+                pest_nombre_comun: pestNombreComun,
+                is_quarantine: isQuarantine,
+                campos_extraidos: ext.campos_extraidos as Record<string, unknown>,
+                traceId,
+                is_first_alert: isFirstAlert,
+              },
+              {
+                sender,
+                getAdminsByFinca,
+                getDecisionMakersByOrg,
+                getUmbralesAlerta: (oId, fId, pType) => getUmbralesAlerta(oId, fId, pType),
+                founderPhone,
+                founderShadow: process.env['ALERT_FOUNDER_SHADOW'] === 'true',
+                // Real idempotency: keyed by evento_id so pgBoss handler retries cannot re-deliver.
+                markAlertaEntregada: (eId) => markAlertaEntregada(eId),
+                eventId: eventoId,
+              },
+            )
+          }).then(deliveryResult => {
+            langfuse.trace({ id: traceId }).event({
+              name: 'alerta_plaga_delivery',
+              output: deliveryResult ?? { alert_sent: false, error: 'delivery_threw' },
+            })
+          }).catch((err: unknown) => {
+            console.error('[EventHandler] entregarAlertaPlaga error (non-blocking):', err)
+            langfuse.trace({ id: traceId }).event({
+              name: 'alerta_plaga_delivery_error',
               level: 'ERROR',
               output: { error: String(err), evento_id: eventoId },
             })
