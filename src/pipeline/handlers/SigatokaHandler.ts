@@ -819,8 +819,13 @@ export const UMBRALES_SEVERIDAD_DEFAULT: UmbralesSeveridad = {
   // SILENCED BY DEFAULT (101 > the max possible H of 100, so it never fires): ee2Leve
   // was a placeholder (30) with no agronomic backing. Shipping it would alert paying
   // clients on an unvalidated signal (P7, D29). It stays off until a finca/org configures
-  // a real value (see SDD configurable-alert-thresholds) or the env override sets one.
-  ee2Leve: resolverUmbralEnv(process.env['SIGATOKA_UMBRAL_EE2_LEVE'], 101),
+  // a real value via the umbrales_alerta table (SDD configurable-alert-thresholds, D34).
+  //
+  // DEPRECATED: SIGATOKA_UMBRAL_EE2_LEVE env var is no longer read here (PR#4 cutover).
+  // umbrales_alerta is now the single source of truth for all Sigatoka thresholds.
+  // Configure ee2Leve per org/finca via the alert config web endpoints or migration.
+  // The env var is intentionally ignored — removing it from process.env has no effect.
+  ee2Leve: 101,
   hojasFuncionalesMin: 9,
 }
 

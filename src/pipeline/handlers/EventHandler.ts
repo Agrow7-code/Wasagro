@@ -27,7 +27,7 @@ import { _sender, _llm, _intentDetector, _ragRetriever, _embeddingService, ROLES
 import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
-import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones, parseFincaUmbrales, UMBRALES_SEVERIDAD_DEFAULT } from './SigatokaHandler.js'
+import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones, UMBRALES_SEVERIDAD_DEFAULT } from './SigatokaHandler.js'
 import {
   getUmbralesAlerta,
   upsertUmbralAlerta,
@@ -1039,12 +1039,14 @@ async function finalizarMuestreoSigatoka(
 
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
 
-  // T1.14 + Fix 2: Dual-read threshold resolution with explicit fail-safe (design §4.1, §7).
-  // Priority: table rows → dual-read fincas.config → UMBRALES_SEVERIDAD_DEFAULT.
-  // The fail-safe is EXPLICIT: thresholds are NEVER undefined (never all-Infinity/silent).
-  // No-regression invariant: J>10, I>5, M<9 always fire even when table is empty
-  // and orgId is empty-string (e.g. legacy user without org_id).
-  // Cutover (PR#4): remove dual-read branch; table is then the only source.
+  // PR#4 cutover: umbrales_alerta is the single source of truth for Sigatoka thresholds.
+  // Dual-read (fincas.config.sigatoka_umbrales fallback) has been removed.
+  // Resolution precedence: per-finca rows → org-default rows → UMBRALES_SEVERIDAD_DEFAULT.
+  // The fail-safe (UMBRALES_SEVERIDAD_DEFAULT) is EXPLICIT: thresholds are NEVER silent.
+  // J>10, I>5, M<9 always fire — even if getUmbralesAlerta returns [] (no rows configured).
+  // New orgs get org-default rows seeded by seedUmbralesAlertaDefaults at onboarding.
+  // Note: SIGATOKA_UMBRAL_EE2_LEVE env var is DEPRECATED — has no effect (PR#4, D34).
+  //   Configure ee2Leve per org/finca via the alert config endpoints or umbrales_alerta table.
   let umbralesFinca = UMBRALES_SEVERIDAD_DEFAULT
   try {
     const tableRows = await getUmbralesAlerta(ctx.orgId, ctx.fincaId, 'sigatoka_negra')
@@ -1052,14 +1054,8 @@ async function finalizarMuestreoSigatoka(
     if (resolved !== null) {
       umbralesFinca = toUmbralesSeveridad(resolved)
     } else {
-      // Table has no rows → unconfigured path
-      if (process.env['ALERT_THRESHOLDS_DUAL_READ'] === 'true') {
-        // Dual-read fallback during cutover window: table has no rows yet → use fincas.config
-        const fincaData = await getFincaById(ctx.fincaId)
-        const parsed = parseFincaUmbrales(fincaData?.config ?? null)
-        if (parsed !== null) umbralesFinca = parsed
-        // else: umbralesFinca stays UMBRALES_SEVERIDAD_DEFAULT — J/I/M still fire
-      }
+      // Table has no rows → unconfigured path.
+      // umbralesFinca stays UMBRALES_SEVERIDAD_DEFAULT — J/I/M still fire.
       // T3.6 — Proactive outreach: no configured threshold → ask decision-makers (§4.1, §4.2)
       // Runs async (best-effort) — does not block the reporter's summary delivery.
       // Only fires when org_id is available (legacy users without org_id are skipped, P2).
@@ -1068,9 +1064,6 @@ async function finalizarMuestreoSigatoka(
           console.warn('[EventHandler] outreachDecisionMakers error (non-blocking):', err)
         })
       }
-    }
-    if (process.env['SIGATOKA_UMBRAL_EE2_LEVE']) {
-      console.warn('[EventHandler] SIGATOKA_UMBRAL_EE2_LEVE env var is deprecated — configure ee2Leve via umbrales_alerta table instead')
     }
   } catch (err) {
     // On DB error: umbralesFinca stays UMBRALES_SEVERIDAD_DEFAULT — thresholds never silenced
