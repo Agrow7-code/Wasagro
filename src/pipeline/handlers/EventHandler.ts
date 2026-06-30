@@ -28,11 +28,48 @@ import type { CostContext } from '../../integrations/llm/IWasagroLLM.js'
 import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import { getBoss } from '../../workers/pgBoss.js'
 import { detectarFormularioSigatoka, buildDescripcionRaw, buildWhatsappSummary, mapearSectoresALotes, mapearSectoresALotesFilas, contarCeldasIlegibles, buildPreguntaAclaracion, aplicarAclaraciones, parseFincaUmbrales, UMBRALES_SEVERIDAD_DEFAULT } from './SigatokaHandler.js'
-import { getUmbralesAlerta } from '../supabaseQueries.js'
-import { resolveUmbrales, toUmbralesSeveridad } from './umbralesAlerta.js'
+import {
+  getUmbralesAlerta,
+  upsertUmbralAlerta,
+  upsertDecisionAlerta,
+  getDecisionAlerta,
+  getDecisionMakersByOrg,
+} from '../supabaseQueries.js'
+import { resolveUmbrales, toUmbralesSeveridad, shouldOutreach, PEST_ALERT_FIELDS, type OutreachConfig } from './umbralesAlerta.js'
+import { reduceAlertConfig, type PendingAlertConfigCtx } from './alertConfigReducer.js'
 import type { SigatokaMuestreo } from '../../types/dominio/SigatokaMuestreo.js'
 import { evaluarCalidadSigatoka, decidirRecaptura } from '../../types/dominio/CalidadSigatoka.js'
 import { subirImagenEvento } from '../../integrations/supabaseStorage.js'
+
+// ─── Config constants for outreach policy (design §4.2) ───────────────────────
+const OUTREACH_CONFIG: OutreachConfig = {
+  cooldownDays: process.env['OUTREACH_COOLDOWN_DAYS'] ? parseInt(process.env['OUTREACH_COOLDOWN_DAYS'], 10) : 7,
+  maxAsks: process.env['OUTREACH_MAX_ASKS'] ? parseInt(process.env['OUTREACH_MAX_ASKS'], 10) : 3,
+}
+
+// ─── Dedup store for proactive outreach (per phone+pest+finca+day) ────────────
+// In-memory dedup for outreach sends within a single process restart. A persistent
+// dedup (Redis/Postgres) is a PR#3b enhancement; the decision_alerta cooldown
+// provides the cross-restart guard at a 7-day granularity.
+const _outreachSentToday = new Set<string>()
+
+/** Exported for test teardown only — clears the in-process dedup set. */
+export function _resetOutreachDedupForTest(): void {
+  _outreachSentToday.clear()
+}
+
+function outreachDedupKey(phone: string, pestType: string, fincaId: string): string {
+  const day = new Date().toISOString().slice(0, 10)
+  return `${phone}:${pestType}:${fincaId}:${day}`
+}
+
+function isOutreachDedupHit(phone: string, pestType: string, fincaId: string): boolean {
+  return _outreachSentToday.has(outreachDedupKey(phone, pestType, fincaId))
+}
+
+function markOutreachSent(phone: string, pestType: string, fincaId: string): void {
+  _outreachSentToday.add(outreachDedupKey(phone, pestType, fincaId))
+}
 
 async function resolverMediaImagen(msg: NormalizedMessage, traceId: string): Promise<{ base64: string; mimeType: string } | null> {
   if (msg.mediaBase64) return { base64: msg.mediaBase64, mimeType: msg.mediaMimetype ?? 'image/jpeg' }
@@ -79,6 +116,14 @@ export async function handleEvento(
       await handleAprobacion(msg, usuario, mensajeId, traceId, approvalMatch[1]?.trim() ?? '')
       return
     }
+  }
+
+  // T3.11 — Opt-out/opt-in keyword handler (BillingIntentHandler pattern, design §4.5)
+  // "desactivar alertas {pest}" / "activar alertas {pest}" from decision-makers.
+  // Fires regardless of session state. Scoped to decision-makers (admin_org/director).
+  if (msg.tipo === 'texto' && (usuario.rol === 'admin_org' || usuario.rol === 'director') && usuario.org_id) {
+    const handled = await handleAlertOptOutKeyword(msg, usuario, mensajeId)
+    if (handled) return
   }
 
   // Ubicación — solicitar confirmación antes de persistir coordenadas (P7)
@@ -543,6 +588,14 @@ export async function handleEvento(
     return
   }
 
+  // ── Config de umbral de alerta — respuesta del decision-maker ────────────
+  // Fires when a decision-maker is in the multi-turn threshold-config conversation
+  // opened proactively by the system (design §4.3, §4.4, T3.9).
+  if (session.status === 'pending_alert_config') {
+    await handleAlertConfigSession(session, transcripcion, mensajeId)
+    return
+  }
+
   // ── Confirmación pendiente: el usuario responde al resumen ────────────────
   if (session.status === 'pending_confirmation') {
     const respuesta = transcripcion.toLowerCase().trim()
@@ -887,14 +940,24 @@ async function finalizarMuestreoSigatoka(
     const resolved = resolveUmbrales(tableRows)
     if (resolved !== null) {
       umbralesFinca = toUmbralesSeveridad(resolved)
-    } else if (process.env['ALERT_THRESHOLDS_DUAL_READ'] === 'true') {
-      // Dual-read fallback during cutover window: table has no rows yet → use fincas.config
-      const fincaData = await getFincaById(ctx.fincaId)
-      const parsed = parseFincaUmbrales(fincaData?.config ?? null)
-      if (parsed !== null) umbralesFinca = parsed
-      // else: umbralesFinca stays UMBRALES_SEVERIDAD_DEFAULT — J/I/M still fire
+    } else {
+      // Table has no rows → unconfigured path
+      if (process.env['ALERT_THRESHOLDS_DUAL_READ'] === 'true') {
+        // Dual-read fallback during cutover window: table has no rows yet → use fincas.config
+        const fincaData = await getFincaById(ctx.fincaId)
+        const parsed = parseFincaUmbrales(fincaData?.config ?? null)
+        if (parsed !== null) umbralesFinca = parsed
+        // else: umbralesFinca stays UMBRALES_SEVERIDAD_DEFAULT — J/I/M still fire
+      }
+      // T3.6 — Proactive outreach: no configured threshold → ask decision-makers (§4.1, §4.2)
+      // Runs async (best-effort) — does not block the reporter's summary delivery.
+      // Only fires when org_id is available (legacy users without org_id are skipped, P2).
+      if (ctx.orgId) {
+        outreachDecisionMakers(ctx.orgId, ctx.fincaId, 'sigatoka_negra', new Date()).catch(err => {
+          console.warn('[EventHandler] outreachDecisionMakers error (non-blocking):', err)
+        })
+      }
     }
-    // else: umbralesFinca stays UMBRALES_SEVERIDAD_DEFAULT — J/I/M still fire
     if (process.env['SIGATOKA_UMBRAL_EE2_LEVE']) {
       console.warn('[EventHandler] SIGATOKA_UMBRAL_EE2_LEVE env var is deprecated — configure ee2Leve via umbrales_alerta table instead')
     }
@@ -919,6 +982,396 @@ async function finalizarMuestreoSigatoka(
     })
     await _sender!.enviarTexto(ctx.from, buildPreguntaAclaracion(ileg.ubicaciones))
   }
+}
+
+// ─── handleAlertOptOutKeyword — T3.11 ────────────────────────────────────────
+// BillingIntentHandler-style detector for "desactivar/activar alertas {pest}" from
+// decision-makers (design §4.5). One-turn: detects the keyword, upserts the enabled
+// state across all catalog campos for that pest, updates decision_alerta, confirms.
+// Returns true if the keyword was handled (caller should return early).
+//
+// Keywords (case-insensitive):
+//   "desactivar alertas [pest]" / "desactivar alertas de [pest]"
+//   "activar alertas [pest]" / "activar alertas de [pest]"
+const ALERT_DEACTIVATE_RE = /\b(desactivar|deshabilitar|silenciar|apagar)\s+alertas?\b/i
+const ALERT_ACTIVATE_RE = /\b(activar|habilitar|encender)\s+alertas?\b/i
+
+async function handleAlertOptOutKeyword(
+  msg: NormalizedMessage,
+  usuario: { id: string; org_id: string; rol: string },
+  mensajeId: string,
+): Promise<boolean> {
+  const text = msg.texto ?? ''
+
+  const isDeactivate = ALERT_DEACTIVATE_RE.test(text)
+  const isActivate = ALERT_ACTIVATE_RE.test(text)
+
+  if (!isDeactivate && !isActivate) return false
+
+  // Extract pest type — look for known pest names in the message
+  let pestType: string | null = null
+  const lower = text.toLowerCase()
+  for (const pt of Object.keys(PEST_ALERT_FIELDS)) {
+    // Match canonical form or display variant (e.g. "sigatoka" matches "sigatoka_negra")
+    if (lower.includes(pt.replace(/_/g, ' ')) || lower.includes(pt.replace(/_/g, ''))) {
+      pestType = pt
+      break
+    }
+  }
+
+  if (!pestType) {
+    // Keyword matched but no recognized pest — not our handler
+    return false
+  }
+
+  const fields = PEST_ALERT_FIELDS[pestType] ?? []
+  if (fields.length === 0) return false
+
+  const enabled = isActivate
+
+  // We need a finca_id to target. Decision-makers may not have a direct finca_id.
+  // For opt-out keywords, we set org-level enabled state (finca_id=null → org default).
+  // This is a best-effort opt-out: per-org-default rows get toggled.
+  // The caller ensures usuario.org_id is present.
+  for (const field of fields) {
+    await upsertUmbralAlerta({
+      org_id: usuario.org_id,
+      finca_id: null,
+      pest_type: pestType,
+      campo: field.campo,
+      operador: field.operador,
+      valor: field.default,
+      enabled,
+    })
+  }
+
+  // For org-level opt-out we cannot scope to a single finca — skip decision_alerta upsert
+  // (decision_alerta requires finca_id NOT NULL per DDL). Log the action for observability.
+  console.info('[AlertOptOut] keyword handler applied', {
+    phone: msg.from,
+    org_id: usuario.org_id,
+    pest_type: pestType,
+    enabled,
+  })
+
+  await actualizarMensaje(mensajeId, { status: 'processed' })
+  if (enabled) {
+    await _sender!.enviarTexto(msg.from, `✅ Alertas de ${pestType.replace(/_/g, ' ')} activadas.`)
+  } else {
+    await _sender!.enviarTexto(msg.from, `✅ Alertas de ${pestType.replace(/_/g, ' ')} desactivadas. Podés activarlas escribiendo "activar alertas ${pestType.replace(/_/g, ' ')}".`)
+  }
+  return true
+}
+
+// ─── handleAlertConfigSession — T3.9 ──────────────────────────────────────────
+// Handles an inbound message from a decision-maker whose session is in
+// 'pending_alert_config' state (design §4.4, M11).
+//
+// The session shape (PendingAlertConfigCtx) contains:
+//   pest_type, finca_id, org_id, pending_campos, collected, current_campo, turn
+//
+// After each turn, we dispatch reduceAlertConfig(ctx, reply) and act on the
+// returned action:
+//   ask_next  → update session ctx, send next campo prompt
+//   persist   → upsert all collected rows + decided decision_alerta + close session
+//   abort     → close session silently (P2), log
+//   opted_out → upsert enabled=false + opted_out decision_alerta + close session
+//   clarify   → update session turn, re-prompt the same campo
+async function handleAlertConfigSession(
+  session: Awaited<ReturnType<typeof getOrCreateSession>>,
+  reply: string,
+  mensajeId: string,
+): Promise<void> {
+  const ctx = session.contexto_parcial as unknown as PendingAlertConfigCtx
+
+  // Corrupted context guard — must have pest_type + finca_id + org_id at minimum
+  if (!ctx.pest_type || !ctx.finca_id || !ctx.org_id) {
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    await _sender!.enviarTexto(session.phone, '¿Qué quieres registrar?')
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  const result = reduceAlertConfig(ctx, reply)
+
+  if (result.action === 'ask_next') {
+    // More campos to collect — advance the session and ask next
+    await updateSession(session.session_id, {
+      contexto_parcial: result.ctx as unknown as Record<string, unknown>,
+    })
+    const nextPrompt = buildCampoPrompt(result.ctx)
+    await _sender!.enviarTexto(session.phone, nextPrompt)
+    await actualizarMensaje(mensajeId, { status: 'processing' })
+    return
+  }
+
+  if (result.action === 'persist' && result.upsertPayload) {
+    // All campos collected — upsert rows + mark as decided
+    for (const row of result.upsertPayload) {
+      await upsertUmbralAlerta({
+        org_id: row.org_id,
+        finca_id: row.finca_id,
+        pest_type: row.pest_type,
+        campo: row.campo,
+        operador: getDefaultOperador(row.pest_type, row.campo),
+        valor: row.valor,
+        enabled: row.enabled,
+      })
+    }
+    await upsertDecisionAlerta({
+      org_id: ctx.org_id,
+      finca_id: ctx.finca_id,
+      pest_type: ctx.pest_type,
+      status: 'decided',
+      asked_at: new Date().toISOString(),
+      ask_count: 1,
+    })
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    await _sender!.enviarTexto(session.phone, '✅ Listo, configuré los umbrales de alerta. Te avisamos cuando los niveles superen lo configurado.')
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  if (result.action === 'opted_out' && result.upsertPayload) {
+    // User opted out — disable all campos
+    for (const row of result.upsertPayload) {
+      await upsertUmbralAlerta({
+        org_id: row.org_id,
+        finca_id: row.finca_id,
+        pest_type: row.pest_type,
+        campo: row.campo,
+        operador: getDefaultOperador(row.pest_type, row.campo),
+        valor: row.valor,
+        enabled: false,
+      })
+    }
+    await upsertDecisionAlerta({
+      org_id: ctx.org_id,
+      finca_id: ctx.finca_id,
+      pest_type: ctx.pest_type,
+      status: 'opted_out',
+      asked_at: new Date().toISOString(),
+      ask_count: 1,
+    })
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    await _sender!.enviarTexto(session.phone, '✅ Listo, no te enviaremos alertas de esta plaga. Podés activarlas cuando quieras escribiendo "activar alertas [plaga]".')
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  if (result.action === 'clarify') {
+    // Non-numeric reply — re-ask same campo (turn incremented in reducer)
+    await updateSession(session.session_id, {
+      contexto_parcial: result.ctx as unknown as Record<string, unknown>,
+    })
+    const campoLabel = getCampoLabel(ctx.pest_type, ctx.current_campo ?? '')
+    await _sender!.enviarTexto(session.phone, `⚠️ Necesito un número. Por ejemplo: 10. ¿Cuál es el umbral para ${campoLabel}?`)
+    await actualizarMensaje(mensajeId, { status: 'processing' })
+    return
+  }
+
+  if (result.action === 'abort') {
+    // Two non-numeric replies — abort silently (P2)
+    console.warn('[EventHandler] pending_alert_config: aborted after max clarifications', {
+      phone: session.phone,
+      pest_type: ctx.pest_type,
+      finca_id: ctx.finca_id,
+    })
+    await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+    await actualizarMensaje(mensajeId, { status: 'processed' })
+    return
+  }
+
+  // Fallback (should not reach here)
+  await updateSession(session.session_id, { status: 'active', clarification_count: 0, contexto_parcial: {} })
+  await actualizarMensaje(mensajeId, { status: 'processed' })
+}
+
+/** Returns the default operador for a given pest/campo from the catalog. */
+function getDefaultOperador(pestType: string, campo: string): 'gt' | 'gte' | 'lt' | 'lte' {
+  const fields = PEST_ALERT_FIELDS[pestType] ?? []
+  return fields.find(f => f.campo === campo)?.operador ?? 'gt'
+}
+
+/** Returns a human-readable label for a campo (for prompts). */
+function getCampoLabel(pestType: string, campo: string): string {
+  const fields = PEST_ALERT_FIELDS[pestType] ?? []
+  return fields.find(f => f.campo === campo)?.label ?? campo
+}
+
+/**
+ * Builds the WhatsApp prompt for the next campo in a pending_alert_config session.
+ * One campo per turn (design §4.4, C decision). Includes the field default as reference.
+ */
+function buildCampoPrompt(ctx: PendingAlertConfigCtx): string {
+  const campo = ctx.current_campo
+  if (!campo) return '¿Qué valor quieres configurar?'
+  const fields = PEST_ALERT_FIELDS[ctx.pest_type] ?? []
+  const field = fields.find(f => f.campo === campo)
+  if (!field) return `¿Cuál es el umbral para ${campo}? Escríbelo en números.`
+  const direction = field.operador === 'lt' || field.operador === 'lte' ? 'mínimo' : 'máximo'
+  return `¿Cuál es el ${direction} de *${field.label}* (${field.unit}) para alertar? (referencia: ${field.default}${field.unit})`
+}
+
+// ─── outreachDecisionMakers — T3.7 shared helper ──────────────────────────────
+// Shared helper used by both EventHandler (Sigatoka path) and pgBoss (non-Sigatoka path).
+// When pest data arrives with no configured threshold, this evaluates the decision_alerta
+// state machine and, if outreach is due, proactively messages the org's decision-makers
+// via Evolution to start the config conversation on THEIR phone (design §4.1, §4.3, §5).
+//
+// Returns true if outreach was sent (at least one DM notified).
+export async function outreachDecisionMakers(
+  orgId: string,
+  fincaId: string,
+  pestType: string,
+  now: Date,
+): Promise<boolean> {
+  if (!_sender) {
+    console.warn('[outreachDecisionMakers] sender not initialized')
+    return false
+  }
+
+  // 1. Check decision_alerta state machine
+  let decisionState = null
+  try {
+    decisionState = await getDecisionAlerta(orgId, fincaId, pestType)
+  } catch (err) {
+    console.warn('[outreachDecisionMakers] getDecisionAlerta error — skipping outreach:', err)
+    return false
+  }
+
+  const decision = shouldOutreach(decisionState, now, OUTREACH_CONFIG)
+
+  if (decision.action === 'silent') {
+    return false
+  }
+
+  if (decision.action === 'escalate') {
+    // Max asks reached — log for founder review (P7, no client spam)
+    console.warn('[outreachDecisionMakers] max asks reached for org/finca/pest', {
+      orgId, fincaId, pestType, ask_count: decisionState?.ask_count,
+    })
+    // No further outreach to decision-makers
+    return false
+  }
+
+  // action: 'ask' or 're-ask'
+  let decisionMakers = []
+  try {
+    decisionMakers = await getDecisionMakersByOrg(orgId)
+  } catch (err) {
+    console.warn('[outreachDecisionMakers] getDecisionMakersByOrg error — skipping outreach:', err)
+    return false
+  }
+
+  if (decisionMakers.length === 0) {
+    console.warn('[outreachDecisionMakers] no decision-makers found for org — skipping outreach', { orgId })
+    return false
+  }
+
+  // 2. Resolve the campos to ask about
+  const fields = PEST_ALERT_FIELDS[pestType] ?? []
+  const enabledFields = fields.filter(f => f.operador !== undefined) // all catalog fields
+
+  if (enabledFields.length === 0) {
+    // Pest not in catalog — cannot configure; skip silently
+    return false
+  }
+
+  const pendingCampos = enabledFields.map(f => f.campo)
+  const firstCampo = pendingCampos[0]!
+
+  // 3. For each decision-maker, check no open session exists, then send + open session
+  let sent = 0
+  const { getOrCreateSession: _getOrCreate, updateSession: _updateSession } = await import('../supabaseQueries.js')
+
+  for (const dm of decisionMakers) {
+    const phone = dm.phone
+
+    // Dedup guard (per phone+pest+finca+day)
+    if (isOutreachDedupHit(phone, pestType, fincaId)) {
+      continue
+    }
+
+    // T3.13 — Session collision deferral: skip if the target phone already has an open session
+    let existingSession = null
+    try {
+      const { data } = await (await import('../../integrations/supabase.js')).supabase
+        .from('sesiones_activas')
+        .select('session_id, status')
+        .eq('phone', phone)
+        .neq('status', 'completed')
+        .neq('status', 'expired')
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle()
+      existingSession = data
+    } catch {
+      // On error, skip this phone conservatively (P7)
+      continue
+    }
+
+    if (existingSession) {
+      console.warn('[outreachDecisionMakers] deferred — target phone has open session', {
+        phone, pestType, fincaId, existingStatus: existingSession.status,
+      })
+      continue
+    }
+
+    // Build initial ctx for the config conversation
+    const configCtx: PendingAlertConfigCtx = {
+      pest_type: pestType,
+      finca_id: fincaId,
+      org_id: orgId,
+      pending_campos: pendingCampos,
+      collected: {},
+      current_campo: firstCampo,
+      turn: 0,  // M11: reset on entry
+    }
+
+    // Open pending_alert_config session on the decision-maker's phone
+    try {
+      const dmSession = await _getOrCreate(phone, 'reporte')
+      await _updateSession(dmSession.session_id, {
+        status: 'pending_alert_config',
+        clarification_count: 0,  // M11: reset clarification_count on entry
+        contexto_parcial: configCtx as unknown as Record<string, unknown>,
+      })
+    } catch (err) {
+      console.warn('[outreachDecisionMakers] failed to open session for dm:', { phone, err })
+      continue
+    }
+
+    // Send proactive outreach message (Evolution free-form, no 24h limit, D6, ADR-E)
+    const firstField = enabledFields.find(f => f.campo === firstCampo)
+    const direction = firstField?.operador === 'lt' || firstField?.operador === 'lte' ? 'mínimo' : 'máximo'
+    const intro = `Detectamos ${pestType.replace(/_/g, ' ')} en la finca. Para poder alertarte cuando los niveles son críticos, necesito configurar los umbrales contigo.\n\n¿Cuál es el ${direction} de *${firstField?.label ?? firstCampo}* (${firstField?.unit ?? ''}) para alertar? (referencia: ${firstField?.default ?? '?'}${firstField?.unit ?? ''})`
+
+    try {
+      await _sender.enviarTexto(phone, intro)
+      markOutreachSent(phone, pestType, fincaId)
+      sent++
+    } catch (err) {
+      console.warn('[outreachDecisionMakers] enviarTexto failed for dm:', { phone, err })
+    }
+  }
+
+  // 4. Update decision_alerta state (upsert)
+  if (sent > 0) {
+    try {
+      await upsertDecisionAlerta({
+        org_id: orgId,
+        finca_id: fincaId,
+        pest_type: pestType,
+        status: 'asked',
+        asked_at: now.toISOString(),
+        ask_count: (decisionState?.ask_count ?? 0) + 1,
+      })
+    } catch (err) {
+      console.warn('[outreachDecisionMakers] failed to upsert decision_alerta:', err)
+    }
+  }
+
+  return sent > 0
 }
 
 async function handleAprobacion(
