@@ -472,12 +472,14 @@ describe('T2.5 non-Sigatoka delivery', () => {
   })
 })
 
-// ─── T2.7 / PR#3b — M12 founder-shadow (NOW ENABLED via decision_alerta.ask_count) ─────────────
-// PR#3b: is_first_alert is no longer forced false. It now comes from EventHandler
-// reading decision_alerta.ask_count at confirmation time.
-// Tests verify the ENABLED behavior: preview fires when founderShadow=true + is_first_alert=true.
+// ─── T2.7 — M12 founder-shadow (DISABLED — deferred) ────────────────────────
+// M12 is disabled because decision_alerta.ask_count is null for web-configured pests
+// (no outreach row), so ask_count=null → is_first_alert=true on EVERY alert for those pests.
+// is_first_alert is ALWAYS false in alertaEntrega regardless of ctx.is_first_alert.
+// Re-enable when a reliable delivered-history check is in place.
+// Tests verify the DISABLED behavior: no founder preview even with founderShadow=true + is_first_alert=true.
 
-describe('T2.7 / PR#3b M12 founder-shadow (enabled from PR#3b)', () => {
+describe('T2.7 M12 founder-shadow (DISABLED — deferred)', () => {
   let sender: ReturnType<typeof makeSender>
   let getAdminsByFinca: Mock
   let getDecisionMakersByOrg: Mock
@@ -495,8 +497,9 @@ describe('T2.7 / PR#3b M12 founder-shadow (enabled from PR#3b)', () => {
     ])
   })
 
-  // M12 ENABLED: founderShadow=true + is_first_alert=true → founder gets preview.
-  it('ALERT_FOUNDER_SHADOW=true + is_first_alert=true → founder preview sent (M12 enabled PR#3b)', async () => {
+  // M12 DISABLED: founderShadow=true + is_first_alert=true → NO preview (is_first_alert is always false).
+  // Reason: web-configured pests have no decision_alerta row → ask_count=null → true on every alert.
+  it('ALERT_FOUNDER_SHADOW=true + is_first_alert=true → NO founder preview (M12 disabled, ctx.is_first_alert ignored)', async () => {
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
     const founderPhone = '5930009999'
     const ctx: AlertaEntregaContext = {
@@ -507,7 +510,7 @@ describe('T2.7 / PR#3b M12 founder-shadow (enabled from PR#3b)', () => {
       is_quarantine: false,
       campos_extraidos: { pct_afectado: 25 },
       traceId: 'trace-s1',
-      is_first_alert: true, // set by EventHandler from decision_alerta.ask_count=0
+      is_first_alert: true, // accepted in ctx but IGNORED by alertaEntrega (M12 disabled)
     }
     const deps: AlertaEntregaDeps = {
       sender,
@@ -520,11 +523,10 @@ describe('T2.7 / PR#3b M12 founder-shadow (enabled from PR#3b)', () => {
 
     const result = await entregarAlertaPlaga(ctx, deps)
     expect(result.alert_sent).toBe(true)
-    // M12 enabled: founder MUST receive a preview on first alert
+    // M12 DISABLED: founder must NOT receive a preview (is_first_alert is always false internally)
     const founderCalls = sender.calls.filter(c => c.to === founderPhone)
-    expect(founderCalls).toHaveLength(1)
-    expect(founderCalls[0]!.msg).toMatch(/PREVIEW/i)
-    // Client admin also receives the alert
+    expect(founderCalls).toHaveLength(0)
+    // Client admin still receives the alert
     const clientCalls = sender.calls.filter(c => c.to === adminA.phone)
     expect(clientCalls.length).toBeGreaterThan(0)
   })
@@ -725,16 +727,17 @@ describe('Idempotency guard (#1)', () => {
     expect(sender.calls).toHaveLength(1)
   })
 
-  it('quarantine bypass ignores idempotency guard (always fires)', async () => {
+  it('quarantine FIRST confirmation: markAlertaEntregada=true → alert fires (dedup passes)', async () => {
     const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
-    // markAlertaEntregada returns false — but quarantine should still fire
-    const markAlertaEntregada = vi.fn().mockResolvedValue(false)
+    // Fix 1: quarantine now goes through the idempotency check.
+    // On first confirmation markAlertaEntregada returns true (fresh) → alert fires normally.
+    const markAlertaEntregada = vi.fn().mockResolvedValue(true) // fresh
     const ctx: AlertaEntregaContext = {
       finca_id: 'F001',
       org_id: 'ORG001',
       pest_type: 'moko_bacteriano',
       pest_nombre_comun: 'Moko bacteriano',
-      is_quarantine: true, // bypass
+      is_quarantine: true,
       campos_extraidos: {},
       traceId: 'trace-idem4',
     }
@@ -749,10 +752,40 @@ describe('Idempotency guard (#1)', () => {
     }
 
     const result = await entregarAlertaPlaga(ctx, deps)
-    // Quarantine always fires regardless of idempotency marker
+    // Fresh delivery → quarantine fires
     expect(result.alert_sent).toBe(true)
     expect(result.reason).toBe('quarantine')
-    // markAlertaEntregada must NOT have been called for quarantine (H3/ADR-G)
-    expect(markAlertaEntregada).not.toHaveBeenCalled()
+    // markAlertaEntregada WAS called (Fix 1: quarantine goes through dedup)
+    expect(markAlertaEntregada).toHaveBeenCalledWith('evt-004')
+  })
+
+  it('quarantine DUPLICATE confirmation: markAlertaEntregada=false → already_sent (exactly ONE send)', async () => {
+    const { entregarAlertaPlaga } = await import('../../src/pipeline/alertaEntrega.js')
+    // Fix 1 (BLOCKER): duplicate confirmation for the same event returns already_sent, not a second quarantine alert.
+    const markAlertaEntregada = vi.fn().mockResolvedValue(false) // already marked
+    const ctx: AlertaEntregaContext = {
+      finca_id: 'F001',
+      org_id: 'ORG001',
+      pest_type: 'moko_bacteriano',
+      pest_nombre_comun: 'Moko bacteriano',
+      is_quarantine: true,
+      campos_extraidos: {},
+      traceId: 'trace-idem5',
+    }
+    const deps: AlertaEntregaDeps = {
+      sender,
+      getAdminsByFinca: vi.fn().mockResolvedValue([adminA]),
+      getDecisionMakersByOrg: vi.fn().mockResolvedValue([]),
+      getUmbralesAlerta,
+      founderPhone: undefined,
+      markAlertaEntregada,
+      eventId: 'evt-005',
+    }
+
+    const result = await entregarAlertaPlaga(ctx, deps)
+    // Second send blocked by dedup → already_sent (not quarantine double-fire)
+    expect(result.alert_sent).toBe(false)
+    expect(result.reason).toBe('already_sent')
+    expect(sender.calls).toHaveLength(0)
   })
 })

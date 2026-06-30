@@ -9,14 +9,24 @@
  * Three layers per design §6:
  *   §6.3 — Quarantine bypass: alerta_cuarentena pests always fire (threshold=1,
  *           never silenced, never configured). Short-circuits BEFORE the resolver.
+ *           Idempotency still applies to quarantine (per-event dedup runs for ALL pests).
  *   §6.2 — Non-Sigatoka real-time delivery: resolveUmbrales → fireAlerts →
  *           deliver to getAdminsByFinca (alertaClima pattern). Unconfigured = silent.
- *   §6.4 — M12 founder-shadow: DISABLED until PR#3 implements decision_alerta.ask_count.
- *           is_first_alert is always false; founderShadow path is kept but unreachable.
+ *   §6.4 — M12 founder-shadow: DISABLED (deferred — see note below).
+ *           is_first_alert is always false. founderShadow path is kept but unreachable.
  *
- * Idempotency (#1): entregarAlertaPlaga checks markAlertaEntregada before sending.
- * The caller (pgBoss) passes a markAlertaEntregada fn keyed by event_id so retries
- * (retryLimit=3 on procesar-intencion) do not re-deliver the same alert.
+ * M12 deferral rationale: decision_alerta.ask_count is null when a pest is configured via
+ * the web endpoint (no outreach row exists). ask_count=null → is_first_alert=true on EVERY
+ * alert for web-configured pests, causing the founder preview to fire repeatedly. Until we
+ * have a reliable delivered-history check (e.g. alerta_plaga_entregada_at count per finca+pest),
+ * M12 is disabled. Flip is_first_alert to ctx.is_first_alert ?? false when that check lands.
+ *
+ * Idempotency (Fix 1 / remediation): per-event dedup runs for ALL pests INCLUDING quarantine.
+ * The quarantine "bypass" means skip threshold resolution, NOT skip the per-event dedup.
+ * After the dedup gate passes, quarantine always delivers (never silenced by config).
+ * Fail-open on DB error: a missed idempotency mark beats silently dropping a real alert (P4/P7).
+ * After PR#3b: pgBoss extraction-stage path removed → the only retry risk is EventHandler
+ * async fire-and-forget, which is idempotent via markAlertaEntregada.
  *
  * Cross-tenant (#4, D31): getAdminsByFinca rows include org_id; delivery only sends to
  * admins whose org_id matches the context org_id.
@@ -59,10 +69,9 @@ export interface AlertaEntregaContext {
   campos_extraidos: Record<string, unknown>
   traceId: string
   /**
-   * M12: is_first_alert via decision_alerta.ask_count (PR#3b).
-   * EventHandler sets this by reading decision_alerta at confirmation time:
-   * ask_count=0 (or no row) → first alert ever for (finca, pest).
-   * pgBoss extraction path still passes false (M12 disabled for that path).
+   * M12: accepted for interface compat but currently IGNORED (M12 disabled).
+   * Reason: ask_count=null for web-configured pests → false positive on every delivery.
+   * Re-enable once a delivered-history check (alerta_plaga_entregada_at count) is in place.
    */
   is_first_alert?: boolean
 }
@@ -80,7 +89,7 @@ export interface AlertaEntregaDeps {
   founderPhone: string | undefined
   /**
    * M12 opt-in flag. Kept in interface for API compat but currently inert:
-   * is_first_alert is always false (M12 deferred to PR#3).
+   * is_first_alert is always false (M12 disabled — see AlertaEntregaContext.is_first_alert).
    */
   founderShadow?: boolean
   /**
@@ -164,8 +173,7 @@ function buildMensajeFounderPreview(
  *   5. extractObservation maps campos_extraidos → observations.
  *   6. fireAlerts → FiredAlert[]. Empty? → below_threshold or no_observation.
  *   7. Cross-tenant filter: only admins whose org_id matches ctx.org_id (D31).
- *   8. M12 founder-shadow: ENABLED (PR#3b). isFirstAlert from ctx.is_first_alert (set by EventHandler
- *      from decision_alerta.ask_count; false when pgBoss calls this path).
+ *   8. M12 founder-shadow: DISABLED (deferred). is_first_alert always false; founderShadow path inert.
  *   9. Deliver to getAdminsByFinca (deduped by phone, alertaClima pattern).
  */
 export async function entregarAlertaPlaga(
@@ -176,12 +184,15 @@ export async function entregarAlertaPlaga(
   const { sender, getAdminsByFinca, getDecisionMakersByOrg, getUmbralesAlerta, founderPhone, founderShadow, markAlertaEntregada, eventId } = deps
 
   // ── §0 Idempotency guard ────────────────────────────────────────────────────
-  // Only applies to non-quarantine (quarantine always fires by design H3/ADR-G).
-  // markAlertaEntregada returns false when already marked → skip re-send on retry.
-  if (!is_quarantine && eventId && markAlertaEntregada) {
+  // Runs for ALL pests — including quarantine (Fix 1 / remediation).
+  // The quarantine "bypass" (§6.3) means skip threshold resolution, NOT skip dedup.
+  // A double-"sí" on the same event must produce exactly ONE quarantine alert.
+  // Fail-open on DB error: after PR#3b removed the pgBoss extraction-stage path,
+  // the only re-delivery risk is EventHandler async fire-and-forget, which is rare.
+  // One missed dedup mark is safer than silently dropping a real quarantine alert (P4/P7).
+  if (eventId && markAlertaEntregada) {
     const isFresh = await markAlertaEntregada(eventId).catch((err: unknown) => {
-      // DB failure: log but proceed (fail-open on idempotency is safer than silent drop
-      // for a real pest alert — the alternative is to never send if DB is flaky).
+      // DB failure: log but proceed (fail-open — see comment above).
       console.error('[alertaEntrega] markAlertaEntregada failed, proceeding with delivery:', { eventId, err })
       return true
     })
@@ -193,7 +204,8 @@ export async function entregarAlertaPlaga(
 
   // ── §6.3 Quarantine bypass ──────────────────────────────────────────────────
   // Short-circuits BEFORE resolver, BEFORE opt-in check.
-  // Fixed threshold = 1 occurrence. Never silenced.
+  // Fixed threshold = 1 occurrence. Never silenced by config.
+  // Idempotency guard above already ran — a second call with the same eventId is rejected.
   if (is_quarantine) {
     const mensaje = buildMensajeAlertaCuarentena(pest_nombre_comun, finca_id)
 
@@ -335,10 +347,13 @@ export async function entregarAlertaPlaga(
   const mensaje = buildMensajeAlertaPlaga(pest_nombre_comun, finca_id, firedAlerts)
 
   // ── §6.4 M12 founder-shadow ─────────────────────────────────────────────────
-  // PR#3b: is_first_alert is now determined by EventHandler via decision_alerta.ask_count.
-  // ask_count=0 (or no row) at confirmation time → first alert ever for this (finca, pest).
-  // The pgBoss path still passes is_first_alert=false (M12 disabled for the old extraction path).
-  const isFirstAlert = ctx.is_first_alert ?? false
+  // DISABLED (deferred). is_first_alert is always false.
+  // Reason: decision_alerta.ask_count is null for web-configured pests (no outreach row),
+  // so ask_count=null → is_first_alert=true fires the preview on EVERY alert for those pests.
+  // Re-enable when we have a reliable delivered-history check (e.g. count of prior
+  // alerta_plaga_entregada_at rows for this finca+pest_type before this event).
+  // ctx.is_first_alert is accepted in the interface for future use but is intentionally ignored here.
+  const isFirstAlert = false
   if (founderShadow && isFirstAlert && founderPhone) {
     const preview = buildMensajeFounderPreview(pest_nombre_comun, finca_id, org_id, firedAlerts)
     await sender.enviarTexto(founderPhone, preview).catch((err: unknown) => {
