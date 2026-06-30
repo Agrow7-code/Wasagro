@@ -35,6 +35,7 @@ import {
   getDecisionAlerta,
   getDecisionMakersByOrg,
   getAdminsByFinca,
+  haEntregadoAlertaAntes,
 } from '../supabaseQueries.js'
 import { resolveUmbrales, toUmbralesSeveridad, shouldOutreach, PEST_ALERT_FIELDS, type OutreachConfig } from './umbralesAlerta.js'
 import { reduceAlertConfig, type PendingAlertConfigCtx } from './alertConfigReducer.js'
@@ -715,16 +716,19 @@ export async function handleEvento(
           const isQuarantine = plagaInfo?.alerta_cuarentena ?? false
           const orgId = usuario.org_id ?? ''
 
-          // M12 is_first_alert: disabled (see alertaEntrega.ts §6.4 comment).
-          // getDecisionAlerta is still called here so we surface DB failures (P4) rather than
-          // silencing them. On error we default to false (same as the disabled state).
-          // Fix 4 (P4): log the DB error before defaulting — never swallow silently.
-          const isFirstAlertPromise = (!isQuarantine && orgId)
-            ? getDecisionAlerta(orgId, usuario.finca_id, pestType)
-                .then(row => (row?.ask_count ?? 0) === 0)
+          // M12 is_first_alert: "no pest alert has ever been delivered for this (finca, pest)".
+          // Uses haEntregadoAlertaAntes (delivered-history check on alerta_plaga_entregada_at)
+          // rather than decision_alerta.ask_count, which is NULL for web-configured pests and
+          // would incorrectly fire the founder preview on every delivery for those pests.
+          // Quarantine pests skip this check — first-alert semantics don't apply (always deliver).
+          // On DB error: haEntregadoAlertaAntes returns true (fail-safe: not first alert, P7).
+          const isFirstAlertPromise = (!isQuarantine && usuario.finca_id)
+            ? haEntregadoAlertaAntes(usuario.finca_id, pestType)
+                .then(hasHistory => !hasHistory)
                 .catch((err: unknown) => {
-                  console.error('[EventHandler] getDecisionAlerta failed, defaulting is_first_alert=false:', {
-                    org_id: orgId,
+                  // Unexpected error path (haEntregadoAlertaAntes itself handles DB errors
+                  // internally, but just in case the promise rejects for another reason).
+                  console.error('[EventHandler] haEntregadoAlertaAntes failed, defaulting is_first_alert=false:', {
                     finca_id: usuario.finca_id,
                     pest_type: pestType,
                     traceId,
@@ -1040,13 +1044,10 @@ async function finalizarMuestreoSigatoka(
   await actualizarMensaje(ctx.mensajeId, { status: 'processed', evento_id: eventoId ?? undefined })
 
   // PR#4 cutover: umbrales_alerta is the single source of truth for Sigatoka thresholds.
-  // Dual-read (fincas.config.sigatoka_umbrales fallback) has been removed.
   // Resolution precedence: per-finca rows → org-default rows → UMBRALES_SEVERIDAD_DEFAULT.
   // The fail-safe (UMBRALES_SEVERIDAD_DEFAULT) is EXPLICIT: thresholds are NEVER silent.
   // J>10, I>5, M<9 always fire — even if getUmbralesAlerta returns [] (no rows configured).
   // New orgs get org-default rows seeded by seedUmbralesAlertaDefaults at onboarding.
-  // Note: SIGATOKA_UMBRAL_EE2_LEVE env var is DEPRECATED — has no effect (PR#4, D34).
-  //   Configure ee2Leve per org/finca via the alert config endpoints or umbrales_alerta table.
   let umbralesFinca = UMBRALES_SEVERIDAD_DEFAULT
   if (!ctx.orgId) {
     // Legacy user without org_id: getUmbralesAlerta can't resolve org-default rows, so we

@@ -14,7 +14,7 @@ vi.mock('../../../src/integrations/langfuse.js', () => ({
 }))
 
 import { UMBRALES_SEVERIDAD_DEFAULT } from '../../../src/pipeline/handlers/SigatokaHandler.js'
-import { seedMetricasPlantilla, seedFincaConfig, seedUmbralesAlertaDefaults } from '../../../src/pipeline/supabaseQueries.js'
+import { seedMetricasPlantilla, seedUmbralesAlertaDefaults } from '../../../src/pipeline/supabaseQueries.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -176,58 +176,6 @@ describe('seedMetricasPlantilla', () => {
   })
 })
 
-// ─── seedFincaConfig ──────────────────────────────────────────────────────────
-
-describe('seedFincaConfig', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('banano: llama update en fincas con sigatoka_umbrales del default', async () => {
-    let updatedConfig: unknown = null
-
-    const fromMock = vi.fn().mockImplementation((table: string) => {
-      if (table !== 'fincas') throw new Error(`Unexpected table: ${table}`)
-      const chain: Record<string, unknown> = {}
-      // select for reading current config
-      chain['select'] = vi.fn().mockReturnThis()
-      chain['eq'] = vi.fn().mockReturnThis()
-      chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: { config: {} }, error: null })
-      chain['single'] = vi.fn().mockResolvedValue({ data: { config: {} }, error: null })
-      chain['update'] = vi.fn().mockImplementation((payload: unknown) => {
-        updatedConfig = payload
-        return chain
-      })
-      chain['then'] = (resolve: (v: unknown) => void) => Promise.resolve({ data: null, error: null }).then(resolve)
-      return chain
-    })
-
-    const mock = { from: fromMock }
-    await seedFincaConfig('F001', 'banano', mock as any)
-
-    expect(fromMock).toHaveBeenCalledWith('fincas')
-    expect(updatedConfig).not.toBeNull()
-    const cfg = (updatedConfig as Record<string, unknown>)['config'] as Record<string, unknown>
-    expect(cfg).toHaveProperty('sigatoka_umbrales')
-    expect(cfg['sigatoka_umbrales']).toEqual(UMBRALES_SEVERIDAD_DEFAULT)
-  })
-
-  it('cacao: no actualiza fincas.config', async () => {
-    const fromMock = vi.fn()
-    const mock = { from: fromMock }
-
-    await expect(seedFincaConfig('F001', 'cacao', mock as any)).resolves.toBeUndefined()
-    expect(fromMock).not.toHaveBeenCalled()
-  })
-
-  it('cultivo desconocido: no actualiza fincas.config', async () => {
-    const fromMock = vi.fn()
-    const mock = { from: fromMock }
-
-    await expect(seedFincaConfig('F001', 'otro', mock as any)).resolves.toBeUndefined()
-    expect(fromMock).not.toHaveBeenCalled()
-  })
-})
 
 // ─── seedUmbralesAlertaDefaults (PR#4 — replaces seedFincaConfig for new orgs) ─
 // Post-cutover: new banano orgs/fincas get their Sigatoka org-defaults seeded

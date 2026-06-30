@@ -794,9 +794,6 @@ export function buildDescripcionRaw(data: SigatokaMuestreo): string {
 // Estos 4 valores deciden qué se le ALERTA al cliente y el estado general del
 // muestreo. Son criterio AGRONÓMICO, no técnico: el valor correcto lo fija el
 // agrónomo de la exportadora. Hasta esa confirmación operan con estos defaults.
-//
-// `ee2Leve` (EE2 1-3) es el de MAYOR incertidumbre — PLACEHOLDER sin respaldo
-// agronómico; overridable sin deploy por env `SIGATOKA_UMBRAL_EE2_LEVE`.
 // Per-finca: pasar `umbrales` a buildWhatsappSummary cuando exista ese dato (D18,
 // umbrales por finca) — cada exportadora puede tener su propio criterio.
 export interface UmbralesSeveridad {
@@ -806,61 +803,19 @@ export interface UmbralesSeveridad {
   hojasFuncionalesMin: number  // M: mínimo de hojas funcionales → ATENCIÓN si por debajo
 }
 
-// Lee un umbral desde una env var: usa el valor sólo si es un número positivo
-// finito; ante ausencia/no-numérico/no-positivo cae al default (fail-safe). Pura.
-export function resolverUmbralEnv(raw: string | undefined, fallback: number): number {
-  const n = raw != null ? Number(raw) : NaN
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
 export const UMBRALES_SEVERIDAD_DEFAULT: UmbralesSeveridad = {
   ee3a6Severo: 10,
   ee2Avanzado: 5,
   // SILENCED BY DEFAULT (101 > the max possible H of 100, so it never fires): ee2Leve
   // was a placeholder (30) with no agronomic backing. Shipping it would alert paying
   // clients on an unvalidated signal (P7, D29). It stays off until a finca/org configures
-  // a real value via the umbrales_alerta table (SDD configurable-alert-thresholds, D34).
-  //
-  // DEPRECATED: SIGATOKA_UMBRAL_EE2_LEVE env var is no longer read here (PR#4 cutover).
-  // umbrales_alerta is now the single source of truth for all Sigatoka thresholds.
-  // Configure ee2Leve per org/finca via the alert config web endpoints or migration.
-  // The env var is intentionally ignored — removing it from process.env has no effect.
+  // a real value via the umbrales_alerta table (D34).
   ee2Leve: 101,
   hojasFuncionalesMin: 9,
 }
 
 // Retrocompat: el umbral suelto que antes era una constante. Apunta al default.
 export const UMBRAL_EE2_LEVE = UMBRALES_SEVERIDAD_DEFAULT.ee2Leve
-
-/**
- * @deprecated PR#4 cutover — DEAD CODE in the hot path. EventHandler now reads Sigatoka
- * thresholds from the `umbrales_alerta` table (getUmbralesAlerta + resolveUmbrales), not
- * from fincas.config. Kept only until its tests are removed; do NOT re-wire it.
- *
- * Parses a raw finca.config value for a valid UmbralesSeveridad object.
- * Returns null if the config is absent/invalid (fail-safe — never fabricates thresholds, P1).
- */
-export function parseFincaUmbrales(config: unknown): UmbralesSeveridad | null {
-  if (config == null || typeof config !== 'object') return null
-  const cfg = config as Record<string, unknown>
-  const raw = cfg['sigatoka_umbrales']
-  if (raw == null || typeof raw !== 'object') return null
-  const u = raw as Record<string, unknown>
-  const isPositiveFinite = (v: unknown): v is number =>
-    typeof v === 'number' && Number.isFinite(v) && v > 0
-  if (
-    !isPositiveFinite(u['ee3a6Severo']) ||
-    !isPositiveFinite(u['ee2Avanzado']) ||
-    !isPositiveFinite(u['ee2Leve'])     ||
-    !isPositiveFinite(u['hojasFuncionalesMin'])
-  ) return null
-  return {
-    ee3a6Severo:         u['ee3a6Severo'],
-    ee2Avanzado:         u['ee2Avanzado'],
-    ee2Leve:             u['ee2Leve'],
-    hojasFuncionalesMin: u['hojasFuncionalesMin'],
-  }
-}
 
 // Etiqueta humana de cada columna de tabla semana para el veredicto de checksum.
 const LABEL_COLUMNA_SEMANA: Record<string, string> = {

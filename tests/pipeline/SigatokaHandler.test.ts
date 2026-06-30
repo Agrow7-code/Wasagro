@@ -29,8 +29,6 @@ import {
   reconciliarCrossField,
   reconciliarPorDesacuerdo,
   elegirMejorDatos,
-  resolverUmbralEnv,
-  parseFincaUmbrales,
   UMBRALES_SEVERIDAD_DEFAULT,
   type UmbralesSeveridad,
   type ResumenColumnaSinCalculo,
@@ -505,18 +503,6 @@ describe('buildWhatsappSummary — alerta multi-columna', () => {
 // ─── #1: umbrales de severidad configurables (placeholder agronómico) ─────────
 
 describe('umbrales de severidad Sigatoka — configurables (#1)', () => {
-  it('resolverUmbralEnv usa el valor del env cuando es un número positivo válido', () => {
-    expect(resolverUmbralEnv('45', 30)).toBe(45)
-    expect(resolverUmbralEnv('12.5', 30)).toBe(12.5)
-  })
-
-  it('resolverUmbralEnv cae al fallback con env ausente, no-numérico o no-positivo', () => {
-    expect(resolverUmbralEnv(undefined, 30)).toBe(30)
-    expect(resolverUmbralEnv('abc', 30)).toBe(30)
-    expect(resolverUmbralEnv('0', 30)).toBe(30)
-    expect(resolverUmbralEnv('-5', 30)).toBe(30)
-  })
-
   it('el default de EE2 leve está silenciado (placeholder D29 sin respaldo, P7)', () => {
     // ee2Leve era un placeholder (30) sin respaldo agronómico. Hasta que el cliente lo
     // configure (SDD configurable-alert-thresholds), el default NO dispara la alerta —
@@ -1534,62 +1520,9 @@ describe('reconciliarCrossField', () => {
   })
 })
 
-// ─── T-16: parseFincaUmbrales — per-farm threshold from fincas.config ─────────
+// ─── buildWhatsappSummary threshold override contract ────────────────────────
 
-describe('parseFincaUmbrales (T-16)', () => {
-  it('returns valid UmbralesSeveridad when all fields are present and numeric', () => {
-    const config = {
-      sigatoka_umbrales: {
-        ee3a6Severo: 5,
-        ee2Avanzado: 3,
-        ee2Leve: 25,
-        hojasFuncionalesMin: 10,
-      },
-    }
-    const result = parseFincaUmbrales(config)
-    expect(result).not.toBeNull()
-    expect(result!.ee3a6Severo).toBe(5)
-    expect(result!.ee2Avanzado).toBe(3)
-    expect(result!.ee2Leve).toBe(25)
-    expect(result!.hojasFuncionalesMin).toBe(10)
-  })
-
-  it('returns null when sigatoka_umbrales key is absent (empty config)', () => {
-    expect(parseFincaUmbrales({})).toBeNull()
-  })
-
-  it('returns null when finca.config is null', () => {
-    expect(parseFincaUmbrales(null)).toBeNull()
-  })
-
-  it('returns null when finca.config is undefined', () => {
-    expect(parseFincaUmbrales(undefined)).toBeNull()
-  })
-
-  it('returns null when a required field is missing from sigatoka_umbrales', () => {
-    const config = {
-      sigatoka_umbrales: {
-        ee3a6Severo: 5,
-        // ee2Avanzado missing
-        ee2Leve: 25,
-        hojasFuncionalesMin: 10,
-      },
-    }
-    expect(parseFincaUmbrales(config)).toBeNull()
-  })
-
-  it('returns null when a field is not a positive number (invalid threshold)', () => {
-    const config = {
-      sigatoka_umbrales: {
-        ee3a6Severo: -1, // invalid
-        ee2Avanzado: 3,
-        ee2Leve: 25,
-        hojasFuncionalesMin: 10,
-      },
-    }
-    expect(parseFincaUmbrales(config)).toBeNull()
-  })
-
+describe('buildWhatsappSummary threshold override contract', () => {
   it('overriding umbrales changes buildWhatsappSummary alert thresholds', () => {
     // Use very high ee3a6Severo threshold so no CRITICO alert fires
     const highThreshold: UmbralesSeveridad = {
@@ -1622,22 +1555,13 @@ describe('parseFincaUmbrales (T-16)', () => {
     const withDefault   = buildWhatsappSummary(data, UMBRALES_SEVERIDAD_DEFAULT)
     expect(withUndefined).toBe(withDefault)
   })
-
-  // Fix 6 — parseFincaUmbrales null-safety (EventHandler fallback when finca is null)
-  it('parseFincaUmbrales({ config: null }) returns null so EventHandler uses defaults (Fix 6)', () => {
-    expect(parseFincaUmbrales(null)).toBeNull()
-    expect(parseFincaUmbrales(undefined)).toBeNull()
-    // finca row present but config field is null
-    const fincaWithNullConfig = { config: null }
-    expect(parseFincaUmbrales(fincaWithNullConfig)).toBeNull()
-  })
 })
 
 // ─── T1.13 — EventHandler Sigatoka path: table-first resolution ──────────────
 // These tests verify the threshold resolution contract that EventHandler must
-// follow (T1.14). The pure helper functions are tested directly here; the
-// EventHandler's finalizarMuestreoSigatoka integration is verified via the
-// dual-read contract.
+// follow. The pure helper functions are tested directly here; the
+// EventHandler's finalizarMuestreoSigatoka integration relies on umbrales_alerta
+// as the single source of truth (PR#4 cutover — dual-read removed).
 
 import {
   resolveUmbrales,
@@ -1674,19 +1598,14 @@ describe('EventHandler Sigatoka threshold resolution contract (T1.13)', () => {
     expect(umbrales.hojasFuncionalesMin).toBe(8)
   })
 
-  it('dual-read fallback: when getUmbralesAlerta returns empty, falls back to parseFincaUmbrales result', () => {
-    // Simulate: table empty → fallback → parseFincaUmbrales(finca.config)
-    const fincaConfig = {
-      sigatoka_umbrales: { ee3a6Severo: 11, ee2Avanzado: 4, ee2Leve: 25, hojasFuncionalesMin: 10 },
-    }
-    const fallback = parseFincaUmbrales(fincaConfig)
-    expect(fallback).not.toBeNull()
-    expect(fallback!.ee3a6Severo).toBe(11)
-    // resolveUmbrales([]) returns null — EventHandler fall-safe uses UMBRALES_SEVERIDAD_DEFAULT
-    // or dual-read parseFincaUmbrales result (whichever is available first in chain)
+  it('when getUmbralesAlerta returns empty → resolveUmbrales null → EventHandler uses UMBRALES_SEVERIDAD_DEFAULT', () => {
+    // PR#4: dual-read fallback (fincas.config) removed. table empty → UMBRALES_SEVERIDAD_DEFAULT.
     const emptyResolved = resolveUmbrales([])
     expect(emptyResolved).toBeNull()
-    // null → use fallback (dual-read logic in T1.14). If no fallback, defaults fire.
+    // Fail-safe: EventHandler uses UMBRALES_SEVERIDAD_DEFAULT when resolved is null.
+    expect(11 > UMBRALES_SEVERIDAD_DEFAULT.ee3a6Severo).toBe(true)
+    expect(6 > UMBRALES_SEVERIDAD_DEFAULT.ee2Avanzado).toBe(true)
+    expect(8 < UMBRALES_SEVERIDAD_DEFAULT.hojasFuncionalesMin).toBe(true)
   })
 
   it('ee2Leve enabled=false row → Infinity → comparison in buildWhatsappSummary never fires', () => {
@@ -1715,49 +1634,29 @@ describe('EventHandler Sigatoka threshold resolution contract (T1.13)', () => {
   })
 })
 
-// ─── No-regression invariant: J/I/M must fire even when table is empty (Fix 2) ─
+// ─── No-regression invariant: J/I/M must fire even when table is empty ────────
 
-describe('No-regression: Sigatoka thresholds fire when table is empty (cutover safety)', () => {
+describe('No-regression: Sigatoka thresholds fire when table is empty (PR#4 fail-safe)', () => {
   // These tests are the deterministic proof that the fail-safe in EventHandler.ts
   // ALWAYS fires J>10, I>5, M<9 via UMBRALES_SEVERIDAD_DEFAULT — never goes silent.
+  // PR#4: umbrales_alerta is the single source of truth; fincas.config no longer read.
 
-  it('table empty + DUAL_READ=true + finca has sigatoka_umbrales → uses finca config values', () => {
-    // Resolving from finca config when table is empty and dual-read is active
-    const fincaConfig = { sigatoka_umbrales: { ee3a6Severo: 11, ee2Avanzado: 4, ee2Leve: 99, hojasFuncionalesMin: 10 } }
-    const parsed = parseFincaUmbrales(fincaConfig)
-    expect(parsed).not.toBeNull()
-    // EventHandler fail-safe: when resolveUmbrales([]) → null → use parseFincaUmbrales result
+  it('table empty → resolveUmbrales null → UMBRALES_SEVERIDAD_DEFAULT fires J/I/M (never silent)', () => {
+    // PR#4: dual-read (fincas.config) removed. table empty → UMBRALES_SEVERIDAD_DEFAULT.
     const emptyResolved = resolveUmbrales([])
     expect(emptyResolved).toBeNull()
-    // Caller uses parsed values; J fires at 11, I fires at 4, M fires at 10
-    expect(parsed!.ee3a6Severo).toBe(11)
-    expect(parsed!.ee2Avanzado).toBe(4)
-    expect(parsed!.hojasFuncionalesMin).toBe(10)
-  })
-
-  it('table empty + DUAL_READ=true + finca.config = {} → falls back to UMBRALES_SEVERIDAD_DEFAULT, J/I/M STILL fire', () => {
-    // parseFincaUmbrales({}) returns null → EventHandler must use UMBRALES_SEVERIDAD_DEFAULT
-    const noConfig = {}
-    const parsed = parseFincaUmbrales(noConfig)
-    expect(parsed).toBeNull() // no sigatoka_umbrales in config
-
-    // Fail-safe: EventHandler assigns UMBRALES_SEVERIDAD_DEFAULT explicitly when resolution is null.
-    // This test VERIFIES that UMBRALES_SEVERIDAD_DEFAULT fires J>10, I>5, M<9.
+    // Fail-safe: EventHandler assigns UMBRALES_SEVERIDAD_DEFAULT explicitly.
     const defaults = UMBRALES_SEVERIDAD_DEFAULT
-    // J (ee3a6Severo) fires at > 10
     expect(defaults.ee3a6Severo).toBe(10)
     expect(11 > defaults.ee3a6Severo).toBe(true)
-    // I (ee2Avanzado) fires at > 5
     expect(defaults.ee2Avanzado).toBe(5)
     expect(6 > defaults.ee2Avanzado).toBe(true)
-    // M (hojasFuncionalesMin) fires at < 9
     expect(defaults.hojasFuncionalesMin).toBe(9)
     expect(8 < defaults.hojasFuncionalesMin).toBe(true)
   })
 
-  it('table empty + DUAL_READ not set → UMBRALES_SEVERIDAD_DEFAULT fires J/I/M (never silent)', () => {
-    // When dual-read flag is not set AND table is empty, EventHandler now EXPLICITLY
-    // assigns UMBRALES_SEVERIDAD_DEFAULT rather than passing undefined.
+  it('table empty → UMBRALES_SEVERIDAD_DEFAULT fires J/I/M (never silent)', () => {
+    // When table is empty, EventHandler EXPLICITLY assigns UMBRALES_SEVERIDAD_DEFAULT.
     // This test verifies the fail-safe contract: defaults are non-trivial and fire alerts.
     const defaults = UMBRALES_SEVERIDAD_DEFAULT
     // J: 11 > 10 (ee3a6Severo threshold at 10%)

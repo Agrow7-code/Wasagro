@@ -12,14 +12,12 @@
  *           Idempotency still applies to quarantine (per-event dedup runs for ALL pests).
  *   §6.2 — Non-Sigatoka real-time delivery: resolveUmbrales → fireAlerts →
  *           deliver to getAdminsByFinca (alertaClima pattern). Unconfigured = silent.
- *   §6.4 — M12 founder-shadow: DISABLED (deferred — see note below).
- *           is_first_alert is always false. founderShadow path is kept but unreachable.
- *
- * M12 deferral rationale: decision_alerta.ask_count is null when a pest is configured via
- * the web endpoint (no outreach row exists). ask_count=null → is_first_alert=true on EVERY
- * alert for web-configured pests, causing the founder preview to fire repeatedly. Until we
- * have a reliable delivered-history check (e.g. alerta_plaga_entregada_at count per finca+pest),
- * M12 is disabled. Flip is_first_alert to ctx.is_first_alert ?? false when that check lands.
+ *   §6.4 — M12 founder-shadow: ENABLED (chore/alert-thresholds-cleanup-m12).
+ *           is_first_alert = ctx.is_first_alert ?? false. True iff no prior delivered alert
+ *           for this (finca, pest) — checked via haEntregadoAlertaAntes (delivered-history
+ *           on alerta_plaga_entregada_at). Works for web-configured pests (no decision_alerta
+ *           row) and outreach-configured pests alike. founderShadow path activates on genuine
+ *           first alerts when ALERT_FOUNDER_SHADOW=true.
  *
  * Idempotency (Fix 1 / remediation): per-event dedup runs for ALL pests INCLUDING quarantine.
  * The quarantine "bypass" means skip threshold resolution, NOT skip the per-event dedup.
@@ -69,9 +67,10 @@ export interface AlertaEntregaContext {
   campos_extraidos: Record<string, unknown>
   traceId: string
   /**
-   * M12: accepted for interface compat but currently IGNORED (M12 disabled).
-   * Reason: ask_count=null for web-configured pests → false positive on every delivery.
-   * Re-enable once a delivered-history check (alerta_plaga_entregada_at count) is in place.
+   * M12: true iff no pest alert has ever been delivered for this (finca_id, pest_type).
+   * Set by EventHandler via haEntregadoAlertaAntes (delivered-history check on
+   * alerta_plaga_entregada_at). Works for web-configured pests — no decision_alerta row needed.
+   * Defaults to false when undefined (quarantine path, legacy callers).
    */
   is_first_alert?: boolean
 }
@@ -88,8 +87,9 @@ export interface AlertaEntregaDeps {
   /** FOUNDER_PHONE env value (undefined = skip). */
   founderPhone: string | undefined
   /**
-   * M12 opt-in flag. Kept in interface for API compat but currently inert:
-   * is_first_alert is always false (M12 disabled — see AlertaEntregaContext.is_first_alert).
+   * M12 opt-in flag. When true + is_first_alert=true + founderPhone set: routes a preview
+   * to the founder before (or alongside) the client delivery.
+   * Controlled by ALERT_FOUNDER_SHADOW env var (default off).
    */
   founderShadow?: boolean
   /**
@@ -173,7 +173,7 @@ function buildMensajeFounderPreview(
  *   5. extractObservation maps campos_extraidos → observations.
  *   6. fireAlerts → FiredAlert[]. Empty? → below_threshold or no_observation.
  *   7. Cross-tenant filter: only admins whose org_id matches ctx.org_id (D31).
- *   8. M12 founder-shadow: DISABLED (deferred). is_first_alert always false; founderShadow path inert.
+ *   8. M12 founder-shadow: if founderShadow + is_first_alert + founderPhone → founder preview.
  *   9. Deliver to getAdminsByFinca (deduped by phone, alertaClima pattern).
  */
 export async function entregarAlertaPlaga(
@@ -347,13 +347,12 @@ export async function entregarAlertaPlaga(
   const mensaje = buildMensajeAlertaPlaga(pest_nombre_comun, finca_id, firedAlerts)
 
   // ── §6.4 M12 founder-shadow ─────────────────────────────────────────────────
-  // DISABLED (deferred). is_first_alert is always false.
-  // Reason: decision_alerta.ask_count is null for web-configured pests (no outreach row),
-  // so ask_count=null → is_first_alert=true fires the preview on EVERY alert for those pests.
-  // Re-enable when we have a reliable delivered-history check (e.g. count of prior
-  // alerta_plaga_entregada_at rows for this finca+pest_type before this event).
-  // ctx.is_first_alert is accepted in the interface for future use but is intentionally ignored here.
-  const isFirstAlert = false
+  // Re-enabled: is_first_alert now comes from haEntregadoAlertaAntes (delivered-history
+  // check on alerta_plaga_entregada_at), which works correctly for web-configured pests
+  // (no decision_alerta row). ctx.is_first_alert=true iff no prior alert was ever
+  // delivered for this (finca, pest) — set by EventHandler before calling entregarAlertaPlaga.
+  // Defaults to false when ctx.is_first_alert is undefined (quarantine, or legacy callers).
+  const isFirstAlert = ctx.is_first_alert ?? false
   if (founderShadow && isFirstAlert && founderPhone) {
     const preview = buildMensajeFounderPreview(pest_nombre_comun, finca_id, org_id, firedAlerts)
     await sender.enviarTexto(founderPhone, preview).catch((err: unknown) => {
