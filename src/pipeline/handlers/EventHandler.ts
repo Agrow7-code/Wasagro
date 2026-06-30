@@ -694,6 +694,17 @@ export async function handleEvento(
         // eventId for the idempotency guard. This is the ONLY delivery path for
         // non-Sigatoka pest alerts; the pgBoss extraction-stage call remains gated OFF.
         // Runs async (best-effort, P4) — never blocks the farmer's confirmation message.
+
+        // Fix 3 (P4): log when alerta_urgente fired but no eventId (saveEvento returned null).
+        if (ext.alerta_urgente && !eventoId) {
+          const plagaForLog = ext.campos_extraidos['plaga_tipo'] as string | undefined
+          console.error('[EventHandler] alerta_urgente but no event id — pest alert delivery skipped', {
+            finca_id: usuario.finca_id,
+            pest: plagaForLog,
+            traceId,
+          })
+        }
+
         if (ext.alerta_urgente && eventoId && isAlertDeliveryEnabled() && usuario.finca_id) {
           const plagaInfo = normalizarPlaga(
             ext.campos_extraidos['plaga_tipo'] as string | null | undefined,
@@ -704,14 +715,23 @@ export async function handleEvento(
           const isQuarantine = plagaInfo?.alerta_cuarentena ?? false
           const orgId = usuario.org_id ?? ''
 
-          // M12 is_first_alert: determined by decision_alerta.ask_count.
-          // ask_count reflects how many times we have already outreached for this
-          // (org, finca, pest). ask_count=0 (or no row) → first alert ever for this pair.
-          // Non-quarantine only: quarantine always fires regardless.
+          // M12 is_first_alert: disabled (see alertaEntrega.ts §6.4 comment).
+          // getDecisionAlerta is still called here so we surface DB failures (P4) rather than
+          // silencing them. On error we default to false (same as the disabled state).
+          // Fix 4 (P4): log the DB error before defaulting — never swallow silently.
           const isFirstAlertPromise = (!isQuarantine && orgId)
             ? getDecisionAlerta(orgId, usuario.finca_id, pestType)
                 .then(row => (row?.ask_count ?? 0) === 0)
-                .catch(() => false)
+                .catch((err: unknown) => {
+                  console.error('[EventHandler] getDecisionAlerta failed, defaulting is_first_alert=false:', {
+                    org_id: orgId,
+                    finca_id: usuario.finca_id,
+                    pest_type: pestType,
+                    traceId,
+                    err,
+                  })
+                  return false
+                })
             : Promise.resolve(false)
 
           const sender = _sender!
