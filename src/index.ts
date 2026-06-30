@@ -33,6 +33,8 @@ import { calcularPrecio, getBasePrice, getSegmentLabel, inferPlanSegment, isPaid
 import { metricasRouter } from './agents/metricas/router.js'
 import { fincaRouter } from './agents/finca/router.js'
 import { createProvisionHandler } from './agents/provisioning/provisionarCliente.js'
+import { adminRouter } from './agents/admin/router.js'
+import { roleGuard } from './auth/roleGuard.js'
 
 // ── Startup env var validation ────────────────────────────────────────────────
 function validarEnvVars(): void {
@@ -220,6 +222,13 @@ app.use('/api/auth/*', rateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10, 
 app.route('/auth', authRouter)
 app.route('/api/auth', authRouter)
 app.route('/api/webhook', webhookRouter)
+
+// ── Admin back-office (D28) — director-only, NO planGuard ──────────────────
+// DO NOT add planGuard here — admin must never be blocked by the director's own billing status.
+app.use('/api/admin/*', authMiddleware)
+app.use('/api/admin/*', roleGuard)
+app.use('/api/admin/*', rateLimiter({ windowMs: 60_000, maxRequests: 60 }))
+app.route('/api/admin', adminRouter)
 
 app.use('/api/metricas/*', authMiddleware)
 app.use('/api/finca/*', authMiddleware)
