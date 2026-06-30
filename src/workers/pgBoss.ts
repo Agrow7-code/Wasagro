@@ -215,23 +215,18 @@ async function procesarIntencionWorker(
       '',
     )
 
-    // T2.4 / T2.6 / T2.8 — PR#2: Alert delivery capability (tested, wired, but gated OFF).
+    // T2.4 / T2.6 / T2.8 — PR#2: Alert delivery capability wired but kept gated at this path.
     //
-    // Live delivery gated OFF until PR#3 wires it at the confirmation point
-    // (event_id idempotency + decision_alerta). Do not enable in prod until then.
+    // PR#3b DONE: canonical delivery now lives in EventHandler (pending_confirmation path)
+    // AFTER eventos_campo is inserted and event_id is available for the idempotency guard.
+    // This pgBoss extraction-stage path remains GATED OFF permanently — do not enable.
     //
-    // WHY GATED: at this point in the flow the farmer has NOT confirmed yet —
-    // eventos_campo has no row, so there is no event_id to key idempotency on.
-    // Code after this block (sesiones_activas UPDATE ~line 303, lotes query) can throw,
-    // triggering a pgBoss retry (retryLimit=3) which would re-deliver the alert.
-    // PR#3 will call entregarAlertaPlaga from EventHandler (confirmation point) where
-    // the event IS persisted and event_id is available for the dedup guard.
+    // WHY KEPT GATED: at this point the farmer has NOT confirmed yet — eventos_campo has
+    // no row, so there is no event_id to key idempotency on. pgBoss retryLimit=3 would
+    // re-deliver. The EventHandler confirmation path resolves all of this.
     //
-    // §6.3 Quarantine bypass, §6.2 Non-Sigatoka delivery, §6.4 M12 founder-shadow
-    // are fully implemented and tested in alertaEntrega.ts — this gate is the only
-    // thing standing between the tested capability and a double-send risk in prod.
-    //
-    // To enable for testing: ALERT_DELIVERY_ENABLED=true (never set in prod until PR#3).
+    // SAFE TO REMOVE in PR#4 (cutover) together with the dual-read branch.
+    // To avoid accidental double-delivery, leave ALERT_DELIVERY_ENABLED default off here.
     if (isAlertDeliveryEnabled() && ext.alerta_urgente && plagaPestType) {
       const sender = crearSenderWhatsApp()
       const founderPhone = process.env['FOUNDER_PHONE'] ?? undefined

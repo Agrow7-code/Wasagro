@@ -2,7 +2,9 @@
  * T2.4 / T2.6 / T2.8 — Alert delivery orchestration for per-pest field alerts.
  *
  * Implements the generic per-pest firing + delivery path described in design §6.
- * Called from pgBoss AFTER marcarIntencionCompletada (P7 — only deliver on confirmed events).
+ * PR#3b: Called from EventHandler at the farmer confirmation point (pending_confirmation → saveEvento),
+ * AFTER eventos_campo is inserted. This is the canonical delivery path for confirmed events.
+ * The pgBoss extraction-stage call remains gated OFF (ALERT_DELIVERY_ENABLED default off).
  *
  * Three layers per design §6:
  *   §6.3 — Quarantine bypass: alerta_cuarentena pests always fire (threshold=1,
@@ -57,9 +59,10 @@ export interface AlertaEntregaContext {
   campos_extraidos: Record<string, unknown>
   traceId: string
   /**
-   * M12: DISABLED until PR#3 (needs decision_alerta.ask_count).
-   * Always treated as false; kept in interface for backward-compat with tests.
-   * // M12 deferred to PR#3 (needs decision_alerta.ask_count); always false until then
+   * M12: is_first_alert via decision_alerta.ask_count (PR#3b).
+   * EventHandler sets this by reading decision_alerta at confirmation time:
+   * ask_count=0 (or no row) → first alert ever for (finca, pest).
+   * pgBoss extraction path still passes false (M12 disabled for that path).
    */
   is_first_alert?: boolean
 }
@@ -161,7 +164,8 @@ function buildMensajeFounderPreview(
  *   5. extractObservation maps campos_extraidos → observations.
  *   6. fireAlerts → FiredAlert[]. Empty? → below_threshold or no_observation.
  *   7. Cross-tenant filter: only admins whose org_id matches ctx.org_id (D31).
- *   8. M12 founder-shadow: DISABLED (is_first_alert always false until PR#3).
+ *   8. M12 founder-shadow: ENABLED (PR#3b). isFirstAlert from ctx.is_first_alert (set by EventHandler
+ *      from decision_alerta.ask_count; false when pgBoss calls this path).
  *   9. Deliver to getAdminsByFinca (deduped by phone, alertaClima pattern).
  */
 export async function entregarAlertaPlaga(
@@ -331,10 +335,10 @@ export async function entregarAlertaPlaga(
   const mensaje = buildMensajeAlertaPlaga(pest_nombre_comun, finca_id, firedAlerts)
 
   // ── §6.4 M12 founder-shadow ─────────────────────────────────────────────────
-  // M12 deferred to PR#3 (needs decision_alerta.ask_count); always false until then.
-  // The founderShadow path is kept here for forward-compat but is unreachable:
-  // is_first_alert is forced to false by the caller (pgBoss).
-  const isFirstAlert = false // ctx.is_first_alert always ignored until PR#3
+  // PR#3b: is_first_alert is now determined by EventHandler via decision_alerta.ask_count.
+  // ask_count=0 (or no row) at confirmation time → first alert ever for this (finca, pest).
+  // The pgBoss path still passes is_first_alert=false (M12 disabled for the old extraction path).
+  const isFirstAlert = ctx.is_first_alert ?? false
   if (founderShadow && isFirstAlert && founderPhone) {
     const preview = buildMensajeFounderPreview(pest_nombre_comun, finca_id, org_id, firedAlerts)
     await sender.enviarTexto(founderPhone, preview).catch((err: unknown) => {
