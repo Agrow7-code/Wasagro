@@ -931,6 +931,51 @@ export async function seedFincaConfig(
 }
 
 /**
+ * PR#4 CUTOVER — Seeds org-default `umbrales_alerta` rows for newly onboarded banano orgs.
+ *
+ * Replaces seedFincaConfig as the Sigatoka threshold seed path now that
+ * `umbrales_alerta` is the single source of truth (dual-read removed in PR#4).
+ *
+ * Inserts 4 org-default rows (finca_id=null) for `sigatoka_negra`, mirroring the
+ * values backfilled by migration 073 for pre-existing orgs:
+ *   ee3a6Severo  gt  10  enabled=true   (J — 10% threshold)
+ *   ee2Avanzado  gt   5  enabled=true   (I — 5% threshold)
+ *   hojasFuncionalesMin lt 9 enabled=true  (M — 9 leaves minimum)
+ *   ee2Leve      gt  30  enabled=false  (H — silenced placeholder, D29/P7)
+ *
+ * Idempotent: upsert uses the named unique constraint `uq_umbrales_alerta_scope`
+ * (same as upsertUmbralAlerta, Fix 4). Re-running is a no-op.
+ * Best-effort (P4): never re-throws — logs on error.
+ * No-op for non-banano crops (cacao has no Sigatoka alerts).
+ */
+export async function seedUmbralesAlertaDefaults(
+  orgId: string,
+  cultivo: string,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
+  const cultivoNorm = cultivo.toLowerCase().trim()
+  if (cultivoNorm !== 'banano') return
+
+  const rows = [
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'ee3a6Severo',        operador: 'gt' as const, valor: 10, enabled: true  },
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'ee2Avanzado',        operador: 'gt' as const, valor: 5,  enabled: true  },
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'hojasFuncionalesMin',operador: 'lt' as const, valor: 9,  enabled: true  },
+    { org_id: orgId, finca_id: null as string | null, pest_type: 'sigatoka_negra', campo: 'ee2Leve',            operador: 'gt' as const, valor: 30, enabled: false },
+  ]
+
+  try {
+    const { error } = await client
+      .from('umbrales_alerta')
+      .upsert(rows, { onConflict: 'uq_umbrales_alerta_scope' })
+    if (error) {
+      console.error('[seedUmbralesAlertaDefaults] Error sembrando org-defaults en umbrales_alerta:', error)
+    }
+  } catch (err) {
+    console.error('[seedUmbralesAlertaDefaults] Error inesperado:', err)
+  }
+}
+
+/**
  * Starts the trial clock for an organization that has just completed onboarding.
  * The condition `AND trial_inicio IS NULL` makes this idempotent — safe to call
  * multiple times; the first call wins and subsequent calls are no-ops.
