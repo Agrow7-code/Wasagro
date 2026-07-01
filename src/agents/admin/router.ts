@@ -5,6 +5,18 @@ import { ProvisionInputSchema, provisionarCliente } from '../provisioning/provis
 
 export const adminRouter = new Hono()
 
+// PostgREST returns an embedded aggregate over a to-many relationship as an
+// ARRAY (`[{ count: N }]`), not a bare object. Older code read `.count`
+// directly off the relation, which yielded `undefined → 0` for every org.
+// Handle both shapes defensively so a PostgREST behavior change can't silently
+// zero the counts again.
+function embeddedCount(
+  rel: { count: number } | { count: number }[] | null | undefined,
+): number {
+  if (Array.isArray(rel)) return rel[0]?.count ?? 0
+  return rel?.count ?? 0
+}
+
 // ─── GET /api/admin/orgs — org list with ACTUAL + CONTRACTUAL counts ─────────
 //
 // T-S2.0 decision (recorded here per tasks.md): a PostgREST aggregate embed
@@ -41,8 +53,8 @@ adminRouter.get('/orgs', async (c) => {
     fincas_contratadas: number
     usuarios_contratados: number
     precio_mensual: number | null
-    fincas: { count: number } | null
-    usuarios: { count: number } | null
+    fincas: { count: number } | { count: number }[] | null
+    usuarios: { count: number } | { count: number }[] | null
   }
 
   const orgs = ((data ?? []) as unknown as OrgRow[]).map((row) => ({
@@ -52,8 +64,8 @@ adminRouter.get('/orgs', async (c) => {
     subscription_status: row.subscription_status,
     trial_inicio: row.trial_inicio,
     trial_fin: row.trial_fin,
-    fincas_count: row.fincas?.count ?? 0,
-    usuarios_count: row.usuarios?.count ?? 0,
+    fincas_count: embeddedCount(row.fincas),
+    usuarios_count: embeddedCount(row.usuarios),
     fincas_contratadas: row.fincas_contratadas,
     usuarios_contratados: row.usuarios_contratados,
     precio_mensual: row.precio_mensual,

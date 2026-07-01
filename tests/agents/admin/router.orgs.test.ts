@@ -51,8 +51,11 @@ describe('GET /api/admin/orgs', () => {
           fincas_contratadas: 1,
           usuarios_contratados: 1,
           precio_mensual: 10,
-          fincas: { count: 3 },
-          usuarios: { count: 2 },
+          // PostgREST returns embedded to-many aggregates as an ARRAY
+          // (`[{ count: N }]`), not a bare object — mirror the real wire shape
+          // so a regression to `row.fincas?.count` (→ 0) is caught here.
+          fincas: [{ count: 3 }],
+          usuarios: [{ count: 2 }],
         },
       ],
       error: null,
