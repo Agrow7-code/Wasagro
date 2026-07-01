@@ -4,7 +4,7 @@ vi.mock('../../src/integrations/supabase.js', () => ({
   supabase: {},
 }))
 
-import { getConversacionesList, getConversacionThread } from '../../src/pipeline/supabaseQueries.js'
+import { getConversacionesList, getConversacionThread, getSDRProspectoById } from '../../src/pipeline/supabaseQueries.js'
 
 function queryBuilder(result: { data: unknown; error: unknown }) {
   const builder: Record<string, unknown> = {
@@ -98,6 +98,33 @@ describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
       expect(result).toEqual([])
       // Only the prospecto lookup happens — no thread queries for a non-existent id.
       expect(mock.from).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('getSDRProspectoById (T-H3.1)', () => {
+    it('known id returns the full row', async () => {
+      const mock = crearSupabaseMock()
+      const builder = queryBuilder({
+        data: { id: 'p1', phone: '593987654321', nombre: 'Carlos', turns_total: 3 },
+        error: null,
+      })
+      mock.from.mockReturnValue(builder)
+
+      const result = await getSDRProspectoById('p1', mock as any)
+
+      expect(mock.from).toHaveBeenCalledWith('sdr_prospectos')
+      expect(builder['select']).toHaveBeenCalledWith('*')
+      expect(builder['eq']).toHaveBeenCalledWith('id', 'p1')
+      expect(result).toMatchObject({ id: 'p1', phone: '593987654321', turns_total: 3 })
+    })
+
+    it('unknown id returns null, does not throw', async () => {
+      const mock = crearSupabaseMock()
+      mock.from.mockReturnValue(queryBuilder({ data: null, error: null }))
+
+      const result = await getSDRProspectoById('unknown-id', mock as any)
+
+      expect(result).toBeNull()
     })
   })
 })

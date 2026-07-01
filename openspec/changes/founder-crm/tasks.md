@@ -275,7 +275,7 @@ Chained PRs recommended: Yes
 ### VERIFY-FIRST
 
 #### T-H3.0 — [VERIFY] Sender factory + cost-tracking + tipo enum — already resolved
-**Status**: Resolved during this tasks pass (see "Verified codebase facts"): `crearSenderWhatsApp()` already wraps `CostTrackedSender` (no explicit wrap); no `wa_message_costs` row will be written for SDR phones (pre-existing, accepted, flag as spec-drift in apply report); reuse `tipo='founder_override'` + `action_taken=null` — zero new migration.
+**Status**: ✅ DONE — resolved during this tasks pass (see "Verified codebase facts"): `crearSenderWhatsApp()` already wraps `CostTrackedSender` (no explicit wrap); no `wa_message_costs` row will be written for SDR phones (pre-existing, accepted, flag as spec-drift in apply report); reuse `tipo='founder_override'` + `action_taken=null` — zero new migration.
 **Failing test pairing**: none; T-H3.2's tests encode all three decisions.
 **Spec**: founder-inbox → "Send message from panel".
 
@@ -284,6 +284,7 @@ Chained PRs recommended: Yes
 ### Commit 7 — Send route
 
 #### T-H3.1 — Add `getSDRProspectoById(id)` to `supabaseQueries.ts`
+**Status**: ✅ DONE (PR3) — TDD RED→GREEN, 2/2 tests green (known id → full row, unknown id → `null`).
 **Scope**: Modify existing file.
 **Files**: `src/pipeline/supabaseQueries.ts` (modify), `tests/pipeline/supabaseQueries.conversaciones.test.ts` (extend).
 **Work**:
@@ -293,6 +294,7 @@ Chained PRs recommended: Yes
 **Spec**: founder-inbox → "Send message from panel" (phone resolution).
 
 #### T-H3.2 — Add `POST /conversaciones/:id/enviar` to `adminRouter`
+**Status**: ✅ DONE (PR3) — TDD RED→GREEN, 5/5 tests green (valid send, non-director 403, paused-no-auto-resume, empty mensaje 400, unknown id 404). `tsc --noEmit` clean.
 **Scope**: New route block in existing file.
 **Files**: `src/agents/admin/router.ts` (modify), `tests/agents/admin/router.conversaciones.enviar.test.ts` (create, test-first).
 **Depends on**: T-H3.1.
