@@ -665,6 +665,28 @@ export async function approveAgricultor(userId: string, client: SupabaseClient =
   if (error) throw error
 }
 
+// ─── Handoff (pause/resume gate, founder-crm change PR1a) ─────────────────
+// Minimal-column lookup (P3 — never select('*') here, that's getSDRProspecto's
+// job). Used on the hot SDR path before any FSM/LLM call.
+
+export async function getHandoffEstado(phone: string, client: SupabaseClient = defaultClient): Promise<Record<string, unknown> | null> {
+  const { data, error } = await client
+    .from('sdr_prospectos')
+    .select('id, handoff_status, handoff_last_pinged_at, turns_total')
+    .eq('phone', phone)
+    .maybeSingle()
+  if (error) throw error
+  return (data ?? null) as Record<string, unknown> | null
+}
+
+export async function setHandoffEstado(id: string, updates: Record<string, unknown>, client: SupabaseClient = defaultClient): Promise<void> {
+  const { error } = await client
+    .from('sdr_prospectos')
+    .update(updates)
+    .eq('id', id)
+  if (error) throw error
+}
+
 // ─── SDR Prospectos ────────────────────────────────────────────────────────
 
 export async function getSDRProspecto(phone: string, client: SupabaseClient = defaultClient): Promise<Record<string, unknown> | null> {
