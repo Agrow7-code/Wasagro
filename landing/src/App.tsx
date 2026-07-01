@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { DashboardLayout } from './dashboard/layout/DashboardLayout'
 import { AdminLayout } from './admin/AdminLayout'
+import { ClientList } from './admin/ClientList'
 import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
@@ -1113,13 +1114,15 @@ export default function App() {
         <Route path="/brochure" element={<Brochure />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
-          path="/admin/*"
+          path="/admin"
           element={
             <ProtectedRoute directorOnly>
               <AdminLayout />
             </ProtectedRoute>
           }
-        />
+        >
+          <Route index element={<ClientList />} />
+        </Route>
         <Route
           path="/dashboard"
           element={
