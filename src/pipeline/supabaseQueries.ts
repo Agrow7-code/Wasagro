@@ -683,10 +683,10 @@ export async function setHandoffEstado(
   id: string,
   updates: Partial<{
     handoff_status: 'bot' | 'human_paused'
-    handoff_reason: 'manual' | 'auto_human_request'
+    handoff_reason: 'manual' | 'auto_human_request' | null
     handoff_paused_at: string
     handoff_resumed_at: string
-    handoff_last_pinged_at: string
+    handoff_last_pinged_at: string | null
   }>,
   client: SupabaseClient = defaultClient,
 ): Promise<void> {
