@@ -750,6 +750,61 @@ export async function saveSDRInteraccion(insert: Record<string, unknown>, client
   if (error) throw error
 }
 
+// ─── Conversaciones inbox (founder-crm PR2, T-H2.1/T-H2.2) ────────────────
+//
+// Both `founder_notified_at` and `ultima_interaccion` are real, actively
+// maintained columns on `sdr_prospectos` (verified in
+// 20260101000012_add-sdr-prospectos.sql; `ultima_interaccion` is bumped by
+// `updateSDRProspecto` above, `founder_notified_at` is set in
+// src/agents/sdr/router.ts:494) — no derivation needed, unlike the tasks.md
+// caution about assuming columns exist.
+
+export async function getConversacionesList(client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await client
+    .from('sdr_prospectos')
+    .select('id, phone, nombre, empresa, status, handoff_status, handoff_reason, founder_notified_at, ultima_interaccion')
+    .order('ultima_interaccion', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as Array<Record<string, unknown>>
+}
+
+export async function getConversacionThread(prospectoId: string, client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
+  const { data: prospecto, error: prospectoError } = await client
+    .from('sdr_prospectos')
+    .select('phone')
+    .eq('id', prospectoId)
+    .maybeSingle()
+  if (prospectoError) throw prospectoError
+  if (!prospecto) return []
+
+  const phone = (prospecto as { phone: string }).phone
+
+  const { data: mensajes, error: mensajesError } = await client
+    .from('mensajes_entrada')
+    .select('*')
+    .eq('phone', phone)
+    .order('created_at', { ascending: true })
+  if (mensajesError) throw mensajesError
+
+  const { data: interacciones, error: interaccionesError } = await client
+    .from('sdr_interacciones')
+    .select('*')
+    .eq('prospecto_id', prospectoId)
+    .order('created_at', { ascending: true })
+  if (interaccionesError) throw interaccionesError
+
+  const thread: Array<Record<string, unknown>> = [
+    ...((mensajes ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row, origen: 'mensajes_entrada' })),
+    ...((interacciones ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row, origen: 'sdr_interacciones' })),
+  ]
+  thread.sort((a, b) => {
+    const aTime = new Date(a['created_at'] as string).getTime()
+    const bTime = new Date(b['created_at'] as string).getTime()
+    return aTime - bTime
+  })
+  return thread
+}
+
 export async function getSDRProspectosPendingApproval(client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
   const { data, error } = await client
     .from('sdr_prospectos')
