@@ -34,6 +34,14 @@ export async function sdrChaserHandler(job: Job<ChaserJobData>) {
  return
  }
 
+ // D24/REQ-hand-010: paused conversations get zero chasers. Read fresh at
+ // execution time (getSDRProspectoById below), so a chaser enqueued BEFORE
+ // the pause still sees the paused column and aborts.
+ if (prospecto['handoff_status'] === 'human_paused') {
+ trace.event({ name: 'chaser_skipped_paused', level: 'DEFAULT' })
+ return
+ }
+
  // D23: Skip if prospect already booked via Cal.com AND the booking wasn't
  // cancelled (webhook should have set reunion_agendada, but calcom_booking_id
  // is the canonical check — protects against race conditions where the

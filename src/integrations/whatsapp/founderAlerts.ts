@@ -9,6 +9,7 @@ export type FounderAlertReason =
   | 'onboarding_requiere_revision'
   | 'consentimiento_rechazado'
   | 'aprobacion_escalada'
+  | 'sdr_handoff_solicitado'
 
 export interface FounderAlertPayload {
   phone?: string
@@ -28,6 +29,7 @@ const TITULOS: Record<FounderAlertReason, string> = {
   onboarding_requiere_revision: '⚠️ Onboarding trabado — requiere revisión',
   consentimiento_rechazado:     '⚠️ Un contacto rechazó el consentimiento',
   aprobacion_escalada:          '⚠️ Aprobación de agricultor sin resolver',
+  sdr_handoff_solicitado:       '⚠️ Prospecto pidió hablar con una persona',
 }
 
 export function construirMensajeFounder(reason: FounderAlertReason, p: FounderAlertPayload): string {
