@@ -51,10 +51,31 @@ vi.mock('../../src/agents/sdrAgent.js', () => ({
   handleMeetingConfirmation: vi.fn().mockResolvedValue(false),
 }))
 
+vi.mock('../../src/pipeline/handlers/HandoffGateHandler.js', () => ({
+  handleHandoffGate: vi.fn().mockResolvedValue(false),
+}))
+
+vi.mock('../../src/pipeline/handlers/EventHandler.js', () => ({
+  handleEvento: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('../../src/pipeline/handlers/BillingIntentHandler.js', () => ({
+  handleBillingIntent: vi.fn().mockResolvedValue(false),
+}))
+
+vi.mock('../../src/auth/planGuard.js', () => ({
+  planGuardWhatsApp: vi.fn().mockResolvedValue({ allowed: true, state: { plan: 'trial' } }),
+}))
+
+vi.mock('../../src/integrations/whatsapp/CostTrackedSender.js', () => ({
+  recordInboundWaCost: vi.fn(),
+}))
+
 import * as queries from '../../src/pipeline/supabaseQueries.js'
 import * as sttService from '../../src/pipeline/sttService.js'
 import * as gcal from '../../src/integrations/gcal.js'
 import * as sdrAgent from '../../src/agents/sdrAgent.js'
+import * as handoffGateHandler from '../../src/pipeline/handlers/HandoffGateHandler.js'
 import { langfuse } from '../../src/integrations/langfuse.js'
 
 const usuarioActivo = {
@@ -803,5 +824,71 @@ describe.skip('procesarMensajeEntrante', () => {
       // Con count>=2 no pregunta lote — va a pending_confirmation
       expect(queries.updateSession).toHaveBeenCalledWith('ses-1', expect.objectContaining({ status: 'pending_confirmation' }))
     })
+  })
+})
+
+// ─── Handoff gate wiring (T-H1.4, founder-crm PR1a) ──────────────────────────
+// Active describe block — the block above is describe.skip (stale, pre-D10).
+describe('procesarMensajeEntrante — handoff gate wiring', () => {
+  const usuarioActivoLocal = {
+    id: 'usr-1', phone: '593987654321', nombre: 'Carlos', rol: 'agricultor',
+    finca_id: 'F001', org_id: 'ORG001', onboarding_completo: true,
+    consentimiento_datos: true, status: 'activo', email: null,
+  }
+
+  const msgSDR: NormalizedMessage = {
+    wamid: 'wamid.handoff.001', from: '593900000001', timestamp: new Date(),
+    tipo: 'texto', texto: 'quiero hablar con alguien', rawPayload: {},
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env['FOUNDER_PHONE']
+    vi.mocked(queries.getMensajeByWamid).mockResolvedValue(null)
+    vi.mocked(queries.registrarMensaje).mockResolvedValue('msg-uuid')
+    vi.mocked(queries.actualizarMensaje).mockResolvedValue(undefined)
+    vi.mocked(sdrAgent.handleFounderApproval).mockResolvedValue(false)
+    vi.mocked(sdrAgent.handleMeetingConfirmation).mockResolvedValue(false)
+    vi.mocked(sdrAgent.handleSDRSession).mockResolvedValue(undefined)
+  })
+
+  it('(a) handleHandoffGate true → short-circuita ANTES de handleMeetingConfirmation/handleSDRSession', async () => {
+    vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
+    vi.mocked(handoffGateHandler.handleHandoffGate).mockResolvedValue(true)
+    const sender = crearSenderMock()
+    const llm = crearLlmMock()
+    inicializarPipeline(sender, llm)
+
+    await procesarMensajeEntrante(msgSDR, 'trace-gate-a')
+
+    expect(handoffGateHandler.handleHandoffGate).toHaveBeenCalledWith(msgSDR, 'msg-uuid', 'trace-gate-a', sender)
+    expect(sdrAgent.handleMeetingConfirmation).not.toHaveBeenCalled()
+    expect(sdrAgent.handleSDRSession).not.toHaveBeenCalled()
+  })
+
+  it('(b) handleHandoffGate false → cae al flujo existente handleMeetingConfirmation→handleSDRSession sin cambios', async () => {
+    vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
+    vi.mocked(handoffGateHandler.handleHandoffGate).mockResolvedValue(false)
+    const sender = crearSenderMock()
+    const llm = crearLlmMock()
+    inicializarPipeline(sender, llm)
+
+    await procesarMensajeEntrante(msgSDR, 'trace-gate-b')
+
+    expect(handoffGateHandler.handleHandoffGate).toHaveBeenCalledWith(msgSDR, 'msg-uuid', 'trace-gate-b', sender)
+    expect(sdrAgent.handleMeetingConfirmation).toHaveBeenCalledOnce()
+    expect(sdrAgent.handleSDRSession).toHaveBeenCalledOnce()
+  })
+
+  it('(c) REGRESIÓN — teléfono con fila en usuarios (field-capture) NUNCA llama a handleHandoffGate', async () => {
+    vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivoLocal)
+    const sender = crearSenderMock()
+    const llm = crearLlmMock()
+    inicializarPipeline(sender, llm)
+
+    const msgFieldPath: NormalizedMessage = { ...msgSDR, from: '593987654321' }
+    await procesarMensajeEntrante(msgFieldPath, 'trace-gate-c')
+
+    expect(handoffGateHandler.handleHandoffGate).not.toHaveBeenCalled()
   })
 })

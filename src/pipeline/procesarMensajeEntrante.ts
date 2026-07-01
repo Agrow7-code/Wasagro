@@ -15,6 +15,7 @@ import {
 import { handleSDRSession, handleFounderApproval, handleMeetingConfirmation } from '../agents/sdrAgent.js'
 import { handleOnboardingAdmin, handleOnboardingAgricultor } from './handlers/OnboardingHandler.js'
 import { handleEvento } from './handlers/EventHandler.js'
+import { handleHandoffGate } from './handlers/HandoffGateHandler.js'
 import { loadSessionState } from '../agents/sdr/contextStore.js'
 import { shouldSuppressOnboardingForActiveSDR } from '../agents/sdr/onboardingGuard.js'
 import { recordInboundWaCost } from '../integrations/whatsapp/CostTrackedSender.js'
@@ -94,6 +95,12 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
       const usuario = await getUserByPhone(msg.from)
 
       if (!usuario) {
+        // Pause/resume gate (REQ-hand-008/011): must run BEFORE any FSM/LLM
+        // call on the SDR branch, and must NEVER be reachable from the
+        // `usuario` field-capture branch below.
+        const gateHandled = await handleHandoffGate(msg, mensajeId, traceId, _sender!)
+        if (gateHandled) return
+
         const meetingHandled = await handleMeetingConfirmation(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
         if (meetingHandled) return
         await handleSDRSession(msg, mensajeId, traceId, _sender!, _llm!, undefined, _llmAdapter ?? undefined)
