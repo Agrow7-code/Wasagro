@@ -679,7 +679,17 @@ export async function getHandoffEstado(phone: string, client: SupabaseClient = d
   return (data ?? null) as Record<string, unknown> | null
 }
 
-export async function setHandoffEstado(id: string, updates: Record<string, unknown>, client: SupabaseClient = defaultClient): Promise<void> {
+export async function setHandoffEstado(
+  id: string,
+  updates: Partial<{
+    handoff_status: 'bot' | 'human_paused'
+    handoff_reason: 'manual' | 'auto_human_request'
+    handoff_paused_at: string
+    handoff_resumed_at: string
+    handoff_last_pinged_at: string
+  }>,
+  client: SupabaseClient = defaultClient,
+): Promise<void> {
   const { error } = await client
     .from('sdr_prospectos')
     .update(updates)

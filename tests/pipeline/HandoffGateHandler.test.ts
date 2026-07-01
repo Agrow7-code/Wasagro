@@ -24,6 +24,7 @@ import { handleHandoffGate } from '../../src/pipeline/handlers/HandoffGateHandle
 import * as queries from '../../src/pipeline/supabaseQueries.js'
 import * as sdrAgent from '../../src/agents/sdrAgent.js'
 import * as founderAlerts from '../../src/integrations/whatsapp/founderAlerts.js'
+import { langfuse } from '../../src/integrations/langfuse.js'
 
 function crearSenderMock() {
   return { enviarTexto: vi.fn().mockResolvedValue(undefined), enviarTemplate: vi.fn().mockResolvedValue(undefined) }
@@ -147,5 +148,62 @@ describe('handleHandoffGate (T-H1.3)', () => {
     await handleHandoffGate(msgTexto, 'msg-5c', 'trace-5c', sender)
 
     expect(founderAlerts.alertarFounder).not.toHaveBeenCalled()
+  })
+
+  it('7. CRITICAL — saveSDRInteraccion rechaza en auto-pausa → alertarFounder y processed igual se llaman, no throw', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-7', handoff_status: 'bot', handoff_last_pinged_at: null, turns_total: 1,
+    })
+    vi.mocked(sdrAgent.detectarHandoffTrigger).mockReturnValue('human_request')
+    vi.mocked(queries.saveSDRInteraccion).mockRejectedValueOnce(new Error('db down'))
+    const sender = crearSenderMock()
+
+    const result = await handleHandoffGate(msgTexto, 'msg-7', 'trace-7', sender)
+
+    expect(result).toBe(true)
+    expect(founderAlerts.alertarFounder).toHaveBeenCalledWith('sdr_handoff_solicitado', expect.any(Object))
+    expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-7', { status: 'processed' })
+  })
+
+  it('8. setHandoffEstado rechaza → handoff_pause_write_failed, rethrow, alertarFounder NO se llama', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-8', handoff_status: 'bot', handoff_last_pinged_at: null, turns_total: 1,
+    })
+    vi.mocked(sdrAgent.detectarHandoffTrigger).mockReturnValue('human_request')
+    vi.mocked(queries.setHandoffEstado).mockRejectedValueOnce(new Error('write failed'))
+    const sender = crearSenderMock()
+
+    await expect(handleHandoffGate(msgTexto, 'msg-8', 'trace-8', sender)).rejects.toThrow('write failed')
+
+    expect(founderAlerts.alertarFounder).not.toHaveBeenCalled()
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'handoff_pause_write_failed', level: 'ERROR' }),
+    )
+  })
+
+  it('9. getHandoffEstado rechaza → handoff_lookup_failed, rethrow', async () => {
+    vi.mocked(queries.getHandoffEstado).mockRejectedValueOnce(new Error('read failed'))
+    const sender = crearSenderMock()
+
+    await expect(handleHandoffGate(msgTexto, 'msg-9', 'trace-9', sender)).rejects.toThrow('read failed')
+
+    const traceInstance = vi.mocked(langfuse.trace).mock.results[0]?.value
+    expect(traceInstance.event).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'handoff_lookup_failed', level: 'ERROR' }),
+    )
+  })
+
+  it('10. ya pausado — saveSDRInteraccion rechaza → true, processed igual se intenta, no throw', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-10', handoff_status: 'human_paused', handoff_last_pinged_at: '2026-06-30T10:00:00Z', turns_total: 3,
+    })
+    vi.mocked(queries.saveSDRInteraccion).mockRejectedValueOnce(new Error('db down'))
+    const sender = crearSenderMock()
+
+    const result = await handleHandoffGate(msgTexto, 'msg-10', 'trace-10', sender)
+
+    expect(result).toBe(true)
+    expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-10', { status: 'processed' })
   })
 })
