@@ -334,6 +334,7 @@ Chained PRs recommended: Yes
 ### Commit 8 — Inbox view
 
 #### T-H4.1 — Create `landing/src/admin/Inbox.tsx`
+**Status**: ✅ DONE (PR4) — TDD RED→GREEN, 5/5 tests green (list+flagged, thread chronological, pause/resume reflects without reload, send clears input on success, send shows inline error and keeps input on failure).
 **Scope**: New file.
 **Files**: `landing/src/admin/Inbox.tsx` (create), `landing/tests/admin/Inbox.test.tsx` (create, test-first).
 **Work**:
@@ -351,6 +352,7 @@ Chained PRs recommended: Yes
 ### Commit 9 — Nav + badge
 
 #### T-H4.2 — Wire `/admin/inbox` route + nav badge in `AdminLayout.tsx`
+**Status**: ✅ DONE (PR4) — TDD RED→GREEN, 3/3 tests green (Inbox nav link present, badge hidden when no paused conversations, badge count refreshes on the `POLL_INTERVAL_MS` polling interval — no websockets). `tsc --noEmit` clean at root and `landing/`.
 **Scope**: Modify existing files.
 **Files**: `landing/src/App.tsx` (modify — add route), `landing/src/admin/AdminLayout.tsx` (modify — nav entry + badge), `landing/tests/admin/inboxBadge.test.tsx` (create, test-first).
 **Depends on**: T-H4.1.
