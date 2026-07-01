@@ -1,5 +1,15 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
+
+// Anti-mock invariant (CLAUDE.md D28 + ADR 020, design.md §5): this nav MUST
+// NEVER link to a mock view (gerente / exportadora / agricultor /
+// calculadora / insumos / labor / cosecha / plagas / clima / gastos). Real
+// per-finca drill-in links (Sigatoka/Setup/Billing) live in ClientDetail,
+// scoped to the selected finca — not here.
+const NAV_LINKS = [
+  { to: '/admin', label: 'Clientes' },
+  { to: '/admin/sdr', label: 'SDR' },
+]
 
 // Minimal shell for the founder back-office (D28, PR-S3, T-S3.2). Nav links
 // are added incrementally in later commits (ClientList / SdrFunnel / the
@@ -32,6 +42,15 @@ export function AdminLayout() {
           Wasagro Admin
         </div>
         <div style={{ fontSize: 13, color: '#9C9080', marginBottom: 24 }}>{user?.nombre}</div>
+        {NAV_LINKS.map((link) => (
+          <Link
+            key={link.to}
+            to={link.to}
+            style={{ fontSize: 14, fontWeight: 600, color: '#1B3D24', textDecoration: 'none', padding: '8px 4px' }}
+          >
+            {link.label}
+          </Link>
+        ))}
         <button
           onClick={handleLogout}
           style={{

@@ -11,6 +11,7 @@ import { AdminLayout } from './admin/AdminLayout'
 import { ClientList } from './admin/ClientList'
 import { CreateClientForm } from './admin/CreateClientForm'
 import { ClientDetail } from './admin/ClientDetail'
+import { SdrFunnel } from './admin/SdrFunnel'
 import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
@@ -1126,6 +1127,7 @@ export default function App() {
           <Route index element={<ClientList />} />
           <Route path="clients/new" element={<CreateClientForm />} />
           <Route path="orgs/:id" element={<ClientDetail />} />
+          <Route path="sdr" element={<SdrFunnel />} />
         </Route>
         <Route
           path="/dashboard"
