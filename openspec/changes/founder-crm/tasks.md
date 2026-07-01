@@ -196,7 +196,7 @@ Chained PRs recommended: Yes
 ### VERIFY-FIRST
 
 #### T-H2.0 — [VERIFY] Confirm merge shape for `mensajes_entrada` + `sdr_interacciones`
-**Status**: Already confirmed during this tasks pass (see "Verified codebase facts") — `mensajes_entrada` has no `prospecto_id`, join by `phone`; `sdr_interacciones.tipo` enum is `inbound|outbound|draft_approval|founder_override|meeting_confirmation`. Re-confirm at apply time only if the schema has changed since.
+**Status**: ✅ DONE (PR2, apply time) — re-verified against the actual migrations. `mensajes_entrada` (20260101000004) has no `prospecto_id`, joins by `phone`; `sdr_interacciones.tipo` enum (20260101000013) is `inbound|outbound|draft_approval|founder_override` (no `meeting_confirmation` value found in this migration — the tasks doc's mention of it was not re-verified against a later migration and is not load-bearing for PR2's read-only queries). **Additional verification per apply-instructions**: `sdr_prospectos.founder_notified_at` and `sdr_prospectos.ultima_interaccion` (assumed by T-H2.1) BOTH exist as real columns (migration 20260101000012) and are actively maintained (`ultima_interaccion` bumped by `updateSDRProspecto`; `founder_notified_at` set in `src/agents/sdr/router.ts:494`) — no derivation needed, the tasks doc's assumption was correct.
 **Failing test pairing**: none; T-H2.2's test encodes the confirmed shape.
 **Spec**: founder-inbox → "Conversation thread read".
 
@@ -205,6 +205,7 @@ Chained PRs recommended: Yes
 ### Commit 5 — List + thread query helpers
 
 #### T-H2.1 — Add `getConversacionesList()` to `supabaseQueries.ts`
+**Status**: ✅ DONE (PR2) — TDD RED→GREEN, 2/2 tests green (single round-trip + error propagation).
 **Scope**: Modify existing file.
 **Files**: `src/pipeline/supabaseQueries.ts` (modify), `tests/pipeline/supabaseQueries.conversaciones.test.ts` (create, test-first).
 **Work**:
@@ -214,6 +215,7 @@ Chained PRs recommended: Yes
 **Spec**: founder-inbox → "Conversation list".
 
 #### T-H2.2 — Add `getConversacionThread(prospectoId)` to `supabaseQueries.ts`
+**Status**: ✅ DONE (PR2) — TDD RED→GREEN, 2/2 tests green (merge+sort+tag case, unknown-id → `[]` case).
 **Scope**: Modify existing file.
 **Files**: `src/pipeline/supabaseQueries.ts` (modify), `tests/pipeline/supabaseQueries.conversaciones.test.ts` (extend).
 **Depends on**: T-H2.1 (same file/commit; can pair).
@@ -228,6 +230,7 @@ Chained PRs recommended: Yes
 ### Commit 6 — Read routes
 
 #### T-H2.3 — Add `GET /conversaciones` to `adminRouter`
+**Status**: ✅ DONE (PR2) — TDD RED→GREEN, 3/3 tests green (paused flag, founder_notified_at flag, 403 non-director).
 **Scope**: New route block in existing file.
 **Files**: `src/agents/admin/router.ts` (modify), `tests/agents/admin/router.conversaciones.test.ts` (create, test-first).
 **Depends on**: T-H2.1.
@@ -238,6 +241,7 @@ Chained PRs recommended: Yes
 **Spec**: founder-inbox → "Conversation list" (both scenarios).
 
 #### T-H2.4 — Add `GET /conversaciones/:id/mensajes` to `adminRouter`
+**Status**: ✅ DONE (PR2) — TDD RED→GREEN, 3/3 tests green (chronological + masked, unknown-id → 200 `[]`, 403 non-director).
 **Scope**: New route block in existing file.
 **Files**: `src/agents/admin/router.ts` (modify), `tests/agents/admin/router.conversaciones.mensajes.test.ts` (create, test-first).
 **Depends on**: T-H2.2.
