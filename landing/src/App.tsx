@@ -9,6 +9,7 @@ import {
 import { DashboardLayout } from './dashboard/layout/DashboardLayout'
 import { AdminLayout } from './admin/AdminLayout'
 import { ClientList } from './admin/ClientList'
+import { CreateClientForm } from './admin/CreateClientForm'
 import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
@@ -1122,6 +1123,7 @@ export default function App() {
           }
         >
           <Route index element={<ClientList />} />
+          <Route path="clients/new" element={<CreateClientForm />} />
         </Route>
         <Route
           path="/dashboard"
