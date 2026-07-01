@@ -1,8 +1,16 @@
 import { Hono } from 'hono'
+import { z } from 'zod'
 import { supabase } from '../../integrations/supabase.js'
 import { maskPhone } from '../../utils/maskPhone.js'
 import { ProvisionInputSchema, provisionarCliente } from '../provisioning/provisionarCliente.js'
-import { setHandoffEstado, getConversacionesList, getConversacionThread } from '../../pipeline/supabaseQueries.js'
+import {
+  setHandoffEstado,
+  getConversacionesList,
+  getConversacionThread,
+  getSDRProspectoById,
+  saveSDRInteraccion,
+} from '../../pipeline/supabaseQueries.js'
+import { crearSenderWhatsApp } from '../../integrations/whatsapp/index.js'
 
 export const adminRouter = new Hono()
 
@@ -316,6 +324,60 @@ adminRouter.post('/conversaciones/:id/resume', async (c) => {
     return c.json({ status: 'resumed' })
   } catch (err) {
     console.error('[admin/conversaciones/:id/resume] failed:', err)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// ─── POST /api/admin/conversaciones/:id/enviar — send from panel ─────────────
+//
+// T-H3.2 (founder-crm PR3, founder-inbox spec "Send message from panel").
+// The real phone is resolved server-side from the `:id` row and NEVER
+// included in the JSON response (D28/D31 — same masking discipline as every
+// read route on this router, taken further here: not even masked, simply
+// absent). crearSenderWhatsApp() already wraps CostTrackedSender (verified
+// T-H3.0) — called directly, no explicit wrap. Reuses the already-allowed
+// tipo='founder_override' with action_taken=null (verified codebase fact,
+// zero new migration). Send does NOT touch handoff_status — no auto-resume
+// (P7): the founder explicitly calls /resume when they're done, same as the
+// pause route explicitly calls /pause.
+const EnviarMensajeSchema = z.object({ mensaje: z.string().min(1) })
+
+adminRouter.post('/conversaciones/:id/enviar', async (c) => {
+  const id = c.req.param('id')
+
+  let rawBody: unknown
+  try {
+    rawBody = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400)
+  }
+
+  const parsed = EnviarMensajeSchema.safeParse(rawBody)
+  if (!parsed.success) {
+    return c.json({ error: 'Validation error' }, 400)
+  }
+
+  try {
+    const prospecto = await getSDRProspectoById(id)
+    if (!prospecto) return c.json({ error: 'Conversation not found' }, 404)
+
+    const phone = prospecto['phone'] as string
+    const mensaje = parsed.data.mensaje
+
+    await crearSenderWhatsApp().enviarTexto(phone, mensaje)
+
+    await saveSDRInteraccion({
+      prospecto_id: id,
+      phone,
+      turno: prospecto['turns_total'],
+      tipo: 'founder_override',
+      contenido: mensaje,
+      action_taken: null,
+    })
+
+    return c.json({ status: 'sent' })
+  } catch (err) {
+    console.error('[admin/conversaciones/:id/enviar] failed:', err)
     return c.json({ error: 'Internal server error' }, 500)
   }
 })
