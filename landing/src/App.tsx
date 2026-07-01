@@ -7,6 +7,7 @@ import {
   Zap, Menu, X, Phone, Video, MoreVertical,
 } from 'lucide-react'
 import { DashboardLayout } from './dashboard/layout/DashboardLayout'
+import { AdminLayout } from './admin/AdminLayout'
 import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
@@ -27,9 +28,16 @@ import Brochure from './Brochure'
 import { PricingCalculator } from './PricingCalculator'
 import { useAuth } from './auth/useAuth'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth()
+function ProtectedRoute({
+  children,
+  directorOnly = false,
+}: {
+  children: React.ReactNode
+  directorOnly?: boolean
+}) {
+  const { isAuthenticated, user } = useAuth()
   if (!isAuthenticated) return <Navigate to="/login" replace />
+  if (directorOnly && user?.rol !== 'director') return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
@@ -1104,6 +1112,14 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/brochure" element={<Brochure />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/admin/*"
+          element={
+            <ProtectedRoute directorOnly>
+              <AdminLayout />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/dashboard"
           element={
