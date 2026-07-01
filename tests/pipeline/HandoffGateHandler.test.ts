@@ -118,6 +118,24 @@ describe('handleHandoffGate (T-H1.3)', () => {
     expect(founderAlerts.alertarFounder).not.toHaveBeenCalled()
   })
 
+  it('6. resiliencia — si el ack (enviarTexto) falla, igual pingea al founder y marca processed', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-6', handoff_status: 'bot', handoff_last_pinged_at: null, turns_total: 1,
+    })
+    vi.mocked(sdrAgent.detectarHandoffTrigger).mockReturnValue('human_request')
+    const sender = crearSenderMock()
+    sender.enviarTexto.mockRejectedValueOnce(new Error('evolution down'))
+
+    const result = await handleHandoffGate(msgTexto, 'msg-6', 'trace-6', sender)
+
+    // The prospect ack failing must NOT lose the founder ping nor leave the
+    // message unprocessed (which would retry into the paused branch, dropping
+    // the notification). Ping fires first; ack is best-effort.
+    expect(result).toBe(true)
+    expect(founderAlerts.alertarFounder).toHaveBeenCalledWith('sdr_handoff_solicitado', expect.any(Object))
+    expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-6', { status: 'processed' })
+  })
+
   it('5. regresión — 3 inbounds consecutivos en human_paused → alertarFounder NUNCA se llama (ping ya ocurrió en la transición)', async () => {
     vi.mocked(queries.getHandoffEstado).mockResolvedValue({
       id: 'uuid-5', handoff_status: 'human_paused', handoff_last_pinged_at: '2026-06-30T10:00:00Z', turns_total: 5,

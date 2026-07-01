@@ -59,6 +59,11 @@ export async function handleHandoffGate(
 
   if (trigger === 'human_request') {
     const now = new Date().toISOString()
+    // DEFERRED (4R R1 WARNING): under >1 pg-boss replica, two jobs for the same
+    // prospect could both read 'bot' and both auto-pause → duplicate ack/ping.
+    // Not exploitable at single-replica (teamSize 1) today. Follow-up: make this
+    // a conditional update (WHERE handoff_status='bot') and only ping/ack when
+    // this call wins the transition. Tracked in sdd/founder-crm/apply-progress.
     await setHandoffEstado(prospectoId, {
       handoff_status: 'human_paused',
       handoff_reason: 'auto_human_request',
@@ -74,8 +79,21 @@ export async function handleHandoffGate(
       action_taken: null,
       langfuse_trace_id: traceId,
     })
-    await sender.enviarTexto(msg.from, ACK_PAUSA)
+    // Notify the founder FIRST — it is the whole point of the auto-pause, and
+    // alertarFounder swallows its own errors. The prospect ack is best-effort:
+    // if the send throws it must NOT skip the founder ping or leave the message
+    // unprocessed (a retry would hit the already-paused branch, which does not
+    // ping — the notification would be lost silently). P4: log the ack failure.
     await alertarFounder('sdr_handoff_solicitado', { phone: msg.from })
+    try {
+      await sender.enviarTexto(msg.from, ACK_PAUSA)
+    } catch (err) {
+      trace.event({
+        name: 'handoff_ack_send_failed',
+        level: 'WARNING',
+        input: { prospecto_id: prospectoId, error: String(err) },
+      })
+    }
     await actualizarMensaje(mensajeId, { status: 'processed' })
     trace.event({ name: 'handoff_auto_paused', level: 'DEFAULT', input: { prospecto_id: prospectoId } })
     return true
