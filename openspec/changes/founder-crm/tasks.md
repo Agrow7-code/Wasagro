@@ -230,6 +230,7 @@ Chained PRs recommended: Yes
 ### Commit 6 — Read routes
 
 #### T-H2.3 — Add `GET /conversaciones` to `adminRouter`
+**Status**: ✅ DONE (PR2) — TDD RED→GREEN, 3/3 tests green (paused flag, founder_notified_at flag, 403 non-director).
 **Scope**: New route block in existing file.
 **Files**: `src/agents/admin/router.ts` (modify), `tests/agents/admin/router.conversaciones.test.ts` (create, test-first).
 **Depends on**: T-H2.1.
@@ -240,6 +241,7 @@ Chained PRs recommended: Yes
 **Spec**: founder-inbox → "Conversation list" (both scenarios).
 
 #### T-H2.4 — Add `GET /conversaciones/:id/mensajes` to `adminRouter`
+**Status**: ✅ DONE (PR2) — TDD RED→GREEN, 3/3 tests green (chronological + masked, unknown-id → 200 `[]`, 403 non-director).
 **Scope**: New route block in existing file.
 **Files**: `src/agents/admin/router.ts` (modify), `tests/agents/admin/router.conversaciones.mensajes.test.ts` (create, test-first).
 **Depends on**: T-H2.2.

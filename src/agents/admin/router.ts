@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { supabase } from '../../integrations/supabase.js'
 import { maskPhone } from '../../utils/maskPhone.js'
 import { ProvisionInputSchema, provisionarCliente } from '../provisioning/provisionarCliente.js'
-import { setHandoffEstado } from '../../pipeline/supabaseQueries.js'
+import { setHandoffEstado, getConversacionesList, getConversacionThread } from '../../pipeline/supabaseQueries.js'
 
 export const adminRouter = new Hono()
 
@@ -201,6 +201,57 @@ adminRouter.post('/clients', async (c) => {
     )
   } catch (err) {
     console.error('[admin/clients] provisionarCliente failed:', err)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// ─── GET /api/admin/conversaciones — inbox list ───────────────────────────────
+//
+// T-H2.3 (founder-crm PR2, founder-inbox spec "Conversation list"). One round
+// trip via getConversacionesList (T-H2.1). Every phone is maskPhone-masked —
+// the raw phone MUST NOT appear in the response body (D28/D31). needs_attention
+// mirrors the spec's "paused=true OR pending founder notification" rule.
+adminRouter.get('/conversaciones', async (c) => {
+  try {
+    const rows = await getConversacionesList()
+    const conversaciones = rows.map((row) => ({
+      id: row['id'],
+      phone: maskPhone(row['phone'] as string),
+      nombre: row['nombre'],
+      empresa: row['empresa'],
+      status: row['status'],
+      handoff_status: row['handoff_status'],
+      handoff_reason: row['handoff_reason'],
+      ultima_interaccion: row['ultima_interaccion'],
+      needs_attention: row['handoff_status'] === 'human_paused' || row['founder_notified_at'] != null,
+    }))
+    return c.json(conversaciones)
+  } catch (err) {
+    console.error('[admin/conversaciones] list query failed:', err)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// ─── GET /api/admin/conversaciones/:id/mensajes — thread read ────────────────
+//
+// T-H2.4 (founder-crm PR2, founder-inbox spec "Conversation thread read" +
+// "Isolation and non-enumeration"). Unlike the pause/resume routes, an unknown
+// `:id` here returns 200 + [] (never 404) — this is a READ endpoint and the
+// spec explicitly requires error responses not to leak existence vs. emptiness.
+// getConversacionThread (T-H2.2) already returns [] for an unknown id with no
+// throw, so this route needs no separate existence check.
+adminRouter.get('/conversaciones/:id/mensajes', async (c) => {
+  const id = c.req.param('id')
+  try {
+    const thread = await getConversacionThread(id)
+    const masked = thread.map((row) => {
+      const out = { ...row }
+      if (typeof out['phone'] === 'string') out['phone'] = maskPhone(out['phone'] as string)
+      return out
+    })
+    return c.json(masked)
+  } catch (err) {
+    console.error('[admin/conversaciones/:id/mensajes] failed:', err)
     return c.json({ error: 'Internal server error' }, 500)
   }
 })
