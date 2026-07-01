@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^5.1.0",
-    "sharp": "^0.34.5",
     "@google/generative-ai": "^0.21.0",
     "@hono/node-server": "^2.0.0",
     "@supabase/supabase-js": "^2.49.4",
@@ -32,12 +31,14 @@
     "openai": "^4.98.0",
     "pg-boss": "^12.18.0",
     "resend": "^6.12.2",
+    "sharp": "^0.34.5",
     "zod": "^3.24.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.15.3",
     "@types/node-cron": "^3.0.11",
+    "jsdom": "^25.0.1",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"

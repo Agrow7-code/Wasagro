@@ -79,8 +79,10 @@ export default function LoginPage() {
         case 'admin_org':
           navigate('/dashboard')
           break
-        case 'gerente':
         case 'director':
+          navigate('/admin')
+          break
+        case 'gerente':
           navigate('/dashboard/gerente')
           break
         case 'analista':
