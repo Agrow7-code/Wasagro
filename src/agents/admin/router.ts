@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { supabase } from '../../integrations/supabase.js'
 import { maskPhone } from '../../utils/maskPhone.js'
 import { ProvisionInputSchema, provisionarCliente } from '../provisioning/provisionarCliente.js'
+import { setHandoffEstado } from '../../pipeline/supabaseQueries.js'
 
 export const adminRouter = new Hono()
 
@@ -200,6 +201,70 @@ adminRouter.post('/clients', async (c) => {
     )
   } catch (err) {
     console.error('[admin/clients] provisionarCliente failed:', err)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+// ─── POST /api/admin/conversaciones/:id/pause | /resume — manual takeover ────
+//
+// T-H1.6 (founder-crm PR1b, REQ-hand-008/009). Addressed by prospecto UUID
+// `:id`, never `:phone` — same D28/D31 phone-masking rationale as every other
+// route on this router. Gated by the router's existing `roleGuard` mount
+// (director-only, applied in src/index.ts ahead of this router).
+//
+// Supabase's `.update().eq()` does not error and does not report rows-affected
+// on its own, so an unknown `:id` would otherwise silently 200. `findProspecto`
+// does a minimal existence lookup first so unknown ids return 404 (P7 — no
+// action can be taken on a target the caller can't confirm exists).
+async function findProspecto(id: string): Promise<{ id: string } | null> {
+  const { data, error } = await supabase
+    .from('sdr_prospectos')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  return (data as { id: string } | null) ?? null
+}
+
+adminRouter.post('/conversaciones/:id/pause', async (c) => {
+  const id = c.req.param('id')
+  try {
+    const prospecto = await findProspecto(id)
+    if (!prospecto) return c.json({ error: 'Conversation not found' }, 404)
+
+    // No founder ping here — the founder is the one triggering this transition,
+    // unlike the auto-pause path in HandoffGateHandler.ts which pings because
+    // the founder doesn't otherwise know the pause happened.
+    await setHandoffEstado(id, {
+      handoff_status: 'human_paused',
+      handoff_reason: 'manual',
+      handoff_paused_at: new Date().toISOString(),
+    })
+    return c.json({ status: 'paused' })
+  } catch (err) {
+    console.error('[admin/conversaciones/:id/pause] failed:', err)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+})
+
+adminRouter.post('/conversaciones/:id/resume', async (c) => {
+  const id = c.req.param('id')
+  try {
+    const prospecto = await findProspecto(id)
+    if (!prospecto) return c.json({ error: 'Conversation not found' }, 404)
+
+    // Manual-only resume (REQ-hand-009) — clearing handoff_reason and
+    // handoff_last_pinged_at re-arms the auto-pause ping-dedupe and pause
+    // reason for the NEXT pause episode, whatever triggers it.
+    await setHandoffEstado(id, {
+      handoff_status: 'bot',
+      handoff_resumed_at: new Date().toISOString(),
+      handoff_reason: null,
+      handoff_last_pinged_at: null,
+    })
+    return c.json({ status: 'resumed' })
+  } catch (err) {
+    console.error('[admin/conversaciones/:id/resume] failed:', err)
     return c.json({ error: 'Internal server error' }, 500)
   }
 })

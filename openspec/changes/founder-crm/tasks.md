@@ -157,6 +157,7 @@ Chained PRs recommended: Yes
 ### Commit 4 — Manual pause/resume routes (work unit: founder-initiated takeover)
 
 #### T-H1.6 — Add `POST /conversaciones/:id/pause` and `/resume` to `adminRouter`
+**Status**: ✅ DONE (PR1b) — TDD RED→GREEN, 6/6 tests green (4 spec'd cases; 403 covered for both routes). `tsc --noEmit` clean.
 **Scope**: New route block in existing file.
 **Files**: `src/agents/admin/router.ts` (modify), `tests/agents/admin/router.conversaciones.pause.test.ts` (create, test-first).
 **Depends on**: T-H1.2 (`setHandoffEstado`).
