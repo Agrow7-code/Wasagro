@@ -366,14 +366,22 @@ adminRouter.post('/conversaciones/:id/enviar', async (c) => {
 
     await crearSenderWhatsApp().enviarTexto(phone, mensaje)
 
-    await saveSDRInteraccion({
-      prospecto_id: id,
-      phone,
-      turno: prospecto['turns_total'],
-      tipo: 'founder_override',
-      contenido: mensaje,
-      action_taken: null,
-    })
+    // The message is already delivered. Persisting it to the thread is a
+    // SECONDARY effect — if it fails, do NOT return an error: the founder would
+    // resend and the prospect would get the message twice. Log-only and still
+    // report success (the inbound trail + the founder's own record remain).
+    try {
+      await saveSDRInteraccion({
+        prospecto_id: id,
+        phone,
+        turno: prospecto['turns_total'],
+        tipo: 'founder_override',
+        contenido: mensaje,
+        action_taken: null,
+      })
+    } catch (persistErr) {
+      console.error('[admin/conversaciones/:id/enviar] send OK but persist failed:', persistErr)
+    }
 
     return c.json({ status: 'sent' })
   } catch (err) {

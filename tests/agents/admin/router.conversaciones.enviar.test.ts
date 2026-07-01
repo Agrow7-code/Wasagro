@@ -127,6 +127,23 @@ describe('POST /api/admin/conversaciones/:id/enviar', () => {
     expect(mockGetSDRProspectoById).not.toHaveBeenCalled()
   })
 
+  it('send succeeds but persist fails: still returns 200 (founder must not resend → no duplicate WhatsApp)', async () => {
+    mockGetSDRProspectoById.mockResolvedValueOnce({ ...PROSPECTO })
+    mockSaveSDRInteraccion.mockRejectedValueOnce(new Error('db down'))
+
+    const app = buildApp({ rol: 'director' })
+    const res = await app.request('/api/admin/conversaciones/p1/enviar', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mensaje: 'Hola, soy Henry' }),
+    })
+
+    // The message WAS delivered; a failed thread-persist must not surface as an
+    // error that makes the founder resend (which would double-send to the prospect).
+    expect(res.status).toBe(200)
+    expect(mockEnviarTexto).toHaveBeenCalledOnce()
+  })
+
   it('unknown :id returns 404, sender NOT called', async () => {
     mockGetSDRProspectoById.mockResolvedValueOnce(null)
 
