@@ -18,8 +18,9 @@ export async function roleGuard(c: Context, next: Next): Promise<Response | void
     if (!user || typeof user.rol !== 'string') return c.json({ error: 'Forbidden' }, 403)
     if (user.rol !== 'director') return c.json({ error: 'Forbidden' }, 403)
     await next()
-  } catch {
+  } catch (err) {
     // Fail-closed: never call next() from inside a catch.
+    console.error('[roleGuard] unexpected error in downstream handler:', err)
     return c.json({ error: 'Internal error' }, 500)
   }
 }

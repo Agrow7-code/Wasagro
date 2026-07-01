@@ -27,6 +27,7 @@ function queryBuilder(result: { data: unknown; error: unknown }) {
     eq: vi.fn(() => builder),
     order: vi.fn(() => builder),
     single: vi.fn(() => Promise.resolve(result)),
+    maybeSingle: vi.fn(() => Promise.resolve(result)),
     then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
       Promise.resolve(result).then(resolve, reject),
   }
@@ -112,12 +113,72 @@ describe('GET /api/admin/orgs/:id', () => {
     expect(JSON.stringify(body)).not.toContain('593987654321')
   })
 
-  it('returns 404 for an unknown org_id', async () => {
-    vi.mocked(supabase.from).mockReturnValue(queryBuilder({ data: null, error: { message: 'not found' } }) as ReturnType<typeof supabase.from>)
+  it('returns 404 for an unknown org_id (real not-found: data:null, error:null via maybeSingle)', async () => {
+    vi.mocked(supabase.from).mockReturnValue(queryBuilder({ data: null, error: null }) as ReturnType<typeof supabase.from>)
 
     const app = buildApp()
     const res = await app.request('/api/admin/orgs/ORG999')
 
     expect(res.status).toBe(404)
+  })
+
+  it('returns 500 (not 404) when the org lookup query itself fails', async () => {
+    vi.mocked(supabase.from).mockReturnValue(
+      queryBuilder({ data: null, error: { message: 'connection reset' } }) as ReturnType<typeof supabase.from>,
+    )
+
+    const app = buildApp()
+    const res = await app.request('/api/admin/orgs/ORG001')
+
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body.error).toBe('Internal server error')
+  })
+
+  it('never selects or returns payment token fields (SAFE allowlist)', async () => {
+    const orgBuilder = queryBuilder({
+      data: {
+        org_id: 'ORG001',
+        nombre: 'Bananera Puebloviejo',
+        plan: 'agricultor',
+        subscription_status: 'trial',
+        trial_inicio: null,
+        trial_fin: null,
+        fincas_contratadas: 1,
+        usuarios_contratados: 1,
+        precio_mensual: 10,
+      },
+      error: null,
+    })
+    vi.mocked(supabase.from).mockImplementation(((table: string) => {
+      if (table === 'organizaciones') return orgBuilder
+      return queryBuilder({ data: [], error: null })
+    }) as typeof supabase.from)
+
+    const app = buildApp()
+    const res = await app.request('/api/admin/orgs/ORG001')
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    const bodyStr = JSON.stringify(body)
+    const forbiddenFields = [
+      'dlocalgo_checkout_token',
+      'dlocalgo_payment_id',
+      'dlocal_card_id',
+      'dlocal_payment_id',
+      'stripe_customer_id',
+      'stripe_subscription_id',
+      'metodo_pago',
+    ]
+    for (const field of forbiddenFields) {
+      expect(bodyStr).not.toContain(field)
+    }
+
+    // The SELECT itself must request only the safe allowlist — never '*'.
+    const selectArg = (orgBuilder.select as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(selectArg).not.toBe('*')
+    for (const field of forbiddenFields) {
+      expect(selectArg).not.toContain(field)
+    }
   })
 })

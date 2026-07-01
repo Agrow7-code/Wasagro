@@ -10,6 +10,10 @@ describe('maskPhone', () => {
     expect(maskPhone('12')).toBe('****')
   })
 
+  it('returns **** for a phone with exactly 4 chars (boundary — fully masked, not "****1234")', () => {
+    expect(maskPhone('1234')).toBe('****')
+  })
+
   it('returns **** for an empty string', () => {
     expect(maskPhone('')).toBe('****')
   })

@@ -69,7 +69,7 @@ describe('POST /api/admin/clients', () => {
 
     expect(res.status).toBe(201)
     const body = await res.json()
-    expect(body.orgId).toBe('ORG010')
+    expect(body.org_id).toBe('ORG010')
     expect(mockProvisionarCliente).toHaveBeenCalledOnce()
     expect(mockCreateProvisionHandler).not.toHaveBeenCalled()
   })

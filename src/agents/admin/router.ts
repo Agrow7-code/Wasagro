@@ -26,7 +26,10 @@ adminRouter.get('/orgs', async (c) => {
     )
     .order('nombre')
 
-  if (error) return c.json({ error: error.message }, 500)
+  if (error) {
+    console.error('[admin/orgs] org list query failed:', error)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
 
   type OrgRow = {
     org_id: string
@@ -64,32 +67,51 @@ adminRouter.get('/orgs', async (c) => {
 // Note (Open Items #3, deferred per design.md): billing history from
 // costo_servicio_mensual is part of S5 (P&L), which design.md explicitly
 // defers — this PR returns org + fincas[] + usuarios[] only.
+//
+// SAFE allowlist — never includes payment token / card / customer-id columns
+// (dlocalgo_checkout_token, dlocalgo_payment_id, dlocal_card_id, dlocal_payment_id,
+// stripe_customer_id, stripe_subscription_id, metodo_pago, or any other
+// *_token/*_card_id/*_payment_id column on organizaciones).
+const SAFE_ORG_FIELDS =
+  'org_id, nombre, plan, subscription_status, trial_inicio, trial_fin, ' +
+  'fincas_contratadas, usuarios_contratados, precio_mensual'
+
 adminRouter.get('/orgs/:id', async (c) => {
   const orgId = c.req.param('id')
 
   const { data: org, error: orgError } = await supabase
     .from('organizaciones')
-    .select('*')
+    .select(SAFE_ORG_FIELDS)
     .eq('org_id', orgId)
-    .single()
+    .maybeSingle()
 
-  if (orgError || !org) return c.json({ error: 'Org not found' }, 404)
+  if (orgError) {
+    console.error('[admin/orgs/:id] org lookup failed:', orgError)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
+  if (!org) return c.json({ error: 'Org not found' }, 404)
 
   const { data: fincas, error: fincasError } = await supabase
     .from('fincas')
     .select('finca_id, nombre, cultivo_principal, config')
     .eq('org_id', orgId)
-  if (fincasError) return c.json({ error: fincasError.message }, 500)
+  if (fincasError) {
+    console.error('[admin/orgs/:id] fincas query failed:', fincasError)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
 
   type UsuarioRow = { id: string; nombre: string | null; rol: string; phone: string }
   const { data: usuarios, error: usuariosError } = await supabase
     .from('usuarios')
     .select('id, nombre, rol, phone')
     .eq('org_id', orgId)
-  if (usuariosError) return c.json({ error: usuariosError.message }, 500)
+  if (usuariosError) {
+    console.error('[admin/orgs/:id] usuarios query failed:', usuariosError)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
 
   return c.json({
-    ...(org as Record<string, unknown>),
+    ...(org as unknown as Record<string, unknown>),
     fincas: fincas ?? [],
     usuarios: ((usuarios ?? []) as UsuarioRow[]).map((u) => ({ ...u, phone: maskPhone(u.phone) })),
   })
@@ -119,7 +141,10 @@ adminRouter.get('/sdr', async (c) => {
     .select('id, nombre, empresa, phone, status, turns_total, calcom_booking_id, created_at')
     .order('created_at', { ascending: false })
 
-  if (error) return c.json({ error: error.message }, 500)
+  if (error) {
+    console.error('[admin/sdr] prospectos query failed:', error)
+    return c.json({ error: 'Internal server error' }, 500)
+  }
 
   const prospectos = ((data ?? []) as unknown as ProspectoRow[]).map((row) => ({
     id: row.id,
@@ -158,7 +183,7 @@ adminRouter.post('/clients', async (c) => {
     const result = await provisionarCliente(parsed.data)
     const status = result.yaExistia ? 200 : 201
     return c.json(
-      { orgId: result.orgId, usuario_id: result.usuarioId, ya_existia: result.yaExistia },
+      { org_id: result.orgId, usuario_id: result.usuarioId, ya_existia: result.yaExistia },
       status,
     )
   } catch (err) {

@@ -227,7 +227,7 @@ app.route('/api/webhook', webhookRouter)
 // DO NOT add planGuard here — admin must never be blocked by the director's own billing status.
 app.use('/api/admin/*', authMiddleware)
 app.use('/api/admin/*', roleGuard)
-app.use('/api/admin/*', rateLimiter({ windowMs: 60_000, maxRequests: 60 }))
+app.use('/api/admin/*', rateLimiter({ windowMs: 60_000, maxRequests: 60, failClosed: true }))
 app.route('/api/admin', adminRouter)
 
 app.use('/api/metricas/*', authMiddleware)
