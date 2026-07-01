@@ -805,6 +805,21 @@ export async function getConversacionThread(prospectoId: string, client: Supabas
   return thread
 }
 
+// getSDRProspectoById (founder-crm PR3, T-H3.1) — full-row lookup by prospecto
+// UUID, used by the panel send route to resolve the real phone server-side.
+// Deliberately NOT reused by sdrChaserWorker.ts's private duplicate of this
+// same query — out of scope for this change (same restraint as maskPhone not
+// being retrofitted everywhere, per tasks.md).
+export async function getSDRProspectoById(id: string, client: SupabaseClient = defaultClient): Promise<Record<string, unknown> | null> {
+  const { data, error } = await client
+    .from('sdr_prospectos')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  return (data ?? null) as Record<string, unknown> | null
+}
+
 export async function getSDRProspectosPendingApproval(client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
   const { data, error } = await client
     .from('sdr_prospectos')
