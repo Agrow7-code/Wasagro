@@ -86,6 +86,42 @@ describe('ClientDetail (T-S3.5)', () => {
     )
   })
 
+  it('a 500 (not 404) response renders the generic error state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'boom' }), { status: 500 })),
+    )
+    renderAt('ORG001')
+
+    await waitFor(() => {
+      expect(screen.getByText('boom')).toBeInTheDocument()
+    })
+  })
+
+  it('surfaces the backend error body instead of a generic status message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'org detail query failed downstream' }), { status: 500 })),
+    )
+    renderAt('ORG001')
+
+    await waitFor(() => {
+      expect(screen.getByText('org detail query failed downstream')).toBeInTheDocument()
+    })
+  })
+
+  it('falls back to a generic message when the error body is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not json', { status: 500 })),
+    )
+    renderAt('ORG001')
+
+    await waitFor(() => {
+      expect(screen.getByText(/error 500 cargando el cliente/i)).toBeInTheDocument()
+    })
+  })
+
   it('"Volver" link navigates back to /admin', async () => {
     vi.stubGlobal(
       'fetch',

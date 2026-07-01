@@ -34,7 +34,19 @@ export function SdrFunnel() {
       setError('')
       try {
         const res = await authFetch(`${API_BASE}/admin/sdr`)
-        if (!res.ok) throw new Error(`Error ${res.status} cargando prospectos`)
+        if (!res.ok) {
+          // Surface the backend's own error body when present (matches the
+          // pattern in CreateClientForm.tsx); fall back to a generic status
+          // message when the body isn't JSON or has no `error` field.
+          const text = await res.text()
+          let backendError: string | undefined
+          try {
+            backendError = (JSON.parse(text) as { error?: string }).error
+          } catch {
+            // not JSON — use the fallback below
+          }
+          throw new Error(backendError || `Error ${res.status} cargando prospectos`)
+        }
         const data = (await res.json()) as ProspectoRow[]
         if (!cancelled) setProspectos(data)
       } catch (err) {

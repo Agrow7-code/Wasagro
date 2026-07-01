@@ -54,7 +54,31 @@ describe('SdrFunnel (T-S3.6)', () => {
     renderWithRouter()
 
     await waitFor(() => {
-      expect(screen.getByText(/error/i)).toBeInTheDocument()
+      expect(screen.getByText('boom')).toBeInTheDocument()
+    })
+  })
+
+  it('surfaces the backend error body instead of a generic status message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'sdr query failed downstream' }), { status: 500 })),
+    )
+    renderWithRouter()
+
+    await waitFor(() => {
+      expect(screen.getByText('sdr query failed downstream')).toBeInTheDocument()
+    })
+  })
+
+  it('falls back to a generic message when the error body is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not json', { status: 500 })),
+    )
+    renderWithRouter()
+
+    await waitFor(() => {
+      expect(screen.getByText(/error 500 cargando prospectos/i)).toBeInTheDocument()
     })
   })
 })

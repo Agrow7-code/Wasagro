@@ -87,6 +87,35 @@ describe('CreateClientForm (T-S3.4)', () => {
     expect(screen.getByRole('button', { name: /crear cliente/i })).toBeDisabled()
   })
 
+  it('shows the backend error message on a 500 and re-enables the form (not stuck disabled)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'provisioning failed downstream' }), { status: 500 })),
+    )
+
+    renderWithRouter()
+    fillRequiredFields()
+    const submitBtn = screen.getByRole('button', { name: /crear cliente/i })
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('provisioning failed downstream')).toBeInTheDocument()
+    })
+    expect(submitBtn).not.toBeDisabled()
+  })
+
+  it("shows the 'Respuesta inesperada del servidor' fallback on a malformed (non-JSON) failed response", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 500 })))
+
+    renderWithRouter()
+    fillRequiredFields()
+    fireEvent.click(screen.getByRole('button', { name: /crear cliente/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Respuesta inesperada del servidor')).toBeInTheDocument()
+    })
+  })
+
   it('submit button is disabled while the request is in-flight (no double submit)', async () => {
     let resolveFetch: (r: Response) => void
     const pending = new Promise<Response>((resolve) => {

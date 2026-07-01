@@ -61,7 +61,19 @@ export function ClientDetail() {
           if (!cancelled) setNotFound(true)
           return
         }
-        if (!res.ok) throw new Error(`Error ${res.status} cargando el cliente`)
+        if (!res.ok) {
+          // Surface the backend's own error body when present (matches the
+          // pattern in CreateClientForm.tsx); fall back to a generic status
+          // message when the body isn't JSON or has no `error` field.
+          const text = await res.text()
+          let backendError: string | undefined
+          try {
+            backendError = (JSON.parse(text) as { error?: string }).error
+          } catch {
+            // not JSON — use the fallback below
+          }
+          throw new Error(backendError || `Error ${res.status} cargando el cliente`)
+        }
         const data = (await res.json()) as OrgDetail
         if (!cancelled) setOrg(data)
       } catch (err) {

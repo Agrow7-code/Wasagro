@@ -106,7 +106,31 @@ describe('ClientList (T-S3.3)', () => {
     renderWithRouter()
 
     await waitFor(() => {
-      expect(screen.getByText(/error/i)).toBeInTheDocument()
+      expect(screen.getByText('boom')).toBeInTheDocument()
+    })
+  })
+
+  it('surfaces the backend error body instead of a generic status message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'org lookup failed downstream' }), { status: 500 })),
+    )
+    renderWithRouter()
+
+    await waitFor(() => {
+      expect(screen.getByText('org lookup failed downstream')).toBeInTheDocument()
+    })
+  })
+
+  it('falls back to a generic message when the error body is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not json', { status: 500 })),
+    )
+    renderWithRouter()
+
+    await waitFor(() => {
+      expect(screen.getByText(/error 500 cargando clientes/i)).toBeInTheDocument()
     })
   })
 })
