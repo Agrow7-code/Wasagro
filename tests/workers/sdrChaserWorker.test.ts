@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { sdrChaserHandler } from '../../src/workers/sdrChaserWorker.js'
 import * as supabaseQueries from '../../src/pipeline/supabaseQueries.js'
 import * as whatsappIndex from '../../src/integrations/whatsapp/index.js'
+import { langfuse } from '../../src/integrations/langfuse.js'
 
 vi.mock('../../src/pipeline/supabaseQueries.js', () => ({
   saveSDRInteraccion: vi.fn(),
@@ -102,6 +103,21 @@ describe('sdrChaserWorker', () => {
 
  expect(whatsappIndex.crearSenderWhatsApp).not.toHaveBeenCalled()
  expect(supabaseQueries.saveSDRInteraccion).not.toHaveBeenCalled()
+ })
+
+ it('should abort and log chaser_skipped_paused if prospect is handoff_status human_paused (T-H1.5)', async () => {
+ await setupProspectoMock({ id: '458', turns_total: 4, phone: '123458', status: 'en_discovery', handoff_status: 'human_paused' })
+
+ const job = {
+ data: { prospecto_id: '458', expected_turn: 4 }
+ }
+
+ await sdrChaserHandler(job as any)
+
+ expect(whatsappIndex.crearSenderWhatsApp).not.toHaveBeenCalled()
+ expect(supabaseQueries.saveSDRInteraccion).not.toHaveBeenCalled()
+ const traceReturnValue = vi.mocked(langfuse.trace).mock.results.find(r => r.value)?.value
+ expect(traceReturnValue?.event).toHaveBeenCalledWith(expect.objectContaining({ name: 'chaser_skipped_paused' }))
  })
 
  it('should NOT abort if prospect has a Cal.com booking but it was cancelled', async () => {
