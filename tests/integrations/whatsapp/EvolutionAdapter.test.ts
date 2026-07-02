@@ -3,6 +3,7 @@ import { EvolutionAdapter } from '../../../src/integrations/whatsapp/EvolutionAd
 import evoTexto from '../../fixtures/evolution-texto.json'
 import evoAudio from '../../fixtures/evolution-audio.json'
 import evoUbicacion from '../../fixtures/evolution-ubicacion.json'
+import evoFromMeTexto from '../../fixtures/evolution-fromme-texto.json'
 
 const SECRET = 'bearer-secret-token'
 
@@ -85,6 +86,24 @@ describe('EvolutionAdapter', () => {
     it('preserva rawPayload (P5)', () => {
       const msg = adapter.parsearMensaje(evoTexto)
       expect(msg!.rawPayload).toEqual(evoTexto)
+    })
+
+    it('un mensaje normal (no fromMe) no trae esFromMe en true', () => {
+      const msg = adapter.parsearMensaje(evoTexto)
+      expect(msg!.esFromMe).not.toBe(true)
+    })
+
+    it('un mensaje fromMe (founder-crm PR5) se etiqueta esFromMe=true en vez de descartarse', () => {
+      const msg = adapter.parsearMensaje(evoFromMeTexto)
+      expect(msg).not.toBeNull()
+      expect(msg!.esFromMe).toBe(true)
+      expect(msg!.tipo).toBe('texto')
+      expect(msg!.texto).toBe('hola, te escribo yo directo')
+    })
+
+    it('fromMe: from() es el remoteJid (destinatario del mensaje), no el founder', () => {
+      const msg = adapter.parsearMensaje(evoFromMeTexto)
+      expect(msg!.from).toBe('593987654321')
     })
   })
 })

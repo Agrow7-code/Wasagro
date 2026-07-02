@@ -98,17 +98,22 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
 
     const msgData = parsed.data
 
-    // Ignorar mensajes enviados por el bot (evita auto-procesamiento en loop)
-    if (msgData.key.fromMe) {
-      console.log(`[EvolutionAdapter] fromMe ignorado: ${msgData.key.id}`)
-      return null
-    }
-
     // Ignorar chats grupales, broadcast y newsletter — solo procesar chats individuales
     const jid = msgData.key.remoteJid
     if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('newsletter')) {
       console.log(`[EvolutionAdapter] JID no individual ignorado: ${jid}`)
       return null
+    }
+
+    // fromMe: mensajes enviados desde el dispositivo vinculado del founder (o
+    // eco de nuestros propios envíos vía Evolution). Ya NO se descartan acá —
+    // se etiquetan con esFromMe=true. `key.remoteJid` sigue siendo el
+    // DESTINATARIO (el prospecto), nunca el número del founder. El router
+    // desvía estos mensajes a handleFounderManualReply; NUNCA deben llegar al
+    // pipeline normal (procesarMensajeEntrante/handleEvento). Ver founder-crm PR5.
+    const esFromMe = msgData.key.fromMe
+    if (esFromMe) {
+      console.log(`[EvolutionAdapter] fromMe detectado: ${msgData.key.id}`)
     }
 
     const from = jid.replace(/@.*$/, '')
@@ -117,6 +122,7 @@ export class EvolutionAdapter implements IWhatsAppAdapter {
       from,
       timestamp: new Date(msgData.messageTimestamp * 1000),
       rawPayload: payload,
+      esFromMe,
     }
 
     const msg = msgData.message

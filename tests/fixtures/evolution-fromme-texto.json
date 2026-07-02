@@ -1,0 +1,16 @@
+{
+  "event": "messages.upsert",
+  "instance": "wasagro-h0",
+  "data": {
+    "key": {
+      "remoteJid": "593987654321@s.whatsapp.net",
+      "fromMe": true,
+      "id": "wamid.evo_fromme_001"
+    },
+    "message": {
+      "conversation": "hola, te escribo yo directo"
+    },
+    "messageTimestamp": 1714000100,
+    "pushName": "Wasagro"
+  }
+}
