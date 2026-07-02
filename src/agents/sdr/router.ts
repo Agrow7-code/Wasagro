@@ -3,7 +3,9 @@ import { langfuse } from '../../integrations/langfuse.js'
 import type { IWasagroLLM } from '../../integrations/llm/IWasagroLLM.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ExtraccionSDRSchema } from '../../types/dominio/SDRTypes.js'
-import { updateSDRProspecto, saveSDRInteraccion } from '../../pipeline/supabaseQueries.js'
+import { updateSDRProspecto, saveSDRInteraccion, actualizarMensaje } from '../../pipeline/supabaseQueries.js'
+import { transcribirAudio } from '../../pipeline/sttService.js'
+import { downloadEvolutionMedia } from '../../integrations/whatsapp/EvolutionMediaClient.js'
 import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSender.js'
 import { getCachedContext, setCachedContext, setIfNotExists } from '../../integrations/redis.js'
 import { reduceContext, computeFsmTransition, isMVPCultivo, type ConvContext, type Intent, type SDRFsmState } from './context.js'
@@ -75,6 +77,16 @@ export interface SDRRouterContext {
   // FIX-3: incoming WhatsApp message type. Lets the router fast-path audio
   // and image without invoking the text classifier on a placeholder string.
   mediaType?: 'texto' | 'audio' | 'imagen' | 'ubicacion' | 'documento' | 'otro'
+  // SDR audio transcription: id of the mensajes_entrada row for this inbound
+  // message. Used to best-effort persist the STT transcript to contenido_raw.
+  mensajeId?: string
+  // SDR audio transcription: raw audio ref/CDN URL + Evolution's original
+  // webhook payload, needed to resolve audio bytes for STT (D4, mirrors
+  // EventHandler.ts's field-capture audio path). Only relevant when
+  // mediaType === 'audio'.
+  audioUrl?: string
+  mediaId?: string
+  rawPayload?: unknown
 }
 
 const MAX_SDR_TURNS = 4
@@ -591,21 +603,71 @@ ESTRICTO:
   }
 }
 
-// ─── Audio inbound handler (FIX-3) ───────────────────────────────────────────
+// ─── Audio inbound handler (FIX-3, extended with STT — SDR audio transcription) ─
 // Pulled out so the audio path doesn't share scope with the long routeSDRNode
 // body — separation of concerns + easier to unit-test.
-
+//
+// SDR audio transcription: reuses D4 Deepgram STT (the same transcribirAudio
+// the field pipeline calls in EventHandler.ts) so the bot actually understands
+// what the prospect said, instead of always synthesizing a fixed
+// intent='interest' classification. When transcription succeeds, the
+// transcript is routed through the exact same text pipeline (classify ->
+// extract -> FSM -> reply) as a typed message — routeSDRNode is called again
+// with mediaType='texto' so it does NOT re-enter this audio branch. When
+// transcription fails or comes back empty, this degrades to the ORIGINAL
+// FIX-3 behavior (synthesized interest + audioAck template) so the flow never
+// breaks (P4).
 async function handleAudioInbound(
   rctx: SDRRouterContext,
   ctxIn: ConvContext,
   initial: Awaited<ReturnType<typeof loadHydratedContext>>,
 ): Promise<void> {
-  const { traceId, sender, client } = rctx
+  const { traceId, sender, client, mensajeId } = rctx
   const trace = langfuse.trace({ id: traceId })
 
-  // The classifier never runs for audio — we synthesize the classification
-  // directly. Confidence 0.85 mirrors the user spec: audio in SDR context is
-  // a strong but not certain signal of interest (it could also be a misclick).
+  let transcripcion = ''
+  try {
+    const audioInput = await resolveSDRAudioInput(rctx)
+    transcripcion = await transcribirAudio(audioInput, traceId)
+  } catch (err) {
+    trace.event({
+      name:  'sdr_audio_transcription_failed',
+      level: 'WARNING',
+      input: { error: err instanceof Error ? err.message : String(err) },
+    })
+  }
+
+  if (transcripcion.trim()) {
+    // Best-effort: surface what the prospect actually said in the thread
+    // (mensajes_entrada.contenido_raw) instead of only the raw audio ref.
+    if (mensajeId) {
+      await safePersist(() => actualizarMensaje(mensajeId, { contenido_raw: transcripcion }, client), {
+        trace,
+        eventName: 'sdr_audio_transcript_persist_failed',
+        meta: { mensajeId },
+      })
+    }
+
+    trace.event({
+      name:  'sdr_audio_transcribed',
+      level: 'DEFAULT',
+      input: { fsmStateBefore: ctxIn.fsmState, transcriptLength: transcripcion.length },
+    })
+
+    // Route the transcript through the SAME text pipeline as a typed message.
+    // mediaType='texto' is required so routeSDRNode does not re-enter this
+    // audio branch (avoids infinite recursion).
+    await routeSDRNode({ ...rctx, mediaType: 'texto', textoOriginal: transcripcion })
+    return
+  }
+
+  // ── Fallback: STT failed or returned empty — ORIGINAL FIX-3 behavior ──────
+  // (synthesized interest + audioAck template) so the flow never breaks (P4).
+
+  // The classifier never runs on this fallback path — we synthesize the
+  // classification directly. Confidence 0.85 mirrors the original FIX-3
+  // rationale: audio in SDR context is a strong but not certain signal of
+  // interest (it could also be a misclick).
   const classification = { intent: 'interest' as Intent, confidence: 0.85 }
   const respuesta = TEMPLATES.audioAck({ ctx: ctxIn })
 
@@ -669,4 +731,32 @@ async function handleAudioInbound(
     eventName: 'sdr_session_persist_failed',
     meta: { prospecto_id: ctx.prospectId, fsmState: ctx.fsmState, path: 'audio' },
   })
+}
+
+// Resolves the audio bytes/URL for STT — same pattern as EventHandler.ts's
+// field-capture audio path (D8): prefer downloading via Evolution's base64
+// endpoint (the CDN media URL requires Bearer auth Evolution already holds),
+// falling back to the raw audioUrl/mediaId when Evolution creds are missing
+// or the download itself fails. Never throws — a resolution failure just
+// means transcribirAudio gets an empty/best-effort input and the caller's
+// try/catch degrades to the audioAck fallback (P4).
+async function resolveSDRAudioInput(rctx: SDRRouterContext): Promise<string | Buffer> {
+  const evApiUrl = process.env['EVOLUTION_API_URL']
+  const evApiKey = process.env['EVOLUTION_API_KEY']
+  const evInstance = process.env['EVOLUTION_INSTANCE']
+
+  if (evApiUrl && evApiKey && evInstance && rctx.rawPayload !== undefined) {
+    try {
+      const media = await downloadEvolutionMedia(rctx.rawPayload, evApiUrl, evApiKey, evInstance)
+      return Buffer.from(media.base64, 'base64')
+    } catch (err) {
+      langfuse.trace({ id: rctx.traceId }).event({
+        name:  'sdr_audio_download_failed',
+        level: 'WARNING',
+        input: { error: err instanceof Error ? err.message : String(err) },
+      })
+    }
+  }
+
+  return rctx.audioUrl ?? rctx.mediaId ?? ''
 }
