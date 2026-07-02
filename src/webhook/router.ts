@@ -5,6 +5,7 @@ import { getBoss } from '../workers/pgBoss.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
 import { setIfNotExists } from '../integrations/redis.js'
 import { handleCalcomWebhook } from '../integrations/calcom/calcomWebhook.js'
+import { handleFounderManualReply } from '../pipeline/handlers/FounderManualReplyHandler.js'
 
 // Cross-instance dedup for incoming webhooks. Evolution API delivers the same
 // webhook 6-8 times per message; pg-boss singletonKey has a race window when
@@ -78,6 +79,24 @@ webhookRouter.post('/whatsapp', async (c) => {
       console.log(`[webhook] wamid duplicado ignorado: ${msg.wamid}`)
       return c.json({ status: 'received' }, 200)
     }
+
+    // founder-crm PR5: a `fromMe` event (founder's own linked device, or an
+    // echo of our own send) is routed OUT of the normal inbound pipeline —
+    // it must NEVER reach procesarMensajeEntrante/handleEvento (field-path
+    // safety, P1). handleFounderManualReply is best-effort by design and
+    // never throws; the try/catch here is defense-in-depth only.
+    if (msg.esFromMe) {
+      console.log(`[webhook] fromMe de ${msg.from} wamid=${msg.wamid} — despachando a handleFounderManualReply`)
+      try {
+        await handleFounderManualReply(msg, trace.id)
+        trace.event({ name: 'founder_manual_reply_dispatched', level: 'DEFAULT', input: { phone: msg.from, wamid: msg.wamid } })
+      } catch (err: unknown) {
+        console.error(`[webhook] ERROR inesperado en handleFounderManualReply: ${String(err)}`)
+        trace.event({ name: 'founder_manual_reply_dispatch_error', level: 'ERROR', output: { error: String(err) } })
+      }
+      return c.json({ status: 'received' }, 200)
+    }
+
     console.log(`[webhook] mensaje de ${msg.from} tipo=${msg.tipo} wamid=${msg.wamid}`)
     try {
       const boss = getBoss()
