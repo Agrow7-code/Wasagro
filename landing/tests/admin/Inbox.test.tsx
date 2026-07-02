@@ -108,7 +108,7 @@ describe('Inbox (T-H4.1)', () => {
 
     // PROSP004: paused manually by the founder → different label.
     const luisRow = flagged.find((row) => within(row).queryByText('Luis Paredes'))!
-    expect(within(luisRow).getByText(/en pausa — la tomaste vos/i)).toBeInTheDocument()
+    expect(within(luisRow).getByText(/en pausa \(la tomaste tú\)/i)).toBeInTheDocument()
 
     // PROSP002/PROSP003 (handoff_status 'bot') render NO attention marker.
     const anaRow = rows.find((row) => within(row).queryByText('Ana Ruiz'))!

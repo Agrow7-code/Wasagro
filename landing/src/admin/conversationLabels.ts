@@ -5,5 +5,5 @@
 export function attentionLabel(row: { handoff_status: string; handoff_reason: string | null }): string | null {
   if (row.handoff_status !== 'human_paused') return null
   if (row.handoff_reason === 'auto_human_request') return 'Pidió hablar con una persona'
-  return 'En pausa — la tomaste vos'
+  return 'En pausa (la tomaste tú)'
 }

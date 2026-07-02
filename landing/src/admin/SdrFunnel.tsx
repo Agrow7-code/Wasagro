@@ -89,11 +89,11 @@ export function SdrFunnel() {
           <tbody>
             {prospectos.map((p) => (
               <tr key={p.id} style={{ borderBottom: '1px solid #EAE6DC' }}>
-                <td style={tdStyle}>{p.nombre ?? '—'}</td>
+                <td style={tdStyle}>{p.nombre ?? 'N/D'}</td>
                 <td style={tdStyle}>{p.phone}</td>
                 <td style={tdStyle}>{ESTADO_LABEL[p.estado] ?? p.estado}</td>
                 <td style={tdStyle}>{p.turns_total}</td>
-                <td style={tdStyle}>{p.calcom_booking_id ?? '—'}</td>
+                <td style={tdStyle}>{p.calcom_booking_id ?? 'N/D'}</td>
                 <td style={tdStyle}>{new Date(p.created_at).toLocaleDateString()}</td>
               </tr>
             ))}
