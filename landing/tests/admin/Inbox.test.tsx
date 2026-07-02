@@ -43,9 +43,9 @@ const CONVERSACIONES = [
 ]
 
 const THREAD = [
-  { id: 'M1', created_at: '2026-07-01T09:58:00Z', origen: 'mensajes_entrada', contenido_raw: 'Quiero hablar con alguien' },
-  { id: 'I1', created_at: '2026-07-01T09:59:00Z', origen: 'sdr_interacciones', contenido: 'Ya te comunico con el equipo.' },
-  { id: 'M2', created_at: '2026-07-01T10:00:00Z', origen: 'mensajes_entrada', contenido_raw: 'Gracias' },
+  { id: 'M1', created_at: '2026-07-01T09:58:00Z', origen: 'mensajes_entrada', direction: 'inbound', contenido_raw: 'Quiero hablar con alguien' },
+  { id: 'I1', created_at: '2026-07-01T09:59:00Z', origen: 'sdr_interacciones', direction: 'outbound', contenido: 'Ya te comunico con el equipo.' },
+  { id: 'M2', created_at: '2026-07-01T10:00:00Z', origen: 'mensajes_entrada', direction: 'inbound', contenido_raw: 'Gracias' },
 ]
 
 function jsonResponse(body: unknown, status = 200) {
@@ -117,6 +117,38 @@ describe('Inbox (T-H4.1)', () => {
     expect(within(items[0]).getByText('Quiero hablar con alguien')).toBeInTheDocument()
     expect(within(items[1]).getByText('Ya te comunico con el equipo.')).toBeInTheDocument()
     expect(within(items[2]).getByText('Gracias')).toBeInTheDocument()
+  })
+
+  it('renders inbound and outbound messages with visibly distinct sender treatment (BUG A)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString()
+        if (url.endsWith('/admin/conversaciones')) return jsonResponse(CONVERSACIONES)
+        if (url.endsWith('/admin/conversaciones/PROSP001/mensajes')) return jsonResponse(THREAD)
+        return jsonResponse([])
+      }),
+    )
+    renderInbox()
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+    })
+    fireEvent.click(screen.getByText('Henry Morales'))
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('thread-item')).toHaveLength(3)
+    })
+    const items = screen.getAllByTestId('thread-item')
+
+    // M1 (inbound) and I1 (outbound) must carry a distinct direction + sender label.
+    expect(items[0].getAttribute('data-direction')).toBe('inbound')
+    expect(items[1].getAttribute('data-direction')).toBe('outbound')
+    expect(within(items[0]).getByText('Prospecto')).toBeInTheDocument()
+    expect(within(items[1]).getByText(/wasagro/i)).toBeInTheDocument()
+    // The sender label must actually differ between the two rows.
+    const senderLabels = items.map((item) => item.querySelector('[data-testid="thread-sender"]')?.textContent)
+    expect(senderLabels[0]).not.toBe(senderLabels[1])
   })
 
   it('pause/resume button calls the POST route and reflects the new state without a full reload', async () => {

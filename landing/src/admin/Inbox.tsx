@@ -20,6 +20,8 @@ interface ThreadItem {
   id: string
   created_at: string
   origen: 'mensajes_entrada' | 'sdr_interacciones'
+  direction: 'inbound' | 'outbound'
+  isFounder?: boolean
   contenido?: string
   contenido_raw?: string
 }
@@ -29,6 +31,15 @@ interface ThreadItem {
 // getConversacionThread in src/pipeline/supabaseQueries.ts).
 function threadText(item: ThreadItem): string {
   return item.contenido ?? item.contenido_raw ?? ''
+}
+
+// BUG A fix (fix/founder-crm-thread-direction): the backend now tags every
+// thread row with an explicit `direction`. Render inbound (prospect) and
+// outbound (Wasagro) messages distinctly so the founder can tell at a glance
+// who said what.
+function senderLabel(item: ThreadItem): string {
+  if (item.direction === 'inbound') return 'Prospecto'
+  return item.isFounder ? 'Wasagro (fundador)' : 'Wasagro'
 }
 
 async function readBackendError(res: Response, fallback: string): Promise<string> {
@@ -192,12 +203,29 @@ export function Inbox() {
             {!threadError && thread === null && <div style={loadingStyle}>Cargando...</div>}
             {!threadError && thread !== null && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {thread.map((item) => (
-                  <div key={item.id} data-testid="thread-item" style={{ padding: '8px 12px', borderRadius: 8, background: '#F5F1E8' }}>
-                    <div style={{ fontSize: 13, color: '#1B3D24' }}>{threadText(item)}</div>
-                    <div style={{ fontSize: 11, color: '#9C9080' }}>{item.created_at}</div>
-                  </div>
-                ))}
+                {thread.map((item) => {
+                  const isInbound = item.direction === 'inbound'
+                  return (
+                    <div
+                      key={item.id}
+                      data-testid="thread-item"
+                      data-direction={item.direction}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        background: isInbound ? '#F5F1E8' : '#E7F0EA',
+                        alignSelf: isInbound ? 'flex-start' : 'flex-end',
+                        maxWidth: '80%',
+                      }}
+                    >
+                      <div data-testid="thread-sender" style={{ fontSize: 11, fontWeight: 700, color: isInbound ? '#9C9080' : '#1B3D24' }}>
+                        {senderLabel(item)}
+                      </div>
+                      <div style={{ fontSize: 13, color: '#1B3D24' }}>{threadText(item)}</div>
+                      <div style={{ fontSize: 11, color: '#9C9080' }}>{item.created_at}</div>
+                    </div>
+                  )
+                })}
                 {thread.length === 0 && <div style={loadingStyle}>Sin mensajes.</div>}
               </div>
             )}
