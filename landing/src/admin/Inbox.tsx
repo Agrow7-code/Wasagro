@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { authFetch } from '../auth/api'
 
@@ -64,6 +64,15 @@ export function Inbox() {
   const [mensaje, setMensaje] = useState('')
   const [sendError, setSendError] = useState('')
   const [sending, setSending] = useState(false)
+  const threadScrollRef = useRef<HTMLDivElement>(null)
+
+  // When a conversation opens (thread loads), jump to the LATEST message
+  // (bottom) — a chat should land on the most recent message, not the oldest.
+  useEffect(() => {
+    if (thread && threadScrollRef.current) {
+      threadScrollRef.current.scrollTop = threadScrollRef.current.scrollHeight
+    }
+  }, [thread])
 
   useEffect(() => {
     let cancelled = false
@@ -146,8 +155,8 @@ export function Inbox() {
   const selected = conversaciones?.find((c) => c.id === selectedId) ?? null
 
   return (
-    <div style={{ display: 'flex', gap: 24, maxWidth: 1080, margin: '0 auto' }}>
-      <div style={{ width: 320, flexShrink: 0 }}>
+    <div style={{ display: 'flex', gap: 24, maxWidth: 1080, margin: '0 auto', height: 'calc(100vh - 160px)' }}>
+      <div style={{ width: 320, flexShrink: 0, overflowY: 'auto' }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1B3D24', marginBottom: 16 }}>Inbox</h1>
 
         {listError && <div style={errorBoxStyle}>{listError}</div>}
@@ -185,11 +194,11 @@ export function Inbox() {
         )}
       </div>
 
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {!selected && <div style={loadingStyle}>Selecciona una conversación.</div>}
         {selected && (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexShrink: 0 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: '#1B3D24' }}>{selected.nombre || selected.phone}</div>
                 <div style={{ fontSize: 12, color: '#9C9080' }}>{selected.phone}</div>
@@ -199,38 +208,40 @@ export function Inbox() {
               </button>
             </div>
 
-            {threadError && <div style={errorBoxStyle}>{threadError}</div>}
-            {!threadError && thread === null && <div style={loadingStyle}>Cargando...</div>}
-            {!threadError && thread !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {thread.map((item) => {
-                  const isInbound = item.direction === 'inbound'
-                  return (
-                    <div
-                      key={item.id}
-                      data-testid="thread-item"
-                      data-direction={item.direction}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        background: isInbound ? '#F5F1E8' : '#E7F0EA',
-                        alignSelf: isInbound ? 'flex-start' : 'flex-end',
-                        maxWidth: '80%',
-                      }}
-                    >
-                      <div data-testid="thread-sender" style={{ fontSize: 11, fontWeight: 700, color: isInbound ? '#9C9080' : '#1B3D24' }}>
-                        {senderLabel(item)}
+            <div ref={threadScrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, marginBottom: 16 }}>
+              {threadError && <div style={errorBoxStyle}>{threadError}</div>}
+              {!threadError && thread === null && <div style={loadingStyle}>Cargando...</div>}
+              {!threadError && thread !== null && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {thread.map((item) => {
+                    const isInbound = item.direction === 'inbound'
+                    return (
+                      <div
+                        key={item.id}
+                        data-testid="thread-item"
+                        data-direction={item.direction}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          background: isInbound ? '#F5F1E8' : '#E7F0EA',
+                          alignSelf: isInbound ? 'flex-start' : 'flex-end',
+                          maxWidth: '80%',
+                        }}
+                      >
+                        <div data-testid="thread-sender" style={{ fontSize: 11, fontWeight: 700, color: isInbound ? '#9C9080' : '#1B3D24' }}>
+                          {senderLabel(item)}
+                        </div>
+                        <div style={{ fontSize: 13, color: '#1B3D24' }}>{threadText(item)}</div>
+                        <div style={{ fontSize: 11, color: '#9C9080' }}>{item.created_at}</div>
                       </div>
-                      <div style={{ fontSize: 13, color: '#1B3D24' }}>{threadText(item)}</div>
-                      <div style={{ fontSize: 11, color: '#9C9080' }}>{item.created_at}</div>
-                    </div>
-                  )
-                })}
-                {thread.length === 0 && <div style={loadingStyle}>Sin mensajes.</div>}
-              </div>
-            )}
+                    )
+                  })}
+                  {thread.length === 0 && <div style={loadingStyle}>Sin mensajes.</div>}
+                </div>
+              )}
+            </div>
 
-            <form onSubmit={handleSend} style={{ display: 'flex', gap: 8 }}>
+            <form onSubmit={handleSend} style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               <input
                 type="text"
                 value={mensaje}
