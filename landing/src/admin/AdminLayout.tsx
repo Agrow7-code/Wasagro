@@ -14,6 +14,7 @@ const NAV_LINKS = [
   { to: '/admin', label: 'Clientes' },
   { to: '/admin/sdr', label: 'SDR' },
   { to: '/admin/inbox', label: 'Inbox' },
+  { to: '/admin/funnel', label: 'Funnel' },
 ]
 
 // T-H4.2 (founder-crm PR4, design Decision 7). Polling, not websockets —

@@ -13,6 +13,7 @@ import { CreateClientForm } from './admin/CreateClientForm'
 import { ClientDetail } from './admin/ClientDetail'
 import { SdrFunnel } from './admin/SdrFunnel'
 import { Inbox } from './admin/Inbox'
+import { Funnel } from './admin/Funnel'
 import { AdminFinca } from './dashboard/views/AdminFinca'
 import { GerenteAgricola } from './dashboard/views/GerenteAgricola'
 import { Exportadora } from './dashboard/views/Exportadora'
@@ -1130,6 +1131,7 @@ export default function App() {
           <Route path="orgs/:id" element={<ClientDetail />} />
           <Route path="sdr" element={<SdrFunnel />} />
           <Route path="inbox" element={<Inbox />} />
+          <Route path="funnel" element={<Funnel />} />
         </Route>
         <Route
           path="/dashboard"
