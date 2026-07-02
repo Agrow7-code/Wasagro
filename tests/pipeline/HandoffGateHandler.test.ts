@@ -6,6 +6,7 @@ vi.mock('../../src/pipeline/supabaseQueries.js', () => ({
   setHandoffEstado: vi.fn().mockResolvedValue(undefined),
   saveSDRInteraccion: vi.fn().mockResolvedValue(undefined),
   actualizarMensaje: vi.fn().mockResolvedValue(undefined),
+  updateSDRProspecto: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../src/agents/sdrAgent.js', () => ({
@@ -205,5 +206,58 @@ describe('handleHandoffGate (T-H1.3)', () => {
 
     expect(result).toBe(true)
     expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-10', { status: 'processed' })
+  })
+
+  it('11. BUG B — inbound ya pausado bumpea ultima_interaccion (updateSDRProspecto)', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-11', handoff_status: 'human_paused', handoff_last_pinged_at: '2026-06-30T10:00:00Z', turns_total: 3,
+    })
+    const sender = crearSenderMock()
+
+    const result = await handleHandoffGate(msgTexto, 'msg-11', 'trace-11', sender)
+
+    expect(result).toBe(true)
+    expect(queries.updateSDRProspecto).toHaveBeenCalledWith('uuid-11', {})
+  })
+
+  it('12. BUG B — auto-pausa también bumpea ultima_interaccion (updateSDRProspecto)', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-12', handoff_status: 'bot', handoff_last_pinged_at: null, turns_total: 1,
+    })
+    vi.mocked(sdrAgent.detectarHandoffTrigger).mockReturnValue('human_request')
+    const sender = crearSenderMock()
+
+    const result = await handleHandoffGate(msgTexto, 'msg-12', 'trace-12', sender)
+
+    expect(result).toBe(true)
+    expect(queries.updateSDRProspecto).toHaveBeenCalledWith('uuid-12', {})
+  })
+
+  it('13. BUG B — updateSDRProspecto rechaza (paused branch) → best-effort, no throw, sigue processed', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-13', handoff_status: 'human_paused', handoff_last_pinged_at: '2026-06-30T10:00:00Z', turns_total: 3,
+    })
+    vi.mocked(queries.updateSDRProspecto).mockRejectedValueOnce(new Error('db down'))
+    const sender = crearSenderMock()
+
+    const result = await handleHandoffGate(msgTexto, 'msg-13', 'trace-13', sender)
+
+    expect(result).toBe(true)
+    expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-13', { status: 'processed' })
+  })
+
+  it('14. BUG B — updateSDRProspecto rechaza (auto-pause branch) → best-effort, no throw, founder ping y processed igual ocurren', async () => {
+    vi.mocked(queries.getHandoffEstado).mockResolvedValue({
+      id: 'uuid-14', handoff_status: 'bot', handoff_last_pinged_at: null, turns_total: 1,
+    })
+    vi.mocked(sdrAgent.detectarHandoffTrigger).mockReturnValue('human_request')
+    vi.mocked(queries.updateSDRProspecto).mockRejectedValueOnce(new Error('db down'))
+    const sender = crearSenderMock()
+
+    const result = await handleHandoffGate(msgTexto, 'msg-14', 'trace-14', sender)
+
+    expect(result).toBe(true)
+    expect(founderAlerts.alertarFounder).toHaveBeenCalledWith('sdr_handoff_solicitado', expect.any(Object))
+    expect(queries.actualizarMensaje).toHaveBeenCalledWith('msg-14', { status: 'processed' })
   })
 })
