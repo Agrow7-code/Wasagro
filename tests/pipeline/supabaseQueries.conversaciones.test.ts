@@ -37,17 +37,50 @@ describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
       })
       // p2's phone is already a usuario (a provisioned client) → excluded.
       const usuariosBuilder = queryBuilder({ data: [{ phone: '593987310830' }], error: null })
-      mock.from.mockReturnValueOnce(prospectosBuilder).mockReturnValueOnce(usuariosBuilder)
+      const msgsBuilder = queryBuilder({ data: [], error: null })
+      mock.from
+        .mockReturnValueOnce(prospectosBuilder)
+        .mockReturnValueOnce(usuariosBuilder)
+        .mockReturnValueOnce(msgsBuilder)
 
       const result = await getConversacionesList(mock as any)
 
       expect(mock.from).toHaveBeenNthCalledWith(1, 'sdr_prospectos')
-      expect(prospectosBuilder['order']).toHaveBeenCalledWith('ultima_interaccion', { ascending: false })
       expect(mock.from).toHaveBeenNthCalledWith(2, 'usuarios')
       expect(usuariosBuilder['in']).toHaveBeenCalledWith('phone', ['593987654321', '593987310830'])
 
       expect(result).toHaveLength(1)
       expect(result[0]).toMatchObject({ id: 'p1' })
+    })
+
+    it('orders by the last inbound message time (mensajes_entrada), not the stale ultima_interaccion', async () => {
+      const mock = crearSupabaseMock()
+      // p1 has an OLDER ultima_interaccion but a NEWER last message → must sort first.
+      const prospectosBuilder = queryBuilder({
+        data: [
+          { id: 'p2', phone: '111', nombre: 'B', empresa: null, status: 'en_discovery', handoff_status: 'bot', handoff_reason: null, founder_notified_at: null, ultima_interaccion: '2026-07-01T10:00:00Z' },
+          { id: 'p1', phone: '222', nombre: 'A', empresa: null, status: 'en_discovery', handoff_status: 'bot', handoff_reason: null, founder_notified_at: null, ultima_interaccion: '2026-06-01T10:00:00Z' },
+        ],
+        error: null,
+      })
+      const usuariosBuilder = queryBuilder({ data: [], error: null })
+      // p1 (222) sent the most recent message; p2 (111) an older one.
+      const msgsBuilder = queryBuilder({
+        data: [
+          { phone: '222', created_at: '2026-07-02T15:00:00Z' },
+          { phone: '111', created_at: '2026-07-01T08:00:00Z' },
+        ],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectosBuilder)
+        .mockReturnValueOnce(usuariosBuilder)
+        .mockReturnValueOnce(msgsBuilder)
+
+      const result = await getConversacionesList(mock as any)
+
+      expect(mock.from).toHaveBeenNthCalledWith(3, 'mensajes_entrada')
+      expect(result.map((r) => r['id'])).toEqual(['p1', 'p2'])
     })
 
     it('does not query usuarios when there are no prospectos', async () => {
