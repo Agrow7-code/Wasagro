@@ -40,6 +40,17 @@ const CONVERSACIONES = [
     ultima_interaccion: '2026-06-30T09:00:00Z',
     needs_attention: false,
   },
+  {
+    id: 'PROSP004',
+    phone: '***9999',
+    nombre: 'Luis Paredes',
+    empresa: 'Cacaotera El Roble',
+    status: 'active',
+    handoff_status: 'human_paused',
+    handoff_reason: 'manual',
+    ultima_interaccion: '2026-07-01T08:00:00Z',
+    needs_attention: true,
+  },
 ]
 
 const THREAD = [
@@ -72,7 +83,7 @@ describe('Inbox (T-H4.1)', () => {
     localStorage.clear()
   })
 
-  it('renders one row per conversation and visually flags needs_attention rows', async () => {
+  it('renders one row per conversation and visually flags needs_attention rows with a specific, actionable label', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -84,13 +95,24 @@ describe('Inbox (T-H4.1)', () => {
     renderInbox()
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
     })
 
     const rows = screen.getAllByTestId('conv-row')
     const flagged = rows.filter((row) => row.getAttribute('data-needs-attention') === 'true')
-    expect(flagged).toHaveLength(1)
-    expect(within(flagged[0]).getByText('Henry Morales')).toBeInTheDocument()
+    expect(flagged).toHaveLength(2)
+
+    // PROSP001: paused via prospect's own request → specific label.
+    const henryRow = flagged.find((row) => within(row).queryByText('Henry Morales'))!
+    expect(within(henryRow).getByText(/pidió hablar con una persona/i)).toBeInTheDocument()
+
+    // PROSP004: paused manually by the founder → different label.
+    const luisRow = flagged.find((row) => within(row).queryByText('Luis Paredes'))!
+    expect(within(luisRow).getByText(/en pausa — la tomaste vos/i)).toBeInTheDocument()
+
+    // PROSP002/PROSP003 (handoff_status 'bot') render NO attention marker.
+    const anaRow = rows.find((row) => within(row).queryByText('Ana Ruiz'))!
+    expect(within(anaRow).queryByText(/pidió hablar|en pausa/i)).not.toBeInTheDocument()
   })
 
   it('auto-opens the conversation from ?conv= (deep-link from the funnel)', async () => {
@@ -131,7 +153,7 @@ describe('Inbox (T-H4.1)', () => {
     renderInbox()
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
     })
     fireEvent.click(screen.getByText('Henry Morales'))
 
@@ -157,7 +179,7 @@ describe('Inbox (T-H4.1)', () => {
     renderInbox()
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
     })
     fireEvent.click(screen.getByText('Henry Morales'))
 
@@ -190,7 +212,7 @@ describe('Inbox (T-H4.1)', () => {
     renderInbox()
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
     })
     fireEvent.click(screen.getByText('Henry Morales'))
 
@@ -228,7 +250,7 @@ describe('Inbox (T-H4.1)', () => {
     renderInbox()
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
     })
     fireEvent.click(screen.getByText('Ana Ruiz'))
 
@@ -264,7 +286,7 @@ describe('Inbox (T-H4.1)', () => {
     renderInbox()
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('conv-row')).toHaveLength(3)
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
     })
     fireEvent.click(screen.getByText('Ana Ruiz'))
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authFetch } from '../auth/api'
+import { attentionLabel } from './conversationLabels'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -151,9 +152,9 @@ export function Funnel() {
                   >
                     <div style={{ fontWeight: 700, fontSize: 13, color: '#1B3D24' }}>
                       {row.nombre || row.phone}
-                      {row.needs_attention && (
+                      {attentionLabel(row) && (
                         <span style={{ marginLeft: 8, fontSize: 11, color: '#D45828', fontWeight: 700 }}>
-                          ⚠ Requiere atención
+                          ⚠ {attentionLabel(row)}
                         </span>
                       )}
                     </div>

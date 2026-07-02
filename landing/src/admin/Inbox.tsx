@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { authFetch } from '../auth/api'
+import { attentionLabel } from './conversationLabels'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -191,9 +192,9 @@ export function Inbox() {
               >
                 <div style={{ fontWeight: 700, fontSize: 14, color: '#1B3D24' }}>
                   {conv.nombre || conv.phone}
-                  {conv.needs_attention && (
+                  {attentionLabel(conv) && (
                     <span style={{ marginLeft: 8, fontSize: 11, color: '#D45828', fontWeight: 700 }}>
-                      ⚠ Requiere atención
+                      ⚠ {attentionLabel(conv)}
                     </span>
                   )}
                 </div>

@@ -62,9 +62,21 @@ describe('GET /api/admin/conversaciones', () => {
     expect(raw).not.toContain('593900000002')
   })
 
-  it('needs_attention is also true when founder_notified_at is set (pending founder notification)', async () => {
+  it('needs_attention is false when founder_notified_at is set but handoff_status is bot (not sticky)', async () => {
     mockGetConversacionesList.mockResolvedValueOnce([
       { id: 'p6', phone: '593900000006', nombre: 'D', empresa: null, status: 'qualified', handoff_status: 'bot', handoff_reason: null, founder_notified_at: '2026-07-01T05:00:00Z', ultima_interaccion: '2026-07-01T05:00:00Z' },
+    ])
+
+    const app = buildApp({ rol: 'director' })
+    const res = await app.request('/api/admin/conversaciones')
+    const body = (await res.json()) as Array<Record<string, unknown>>
+
+    expect(body[0]!['needs_attention']).toBe(false)
+  })
+
+  it('needs_attention is true when handoff_status is human_paused regardless of founder_notified_at', async () => {
+    mockGetConversacionesList.mockResolvedValueOnce([
+      { id: 'p7', phone: '593900000007', nombre: 'E', empresa: null, status: 'qualified', handoff_status: 'human_paused', handoff_reason: 'manual', founder_notified_at: null, ultima_interaccion: '2026-07-01T05:00:00Z' },
     ])
 
     const app = buildApp({ rol: 'director' })
