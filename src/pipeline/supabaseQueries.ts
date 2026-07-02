@@ -811,8 +811,34 @@ export async function getConversacionesList(client: SupabaseClient = defaultClie
     .in('phone', phones)
   if (usuariosError) throw usuariosError
   const phonesCliente = new Set(((usuarios ?? []) as Array<Record<string, unknown>>).map((u) => u['phone'] as string))
+  const visibles = prospectos.filter((p) => !phonesCliente.has(p['phone'] as string))
+  if (visibles.length === 0) return visibles
 
-  return prospectos.filter((p) => !phonesCliente.has(p['phone'] as string))
+  // Order by the prospect's LAST inbound message time, not sdr_prospectos
+  // .ultima_interaccion. That column is bumped only by some SDR handlers (the
+  // meeting-waiting / audio paths miss it), so it sorts conversations stale.
+  // mensajes_entrada is the reliable log of every message a prospect sent, so
+  // "ordered by the last message they sent" comes straight from it.
+  const visiblePhones = visibles.map((p) => p['phone'] as string)
+  const { data: msgs, error: msgsError } = await client
+    .from('mensajes_entrada')
+    .select('phone, created_at')
+    .in('phone', visiblePhones)
+    .order('created_at', { ascending: false })
+  if (msgsError) throw msgsError
+  const ultimoMensaje = new Map<string, string>()
+  for (const row of (msgs ?? []) as Array<Record<string, unknown>>) {
+    const ph = row['phone'] as string
+    if (!ultimoMensaje.has(ph)) ultimoMensaje.set(ph, row['created_at'] as string) // first = newest (desc)
+  }
+
+  // Sort key: last inbound message time, falling back to ultima_interaccion for
+  // a prospecto with no logged inbound message.
+  const clave = (p: Record<string, unknown>): number => {
+    const t = ultimoMensaje.get(p['phone'] as string) ?? (p['ultima_interaccion'] as string | null)
+    return t ? new Date(t).getTime() : 0
+  }
+  return visibles.sort((a, b) => clave(b) - clave(a))
 }
 
 // Founder-crm conversation thread assembly.
