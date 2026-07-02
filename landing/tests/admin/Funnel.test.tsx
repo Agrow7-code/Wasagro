@@ -14,8 +14,8 @@ const CONVERSACIONES = [
     nombre: 'Henry Morales',
     empresa: 'Bananera Puebloviejo',
     status: 'new',
-    handoff_status: 'bot',
-    handoff_reason: null,
+    handoff_status: 'human_paused',
+    handoff_reason: 'auto_human_request',
     ultima_interaccion: '2026-07-01T10:00:00Z',
     needs_attention: true,
   },
@@ -165,7 +165,7 @@ describe('Funnel (PR6)', () => {
     expect(screen.queryAllByTestId('funnel-column')).toHaveLength(0)
   })
 
-  it('visually flags a needs_attention card', async () => {
+  it('visually flags a needs_attention card with the specific, actionable label', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -184,5 +184,6 @@ describe('Funnel (PR6)', () => {
     const flagged = cards.filter((card) => card.getAttribute('data-needs-attention') === 'true')
     expect(flagged).toHaveLength(1)
     expect(within(flagged[0]).getByText('Henry Morales')).toBeInTheDocument()
+    expect(within(flagged[0]).getByText(/pidió hablar con una persona/i)).toBeInTheDocument()
   })
 })

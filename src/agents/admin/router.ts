@@ -218,7 +218,9 @@ adminRouter.post('/clients', async (c) => {
 // T-H2.3 (founder-crm PR2, founder-inbox spec "Conversation list"). One round
 // trip via getConversacionesList (T-H2.1). Every phone is maskPhone-masked —
 // the raw phone MUST NOT appear in the response body (D28/D31). needs_attention
-// mirrors the spec's "paused=true OR pending founder notification" rule.
+// mirrors the spec's "human_paused" rule only — founder_notified_at is set once
+// and never cleared, so including it made the flag stick permanently (fix
+// founder-crm-attention-label).
 adminRouter.get('/conversaciones', async (c) => {
   try {
     const rows = await getConversacionesList()
@@ -231,7 +233,7 @@ adminRouter.get('/conversaciones', async (c) => {
       handoff_status: row['handoff_status'],
       handoff_reason: row['handoff_reason'],
       ultima_interaccion: row['ultima_interaccion'],
-      needs_attention: row['handoff_status'] === 'human_paused' || row['founder_notified_at'] != null,
+      needs_attention: row['handoff_status'] === 'human_paused',
     }))
     return c.json(conversaciones)
   } catch (err) {
