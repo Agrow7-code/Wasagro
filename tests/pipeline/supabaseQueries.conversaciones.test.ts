@@ -5,6 +5,7 @@ vi.mock('../../src/integrations/supabase.js', () => ({
 }))
 
 import { getConversacionesList, getConversacionThread, getSDRProspectoById } from '../../src/pipeline/supabaseQueries.js'
+import type { getSignedUrlEvento } from '../../src/integrations/supabaseStorage.js'
 
 function queryBuilder(result: { data: unknown; error: unknown }) {
   const builder: Record<string, unknown> = {
@@ -172,6 +173,67 @@ describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
       const result = await getConversacionThread('p1', mock as any)
 
       expect(result.map((r) => r['id'])).toEqual(['m1', 'i1', 'm2'])
+    })
+
+    it('an inbound row with media_path gets media_url (via the signed-url helper) + media_tipo', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [
+          {
+            id: 'm1', phone: '593987654321', contenido_raw: null, tipo_mensaje: 'image',
+            media_path: 'sdr/593987654321/uuid1.jpg', created_at: '2026-07-01T10:00:00Z',
+          },
+          {
+            id: 'm2', phone: '593987654321', contenido_raw: null, tipo_mensaje: 'audio',
+            media_path: 'sdr/593987654321/uuid2.ogg', created_at: '2026-07-01T10:01:00Z',
+          },
+          { id: 'm3', phone: '593987654321', contenido_raw: 'hola', tipo_mensaje: 'text', media_path: null, created_at: '2026-07-01T10:02:00Z' },
+        ],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({ data: [], error: null })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const getSignedUrl = vi.fn<typeof getSignedUrlEvento>().mockResolvedValue('https://signed.example/media')
+
+      const result = await getConversacionThread('p1', mock as any, getSignedUrl)
+
+      const imageItem = result.find((r) => r['id'] === 'm1')!
+      const audioItem = result.find((r) => r['id'] === 'm2')!
+      const textItem = result.find((r) => r['id'] === 'm3')!
+
+      expect(getSignedUrl).toHaveBeenCalledWith('sdr/593987654321/uuid1.jpg')
+      expect(getSignedUrl).toHaveBeenCalledWith('sdr/593987654321/uuid2.ogg')
+      expect(imageItem).toMatchObject({ media_url: 'https://signed.example/media', media_tipo: 'image' })
+      expect(audioItem).toMatchObject({ media_url: 'https://signed.example/media', media_tipo: 'audio' })
+      expect(textItem['media_url']).toBeUndefined()
+      expect(textItem['media_tipo']).toBeUndefined()
+    })
+
+    it('a row without media_path is unchanged (no signed-url call for it)', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [{ id: 'm1', phone: '593987654321', contenido_raw: 'hola', tipo_mensaje: 'text', created_at: '2026-07-01T10:00:00Z' }],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({ data: [], error: null })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const getSignedUrl = vi.fn<typeof getSignedUrlEvento>().mockResolvedValue('https://signed.example/media')
+
+      const result = await getConversacionThread('p1', mock as any, getSignedUrl)
+
+      expect(getSignedUrl).not.toHaveBeenCalled()
+      expect(result[0]).toMatchObject({ id: 'm1', contenido: 'hola' })
+      expect(result[0]['media_url']).toBeUndefined()
     })
   })
 

@@ -1,5 +1,6 @@
 import { supabase as defaultClient } from '../integrations/supabase.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getSignedUrlEvento } from '../integrations/supabaseStorage.js'
 
 export interface UsuarioRow {
   id: string
@@ -96,7 +97,7 @@ export async function registrarMensaje(insert: MensajeInsert, client: SupabaseCl
 
 export async function actualizarMensaje(
   id: string,
-  updates: Partial<{ status: string; contenido_raw: string; evento_id: string; error_detail: string }>,
+  updates: Partial<{ status: string; contenido_raw: string; evento_id: string; error_detail: string; media_path: string }>,
   client: SupabaseClient = defaultClient,
 ): Promise<void> {
   const { error } = await client
@@ -815,7 +816,11 @@ export async function getConversacionesList(client: SupabaseClient = defaultClie
 // from here — they are taken solely from mensajes_entrada (see below).
 const TIPOS_OUTBOUND_HILO = ['outbound', 'founder_override', 'draft_approval']
 
-export async function getConversacionThread(prospectoId: string, client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
+export async function getConversacionThread(
+  prospectoId: string,
+  client: SupabaseClient = defaultClient,
+  getSignedUrl: typeof getSignedUrlEvento = getSignedUrlEvento,
+): Promise<Array<Record<string, unknown>>> {
   const { data: prospecto, error: prospectoError } = await client
     .from('sdr_prospectos')
     .select('phone')
@@ -849,13 +854,29 @@ export async function getConversacionThread(prospectoId: string, client: Supabas
   // duplicates (the same message logged seconds apart in each table), so we no
   // longer merge+dedup — we take inbound from mensajes_entrada only, and take
   // OUTBOUND (Wasagro-side) rows only from sdr_interacciones.
-  const inbound = ((mensajes ?? []) as Array<Record<string, unknown>>).map((row) => ({
-    ...row,
-    origen: 'mensajes_entrada',
-    direction: 'inbound' as const,
-    // contenido_raw is null for SDR audio/image inbound (no STT in the SDR path).
-    contenido: String(row['contenido_raw'] ?? '').trim() || '[audio o imagen]',
-  }))
+  // Inbound audio/image rows with a media_path (SDR ingest, best-effort) get a
+  // signed URL so the founder inbox can render the original media instead of
+  // just the '[audio o imagen]' placeholder. Rows without media_path (text,
+  // or media that failed to download/upload, or pre-migration history) are
+  // left unchanged — no media_url/media_tipo key at all. Resolved in parallel,
+  // there are only a handful of media rows per conversation.
+  const inbound = await Promise.all(
+    ((mensajes ?? []) as Array<Record<string, unknown>>).map(async (row) => {
+      const item: Record<string, unknown> = {
+        ...row,
+        origen: 'mensajes_entrada',
+        direction: 'inbound' as const,
+        // contenido_raw is null for SDR audio/image inbound (no STT in the SDR path).
+        contenido: String(row['contenido_raw'] ?? '').trim() || '[audio o imagen]',
+      }
+      const mediaPath = row['media_path'] as string | null | undefined
+      if (mediaPath) {
+        item['media_url'] = await getSignedUrl(mediaPath)
+        item['media_tipo'] = row['tipo_mensaje'] === 'audio' ? 'audio' : 'image'
+      }
+      return item
+    }),
+  )
 
   const outbound = interaccionesRows
     .filter((row) => TIPOS_OUTBOUND_HILO.includes(row['tipo'] as string))
