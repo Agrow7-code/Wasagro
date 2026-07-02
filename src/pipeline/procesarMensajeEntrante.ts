@@ -16,6 +16,7 @@ import { handleSDRSession, handleFounderApproval, handleMeetingConfirmation } fr
 import { handleOnboardingAdmin, handleOnboardingAgricultor } from './handlers/OnboardingHandler.js'
 import { handleEvento } from './handlers/EventHandler.js'
 import { handleHandoffGate } from './handlers/HandoffGateHandler.js'
+import { ingerirMediaSDR } from './handlers/SDRMediaIngest.js'
 import { loadSessionState } from '../agents/sdr/contextStore.js'
 import { shouldSuppressOnboardingForActiveSDR } from '../agents/sdr/onboardingGuard.js'
 import { recordInboundWaCost } from '../integrations/whatsapp/CostTrackedSender.js'
@@ -95,6 +96,13 @@ export async function procesarMensajeEntrante(msg: NormalizedMessage, traceId: s
       const usuario = await getUserByPhone(msg.from)
 
       if (!usuario) {
+        // Best-effort SDR media ingest (feat/sdr-inbox-media): fire-and-forget
+        // — deliberately NOT awaited so a slow/failed media download never
+        // adds latency to the prospect's reply (P3). ingerirMediaSDR already
+        // swallows every internal failure (P4); the extra .catch() here is
+        // defense-in-depth against unhandled rejections, never relied upon.
+        void ingerirMediaSDR(msg, mensajeId, traceId).catch(() => {})
+
         // Pause/resume gate (REQ-hand-008/011): must run BEFORE any FSM/LLM
         // call on the SDR branch, and must NEVER be reachable from the
         // `usuario` field-capture branch below.

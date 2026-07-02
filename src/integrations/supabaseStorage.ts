@@ -11,6 +11,14 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': 'webp',
   'image/heic': 'heic',
   'application/pdf': 'pdf',
+  // WhatsApp voice notes (Evolution) come as ogg/opus; keep a few common
+  // fallbacks in case a prospect sends an audio file instead of a voice note.
+  'audio/ogg': 'ogg',
+  'audio/opus': 'opus',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+  'audio/wav': 'wav',
 }
 
 /**
@@ -75,6 +83,46 @@ export async function subirImagenEvento(
     return path
   } catch (err) {
     console.error('[supabaseStorage] upload excepción:', String(err))
+    return null
+  }
+}
+
+/**
+ * Construye la ruta del objeto para el media (audio/imagen) de un prospecto
+ * SDR, dentro del mismo bucket privado eventos-media (D8/D29 reuse — sin
+ * bucket nuevo), scoped bajo sdr/<telefono>/. Pura y testeable.
+ */
+export function buildMediaPathSDR(phone: string, mimeType: string, id: string = randomUUID()): string {
+  const ext = MIME_EXT[mimeType.toLowerCase()] ?? 'bin'
+  const safePhone = (phone || 'sin-telefono').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `sdr/${safePhone}/${id}.${ext}`
+}
+
+/**
+ * Sube el audio/imagen entrante de un prospecto SDR al bucket privado
+ * eventos-media, bajo sdr/. NUNCA lanza: si Storage falla, loggea y devuelve
+ * null — el ingest de media SDR es best-effort y jamás debe romper el
+ * pipeline (P3/P4).
+ */
+export async function subirMediaSDR(
+  base64: string,
+  mimeType: string,
+  phone: string,
+  client: SupabaseClient = supabase,
+): Promise<string | null> {
+  try {
+    const path = buildMediaPathSDR(phone, mimeType)
+    const buffer = Buffer.from(base64, 'base64')
+    const { error } = await client.storage
+      .from(EVENTOS_MEDIA_BUCKET)
+      .upload(path, buffer, { contentType: mimeType, upsert: false })
+    if (error) {
+      console.error('[supabaseStorage] upload SDR falló:', error.message)
+      return null
+    }
+    return path
+  } catch (err) {
+    console.error('[supabaseStorage] upload SDR excepción:', String(err))
     return null
   }
 }
