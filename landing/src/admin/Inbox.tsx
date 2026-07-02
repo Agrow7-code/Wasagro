@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { authFetch } from '../auth/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -65,6 +66,7 @@ export function Inbox() {
   const [sendError, setSendError] = useState('')
   const [sending, setSending] = useState(false)
   const threadScrollRef = useRef<HTMLDivElement>(null)
+  const [searchParams] = useSearchParams()
 
   // When a conversation opens (thread loads), jump to the LATEST message
   // (bottom) — a chat should land on the most recent message, not the oldest.
@@ -110,6 +112,15 @@ export function Inbox() {
       setThreadError(err instanceof Error ? err.message : 'Error cargando la conversación')
     }
   }
+
+  // Deep-link: arriving from the funnel (/admin/inbox?conv=<id>) auto-opens that
+  // conversation once the list has loaded (guarded by !selectedId so it fires once).
+  useEffect(() => {
+    const convId = searchParams.get('conv')
+    if (convId && conversaciones && !selectedId) {
+      void selectConversacion(convId)
+    }
+  }, [conversaciones, searchParams, selectedId])
 
   // Reflects the new handoff_status locally from the route's own response —
   // no re-fetch of /conversaciones (no full reload).

@@ -138,7 +138,7 @@ export function Funnel() {
                     key={row.id}
                     data-testid="funnel-card"
                     data-needs-attention={row.needs_attention}
-                    onClick={() => navigate('/admin/inbox')}
+                    onClick={() => navigate(`/admin/inbox?conv=${row.id}`)}
                     style={{
                       textAlign: 'left',
                       width: '100%',
