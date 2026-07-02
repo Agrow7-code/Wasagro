@@ -1,7 +1,7 @@
 import { langfuse } from '../../integrations/langfuse.js'
 import type { NormalizedMessage } from '../../integrations/whatsapp/NormalizedMessage.js'
 import type { IWhatsAppSender } from '../../integrations/whatsapp/IWhatsAppSender.js'
-import { getHandoffEstado, setHandoffEstado, saveSDRInteraccion, actualizarMensaje } from '../supabaseQueries.js'
+import { getHandoffEstado, setHandoffEstado, saveSDRInteraccion, actualizarMensaje, updateSDRProspecto } from '../supabaseQueries.js'
 import { detectarHandoffTrigger } from '../../agents/sdrAgent.js'
 import { alertarFounder } from '../../integrations/whatsapp/founderAlerts.js'
 
@@ -94,6 +94,20 @@ export async function handleHandoffGate(
       prospectoId,
       'saveSDRInteraccion',
     )
+    // BUG FIX (founder-crm inbox ordering): `GET /api/admin/conversaciones`
+    // orders by `ultima_interaccion DESC`, but that column is only bumped by
+    // `updateSDRProspecto`. While paused (exactly the conversations shown in
+    // the founder inbox), new inbound messages were logged here but never
+    // bumped `ultima_interaccion`, so the conversation went stale in the list.
+    // `updateSDRProspecto(id, {})` always stamps `ultima_interaccion` even
+    // with an empty updates payload — best-effort, wrapped like every other
+    // post-pause side-effect (P7: must never throw out of the gate).
+    await runPostPauseSideEffect(
+      () => updateSDRProspecto(prospectoId, {}),
+      trace,
+      prospectoId,
+      'updateSDRProspecto',
+    )
     await runPostPauseSideEffect(
       () => actualizarMensaje(mensajeId, { status: 'processed' }),
       trace,
@@ -156,6 +170,15 @@ export async function handleHandoffGate(
       trace,
       prospectoId,
       'saveSDRInteraccion',
+    )
+    // Same ultima_interaccion bump as the already-paused branch — the
+    // auto-pause transition also logs an inbound that must move this
+    // conversation to the top of the founder inbox list.
+    await runPostPauseSideEffect(
+      () => updateSDRProspecto(prospectoId, {}),
+      trace,
+      prospectoId,
+      'updateSDRProspecto',
     )
     await runPostPauseSideEffect(() => sender.enviarTexto(msg.from, ACK_PAUSA), trace, prospectoId, 'enviarTexto')
     await runPostPauseSideEffect(

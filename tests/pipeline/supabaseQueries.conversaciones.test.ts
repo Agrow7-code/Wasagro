@@ -99,6 +99,107 @@ describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
       // Only the prospecto lookup happens — no thread queries for a non-existent id.
       expect(mock.from).toHaveBeenCalledTimes(1)
     })
+
+    it('tags each row with an explicit direction — inbound for mensajes_entrada, derived from tipo for sdr_interacciones', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [{ id: 'm1', phone: '593987654321', contenido_raw: 'hola', created_at: '2026-07-01T10:00:00Z' }],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({
+        data: [
+          { id: 'i1', prospecto_id: 'p1', tipo: 'inbound', contenido: 'otro mensaje', created_at: '2026-07-01T10:01:00Z' },
+          { id: 'i2', prospecto_id: 'p1', tipo: 'founder_override', contenido: 'te ayudo enseguida', created_at: '2026-07-01T10:02:00Z' },
+        ],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const result = await getConversacionThread('p1', mock as any)
+
+      expect(result).toHaveLength(3)
+      expect(result.find((r) => r['id'] === 'm1')).toMatchObject({ direction: 'inbound' })
+      expect(result.find((r) => r['id'] === 'i1')).toMatchObject({ direction: 'inbound' })
+      expect(result.find((r) => r['id'] === 'i2')).toMatchObject({ direction: 'outbound', isFounder: true })
+    })
+
+    it('dedups an inbound message logged to BOTH mensajes_entrada and sdr_interacciones — appears ONCE', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [{ id: 'm1', phone: '593987654321', contenido_raw: 'hola quiero info', created_at: '2026-07-01T10:00:00.000Z' }],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({
+        data: [
+          // Same message the webhook already logged to mensajes_entrada — the
+          // SDR gate also logs it to sdr_interacciones (tipo='inbound'), same
+          // content, a couple seconds later (well within the dedup window).
+          { id: 'i1', prospecto_id: 'p1', tipo: 'inbound', contenido: 'hola quiero info', created_at: '2026-07-01T10:00:02.000Z' },
+        ],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const result = await getConversacionThread('p1', mock as any)
+
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({ id: 'i1', origen: 'sdr_interacciones', direction: 'inbound' })
+    })
+
+    it('does NOT dedup two distinct inbound messages that merely happen to be close in time', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [{ id: 'm1', phone: '593987654321', contenido_raw: 'hola', created_at: '2026-07-01T10:00:00.000Z' }],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({
+        data: [
+          { id: 'i1', prospecto_id: 'p1', tipo: 'inbound', contenido: 'mensaje totalmente distinto', created_at: '2026-07-01T10:00:01.000Z' },
+        ],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const result = await getConversacionThread('p1', mock as any)
+
+      expect(result).toHaveLength(2)
+    })
+
+    it('orders the deduped, direction-tagged thread by created_at across both sources', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [
+          { id: 'm1', phone: '593987654321', contenido_raw: 'primero', created_at: '2026-07-01T10:00:00Z' },
+          { id: 'm2', phone: '593987654321', contenido_raw: 'tercero', created_at: '2026-07-01T10:10:00Z' },
+        ],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({
+        data: [{ id: 'i1', prospecto_id: 'p1', tipo: 'founder_override', contenido: 'segundo', created_at: '2026-07-01T10:05:00Z' }],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const result = await getConversacionThread('p1', mock as any)
+
+      expect(result.map((r) => r['id'])).toEqual(['m1', 'i1', 'm2'])
+    })
   })
 
   describe('getSDRProspectoById (T-H3.1)', () => {

@@ -768,6 +768,39 @@ export async function getConversacionesList(client: SupabaseClient = defaultClie
   return (data ?? []) as Array<Record<string, unknown>>
 }
 
+// Dedup window for the founder-crm thread merge (fix/founder-crm-thread-direction).
+//
+// Every inbound WhatsApp message on the SDR branch is logged to BOTH tables:
+// `mensajes_entrada` (webhook, `registrarMensaje`, unconditional — runs before
+// any routing decision) AND `sdr_interacciones` (tipo='inbound', written by
+// routeSDRNode/handleAudioInbound/HandoffGateHandler, but wrapped in
+// `safePersist`/`runPostPauseSideEffect` best-effort helpers that can silently
+// swallow a write failure). Because the sdr_interacciones write is NOT
+// guaranteed, sdr_interacciones cannot be trusted as the single source of
+// truth — an inbound could, in a rare failure case, land ONLY in
+// mensajes_entrada. We therefore keep the merge and dedup instead of dropping
+// mensajes_entrada outright.
+const THREAD_DEDUP_WINDOW_MS = 5000
+
+function isDuplicateInboundRow(
+  mensaje: Record<string, unknown>,
+  interaccion: Record<string, unknown>,
+): boolean {
+  const mensajeContent = String(mensaje['contenido_raw'] ?? '').trim()
+  const interaccionContent = String(interaccion['contenido'] ?? '').trim()
+  // mensajes_entrada.contenido_raw is null for SDR audio/image inbound (no STT
+  // in the SDR path — see sdrAgent.ts FIX-3 comment), while sdr_interacciones
+  // logs a '[audio]' placeholder for the same event. Treat an empty mensaje
+  // content as a content match too, so that pair still dedups on the time
+  // window alone rather than showing up twice.
+  const contentMatches = mensajeContent.length === 0 || mensajeContent === interaccionContent
+  if (!contentMatches) return false
+
+  const mensajeTime = new Date(mensaje['created_at'] as string).getTime()
+  const interaccionTime = new Date(interaccion['created_at'] as string).getTime()
+  return Math.abs(mensajeTime - interaccionTime) <= THREAD_DEDUP_WINDOW_MS
+}
+
 export async function getConversacionThread(prospectoId: string, client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
   const { data: prospecto, error: prospectoError } = await client
     .from('sdr_prospectos')
@@ -793,9 +826,24 @@ export async function getConversacionThread(prospectoId: string, client: Supabas
     .order('created_at', { ascending: true })
   if (interaccionesError) throw interaccionesError
 
+  const interaccionesRows = (interacciones ?? []) as Array<Record<string, unknown>>
+  const inboundInteracciones = interaccionesRows.filter((row) => row['tipo'] === 'inbound')
+
+  // Drop a mensajes_entrada row when a matching sdr_interacciones inbound row
+  // already represents the same message — same phone (implied by the shared
+  // per-prospecto query scope), matching content within a small time window.
+  const dedupedMensajes = ((mensajes ?? []) as Array<Record<string, unknown>>).filter(
+    (mensaje) => !inboundInteracciones.some((interaccion) => isDuplicateInboundRow(mensaje, interaccion)),
+  )
+
   const thread: Array<Record<string, unknown>> = [
-    ...((mensajes ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row, origen: 'mensajes_entrada' })),
-    ...((interacciones ?? []) as Array<Record<string, unknown>>).map((row) => ({ ...row, origen: 'sdr_interacciones' })),
+    ...dedupedMensajes.map((row) => ({ ...row, origen: 'mensajes_entrada', direction: 'inbound' as const })),
+    ...interaccionesRows.map((row) => ({
+      ...row,
+      origen: 'sdr_interacciones',
+      direction: row['tipo'] === 'inbound' ? ('inbound' as const) : ('outbound' as const),
+      isFounder: row['tipo'] === 'founder_override',
+    })),
   ]
   thread.sort((a, b) => {
     const aTime = new Date(a['created_at'] as string).getTime()
