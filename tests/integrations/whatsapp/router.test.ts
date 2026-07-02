@@ -136,7 +136,7 @@ describe('POST /webhook/whatsapp — fromMe (founder-crm PR5)', () => {
     vi.clearAllMocks()
   })
 
-  it('un mensaje esFromMe=true se despacha a handleFounderManualReply y retorna 200', async () => {
+  it('un mensaje esFromMe=true encola founder-manual-reply en pg-boss (con singletonKey) y retorna 200, sin llamar a handleFounderManualReply inline', async () => {
     const msg = crearMsgFromMe()
     const app = crearApp(crearAdapterMock(true, msg))
     const res = await app.request('/webhook/whatsapp', {
@@ -145,13 +145,15 @@ describe('POST /webhook/whatsapp — fromMe (founder-crm PR5)', () => {
       headers: { 'Content-Type': 'application/json' },
     })
     expect(res.status).toBe(200)
-    expect(handleFounderManualReply).toHaveBeenCalledWith(
-      expect.objectContaining({ wamid: msg.wamid, esFromMe: true }),
-      expect.any(String),
+    expect(getBoss().send).toHaveBeenCalledWith(
+      'founder-manual-reply',
+      expect.objectContaining({ msg: expect.objectContaining({ wamid: msg.wamid, esFromMe: true }) }),
+      expect.objectContaining({ singletonKey: msg.wamid, retryLimit: 3, retryBackoff: true }),
     )
+    expect(handleFounderManualReply).not.toHaveBeenCalled()
   })
 
-  it('un mensaje esFromMe=true NUNCA se encola en pg-boss (nunca entra a procesarMensajeEntrante)', async () => {
+  it('un mensaje esFromMe=true NUNCA se encola como procesar-mensaje (nunca entra a procesarMensajeEntrante)', async () => {
     const msg = crearMsgFromMe()
     const app = crearApp(crearAdapterMock(true, msg))
     await app.request('/webhook/whatsapp', {
@@ -159,7 +161,7 @@ describe('POST /webhook/whatsapp — fromMe (founder-crm PR5)', () => {
       body: JSON.stringify({ test: true }),
       headers: { 'Content-Type': 'application/json' },
     })
-    expect(getBoss().send).not.toHaveBeenCalled()
+    expect(getBoss().send).not.toHaveBeenCalledWith('procesar-mensaje', expect.anything(), expect.anything())
   })
 
   it('un mensaje normal (esFromMe ausente) sigue encolándose normalmente y NO llama a handleFounderManualReply', async () => {

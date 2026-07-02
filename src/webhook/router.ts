@@ -5,7 +5,6 @@ import { getBoss } from '../workers/pgBoss.js'
 import type { IWhatsAppAdapter } from '../integrations/whatsapp/IWhatsAppAdapter.js'
 import { setIfNotExists } from '../integrations/redis.js'
 import { handleCalcomWebhook } from '../integrations/calcom/calcomWebhook.js'
-import { handleFounderManualReply } from '../pipeline/handlers/FounderManualReplyHandler.js'
 
 // Cross-instance dedup for incoming webhooks. Evolution API delivers the same
 // webhook 6-8 times per message; pg-boss singletonKey has a race window when
@@ -83,16 +82,24 @@ webhookRouter.post('/whatsapp', async (c) => {
     // founder-crm PR5: a `fromMe` event (founder's own linked device, or an
     // echo of our own send) is routed OUT of the normal inbound pipeline —
     // it must NEVER reach procesarMensajeEntrante/handleEvento (field-path
-    // safety, P1). handleFounderManualReply is best-effort by design and
-    // never throws; the try/catch here is defense-in-depth only.
+    // safety, P1). It is ALSO routed OFF the synchronous webhook path: the
+    // handler can do up to 4 sequential Supabase round-trips, which would
+    // block the <1s ack (CR2). Enqueue and return 200 immediately, same
+    // pattern as the procesar-mensaje enqueue below. singletonKey: msg.wamid
+    // also collapses cross-instance duplicates if the Redis dedup above
+    // degrades (see isDuplicate fallback).
     if (msg.esFromMe) {
-      console.log(`[webhook] fromMe de ${msg.from} wamid=${msg.wamid} — despachando a handleFounderManualReply`)
+      console.log(`[webhook] fromMe de ${msg.from} wamid=${msg.wamid} — encolando founder-manual-reply`)
       try {
-        await handleFounderManualReply(msg, trace.id)
-        trace.event({ name: 'founder_manual_reply_dispatched', level: 'DEFAULT', input: { phone: msg.from, wamid: msg.wamid } })
+        await getBoss().send('founder-manual-reply', { msg, traceId: trace.id }, {
+          singletonKey: msg.wamid,
+          retryLimit: 3,
+          retryBackoff: true,
+        })
+        trace.event({ name: 'founder_manual_reply_enqueued', level: 'DEFAULT', input: { phone: msg.from, wamid: msg.wamid } })
       } catch (err: unknown) {
-        console.error(`[webhook] ERROR inesperado en handleFounderManualReply: ${String(err)}`)
-        trace.event({ name: 'founder_manual_reply_dispatch_error', level: 'ERROR', output: { error: String(err) } })
+        console.error(`[webhook] ERROR al encolar founder-manual-reply: ${String(err)}`)
+        trace.event({ name: 'founder_manual_reply_enqueue_error', level: 'ERROR', output: { error: String(err) } })
       }
       return c.json({ status: 'received' }, 200)
     }

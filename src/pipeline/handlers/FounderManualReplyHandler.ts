@@ -51,6 +51,16 @@ export async function handleFounderManualReply(msg: NormalizedMessage, traceId?:
     // Evolution's API, which ALSO emits a fromMe echo for the message we just
     // sent. Without this check, every automated/panel send would be
     // double-logged as a "founder manual reply".
+    //
+    // KNOWN GAP (deferred, R3 WARNING): this content+120s dedup can
+    // theoretically double-log if a panel/bot send's fromMe echo webhook
+    // arrives and this SELECT runs BEFORE that send's own INSERT commits —
+    // the echo row wouldn't exist yet, so esEco would be false. The enqueue
+    // delay (router.ts -> pg-boss job) mitigates this in practice (the
+    // outbound send's own DB write should usually commit first), but it's
+    // not eliminated. Full fix requires idempotency keyed on `wamid` (needs
+    // a `wamid` column + migration on sdr_interacciones) — not implemented
+    // here; out of scope for this PR.
     const sinceIso = new Date(msg.timestamp.getTime() - DEDUP_WINDOW_MS).toISOString()
     const recientes = await getRecentOutboundInteracciones(prospectoId, sinceIso)
     const esEco = recientes.some((row) => String(row['contenido'] ?? '').trim() === texto.trim())
@@ -65,7 +75,12 @@ export async function handleFounderManualReply(msg: NormalizedMessage, traceId?:
       turno: (prospecto['turns_total'] as number | null) ?? 0,
       tipo: 'founder_override',
       contenido: texto,
-      action_taken: null,
+      // Marks this row as written by THIS handler (a phone reply, never a
+      // new echo). getRecentOutboundInteracciones excludes rows tagged this
+      // way so a genuine 2nd identical phone reply isn't self-echo-dropped
+      // against the 1st (R2/R3, founder-crm PR5 fix). Real API-send echoes
+      // (panel/bot/chaser/booking) keep action_taken=null.
+      action_taken: 'founder_phone_reply',
       langfuse_trace_id: traceId,
     })
     // Bump ultima_interaccion so this conversation surfaces correctly ordered

@@ -105,5 +105,27 @@ describe('EvolutionAdapter', () => {
       const msg = adapter.parsearMensaje(evoFromMeTexto)
       expect(msg!.from).toBe('593987654321')
     })
+
+    it('fromMe=true en un JID de grupo (@g.us) sigue descartándose (regression guard: el filtro de JID no-individual va ANTES del tagging de esFromMe)', () => {
+      const payloadGrupoFromMe = {
+        ...evoFromMeTexto,
+        data: {
+          ...evoFromMeTexto.data,
+          key: { ...evoFromMeTexto.data.key, remoteJid: '120363000000000000@g.us' },
+        },
+      }
+      expect(adapter.parsearMensaje(payloadGrupoFromMe)).toBeNull()
+    })
+
+    it('fromMe=true en un JID de broadcast (@broadcast) sigue descartándose', () => {
+      const payloadBroadcastFromMe = {
+        ...evoFromMeTexto,
+        data: {
+          ...evoFromMeTexto.data,
+          key: { ...evoFromMeTexto.data.key, remoteJid: 'status@broadcast' },
+        },
+      }
+      expect(adapter.parsearMensaje(payloadBroadcastFromMe)).toBeNull()
+    })
   })
 })

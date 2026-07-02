@@ -32,6 +32,8 @@ import {
   markAlertaEntregada,
   // M12 — delivered-history check for is_first_alert
   haEntregadoAlertaAntes,
+  // founder-crm PR5 fix — self-echo dedup source for fromMe reconciliation
+  getRecentOutboundInteracciones,
 } from '../../src/pipeline/supabaseQueries.js'
 
 function crearThenable(result: unknown) {
@@ -59,6 +61,7 @@ function crearSupabaseMock() {
     eq: vi.fn().mockReturnThis(),
     neq: vi.fn().mockReturnThis(),
     gt: vi.fn().mockReturnThis(),
+    gte: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
@@ -767,5 +770,24 @@ describe('haEntregadoAlertaAntes', () => {
     expect(result).toBe(false)
     // Verify filter was called with Sigatoka negra, not Moniliasis
     expect(mock._chain.filter).toHaveBeenCalledWith('datos_evento->>plaga_tipo', 'eq', 'Sigatoka negra')
+  })
+})
+
+// ─── getRecentOutboundInteracciones (founder-crm PR5 fix — R2/R3) ──────────
+//
+// TIPOS_ECO_SALIENTE includes 'founder_override', which is the tipo THIS
+// handler writes for a phone reply. Without excluding the handler's own
+// rows, a 2nd identical founder phone reply would self-echo-match the 1st
+// and be silently dropped. Real API-send echoes (panel founder_override
+// with action_taken=null, bot outbound, chaser, booking) must stay in the
+// dedup source.
+describe('getRecentOutboundInteracciones', () => {
+  it('excludes rows written by this handler itself (action_taken=founder_phone_reply) from the echo-dedup source', async () => {
+    const mock = crearSupabaseMock()
+    mock._chain.order.mockResolvedValue({ data: [], error: null })
+
+    await getRecentOutboundInteracciones('prospecto-1', '2026-07-01T00:00:00Z', mock as any)
+
+    expect(mock._chain.neq).toHaveBeenCalledWith('action_taken', 'founder_phone_reply')
   })
 })

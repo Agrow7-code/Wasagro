@@ -767,6 +767,12 @@ export async function getRecentOutboundInteracciones(
     .select('contenido, tipo, created_at')
     .eq('prospecto_id', prospectoId)
     .in('tipo', TIPOS_ECO_SALIENTE)
+    // Exclude rows THIS handler itself wrote for a phone reply — those never
+    // produce a new echo, and matching against them would self-drop a
+    // genuine 2nd identical founder phone reply (R2/R3, founder-crm PR5 fix).
+    // Real API-send echoes (panel founder_override with action_taken=null,
+    // bot outbound, chaser, booking) stay in the dedup source.
+    .neq('action_taken', 'founder_phone_reply')
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
   if (error) throw error
