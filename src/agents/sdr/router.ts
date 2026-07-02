@@ -42,7 +42,7 @@ const TEMPLATE_TO_BOT_ACTION: Record<TemplateKey, BotAction> = {
 // stale CHECK constraint and a missing migration column made two consecutive
 // UPDATEs throw, and the prospect saw the recovery twice and stopped replying).
 // Failures are logged to console + LangFuse so the root cause is still visible.
-async function safePersist<T>(
+export async function safePersist<T>(
   operation: () => Promise<T>,
   opts: { trace: ReturnType<typeof langfuse.trace>; eventName: string; meta: Record<string, unknown> },
 ): Promise<T | null> {
@@ -239,6 +239,24 @@ export async function routeSDRNode(rctx: SDRRouterContext): Promise<void> {
       // the main close flow), PERSIST after with tolerance.
       await sender.enviarTexto(nextCtx.phone, respuesta)
       await sender.enviarTexto(nextCtx.phone, composeCalendarLink(nextCtx.prospectId))
+
+      // Persist the bot's own invite reply as tipo='outbound' so it shows up
+      // on Wasagro's side of the founder-crm thread (see getConversacionThread)
+      // and so PR5's fromMe echo dedup recognizes our own send instead of
+      // logging it as a founder manual reply. Best-effort — never breaks the flow.
+      await safePersist(() => saveSDRInteraccion({
+        prospecto_id: nextCtx.prospectId,
+        phone: nextCtx.phone,
+        turno: nextCtx.turnCount,
+        tipo: 'outbound',
+        contenido: respuesta,
+        action_taken: null,
+        langfuse_trace_id: traceId,
+      }, client), {
+        trace,
+        eventName: 'sdr_outbound_interaccion_save_failed',
+        meta: { prospecto_id: nextCtx.prospectId, path: 'non_mvp_cultivo_invite' },
+      })
 
       const updateData = computeLegacyUpdate(nextCtx, initial)
       updateData['status'] = 'piloto_propuesto'
@@ -488,6 +506,27 @@ ESTRICTO:
 
   // From here down: everything is best-effort. The prospect already has their
   // reply; a stale CHECK constraint or missing column must NOT trigger recovery.
+
+  // Persist the bot's own reply as tipo='outbound' so it shows up on Wasagro's
+  // side of the founder-crm thread (see getConversacionThread) and so PR5's
+  // fromMe echo dedup recognizes our own send instead of logging it as a
+  // founder manual reply. Best-effort — never breaks the flow.
+  if (shouldSend) {
+    await safePersist(() => saveSDRInteraccion({
+      prospecto_id: ctx.prospectId,
+      phone: ctx.phone,
+      turno: ctx.turnCount,
+      tipo: 'outbound',
+      contenido: respuesta,
+      action_taken: null,
+      langfuse_trace_id: traceId,
+    }, client), {
+      trace,
+      eventName: 'sdr_outbound_interaccion_save_failed',
+      meta: { prospecto_id: ctx.prospectId, turno: ctx.turnCount },
+    })
+  }
+
   const updateData = computeLegacyUpdate(ctx, initial)
   if (requires_founder_approval) {
     updateData.status = 'piloto_propuesto'

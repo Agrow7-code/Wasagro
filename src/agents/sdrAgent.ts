@@ -54,6 +54,7 @@ import type { Segmento } from './sdr/context.js'
 import { getClassifier } from './sdr/classifier.js'
 import { loadHydratedContext } from './sdr/contextStore.js'
 import { compose } from './sdr/composer.js'
+import { safePersist } from './sdr/router.js'
 import type { ILLMAdapter } from '../integrations/llm/ILLMAdapter.js'
 
 export function inferBrochureSegment(prospecto: Record<string, unknown>): 'exportadora' | 'agricultor' {
@@ -364,6 +365,13 @@ export async function handleMeetingConfirmation(
     }
 
     let actionTaken = 'meeting_pending'
+    // The bot's own reply for this turn — captured so it can be persisted as
+    // tipo='outbound' below. Real-prod misattribution bug (phone
+    // 573108059563): these replies were sent via sender.enviarTexto(...) but
+    // never persisted, so Wasagro's side of the founder-crm thread was
+    // missing entirely (getConversacionThread only ever saw the prospect's
+    // inbound/meeting_confirmation rows).
+    let respuestaAlProspecto = ''
 
     // Fase A: structural responses come from deterministic templates. The
     // composer resolves by intent (these are all high-priority intent overrides
@@ -383,11 +391,13 @@ export async function handleMeetingConfirmation(
       })
 
       const composed = compose('meeting_proposed', 'booked', ctxForTemplate)
-      await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto! Quedamos confirmados.')
+      respuestaAlProspecto = composed?.text ?? '¡Perfecto! Quedamos confirmados.'
+      await sender.enviarTexto(msg.from, respuestaAlProspecto)
       actionTaken = 'meeting_confirmed'
     } else if (intencion === 'wants_brochure') {
       const composed = compose('meeting_proposed', 'wants_brochure', ctxForTemplate)
-      await sender.enviarTexto(msg.from, composed?.text ?? '¡Claro! Te mando el brochure ✅')
+      respuestaAlProspecto = composed?.text ?? '¡Claro! Te mando el brochure ✅'
+      await sender.enviarTexto(msg.from, respuestaAlProspecto)
       actionTaken = 'brochure_sent'
 
       // Mantener el prospecto vivo en piloto_propuesto — el brochure es un nurture step,
@@ -395,16 +405,19 @@ export async function handleMeetingConfirmation(
       await updateSDRProspecto(prospecto['id'] as string, { status: 'dormant' }, client)
     } else if (intencion === 'declined') {
       const composed = compose('meeting_proposed', 'declined', ctxForTemplate)
-      await sender.enviarTexto(msg.from, composed?.text ?? 'Entiendo, no hay problema.')
+      respuestaAlProspecto = composed?.text ?? 'Entiendo, no hay problema.'
+      await sender.enviarTexto(msg.from, respuestaAlProspecto)
       actionTaken = 'graceful_exit'
       await updateSDRProspecto(prospecto['id'] as string, { status: 'descartado' }, client)
     } else if (intencion === 'will_book_later') {
       const composed = compose('meeting_proposed', 'will_book_later', ctxForTemplate)
-      await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto, quedo a la espera!')
+      respuestaAlProspecto = composed?.text ?? '¡Perfecto, quedo a la espera!'
+      await sender.enviarTexto(msg.from, respuestaAlProspecto)
       actionTaken = 'meeting_pending'
     } else if (intencion === 'meeting_waiting') {
       const composed = compose('meeting_proposed', 'meeting_waiting', ctxForTemplate)
-      await sender.enviarTexto(msg.from, composed?.text ?? '¡Perfecto! Un miembro del equipo se te une enseguida.')
+      respuestaAlProspecto = composed?.text ?? '¡Perfecto! Un miembro del equipo se te une enseguida.'
+      await sender.enviarTexto(msg.from, respuestaAlProspecto)
       // 'meeting_confirmed' is the legal action_taken value matching the FSM
       // landing state (context.ts absorbs meeting_waiting -> meeting_confirmed).
       // Avoids introducing a new CHECK constraint value (FIX-7 lesson).
@@ -414,11 +427,29 @@ export async function handleMeetingConfirmation(
       const bookingUrl = process.env['CALCOM_BOOKING_URL'] ?? process.env['DEMO_BOOKING_URL']
       const prospectoId = prospecto['id'] as string
       const urlWithParam = bookingUrl ? `${bookingUrl}?prospecto_id=${encodeURIComponent(prospectoId)}` : ''
-      const followUp = urlWithParam
+      respuestaAlProspecto = urlWithParam
         ? `No estoy seguro de haberte entendido. Si quieres agendar la demostración, puedes elegir el horario directamente aquí: ${urlWithParam} ⏰`
         : '¿Cuándo tienes 30 minutos disponibles? Dime el día y la hora que mejor te quede.'
-      await sender.enviarTexto(msg.from, followUp)
+      await sender.enviarTexto(msg.from, respuestaAlProspecto)
     }
+
+    // Persist the bot's own reply as tipo='outbound' — best-effort (never
+    // breaks the flow), matching the same content that was actually sent so
+    // PR5's fromMe echo dedup (exact content match) recognizes it as our own
+    // send instead of logging it as a founder manual reply.
+    await safePersist(() => saveSDRInteraccion({
+      prospecto_id: prospecto['id'],
+      phone: msg.from,
+      turno: (prospecto['turns_total'] as number) + 1,
+      tipo: 'outbound',
+      contenido: respuestaAlProspecto,
+      action_taken: null,
+      langfuse_trace_id: traceId,
+    }, client), {
+      trace,
+      eventName: 'sdr_outbound_interaccion_save_failed',
+      meta: { prospecto_id: prospecto['id'], path: 'meeting_confirmation' },
+    })
 
     // SDR funnel scoring: convert handler-level actionTaken → FSM-equivalent
     // terminal state and emit score. Only fires when the prospect actually

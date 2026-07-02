@@ -253,4 +253,39 @@ describe('handleMeetingConfirmation', () => {
     const row = interactionCall![0] as { action_taken: string }
     expect(row.action_taken).toBe('brochure_sent')
   })
+
+  // Real-prod misattribution bug (phone 573108059563): the bot's own replies
+  // in this flow were never persisted with tipo='outbound', so Wasagro's side
+  // of the conversation was missing from the founder-crm thread entirely.
+  it('persists the bot reply as tipo=outbound with the SAME text that was sent', async () => {
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue({
+      ...prospectoBase,
+      status: 'piloto_propuesto',
+      turns_total: 4,
+    })
+
+    const llmConBrochure = {
+      ...mockLLM,
+      clasificarIntencionSDR: vi.fn().mockResolvedValue('wants_brochure'),
+    } as any
+
+    const wantsBrochureMsg: NormalizedMessage = {
+      ...mockMsg,
+      texto: 'Prefiero leerlo primero, mandame el brochure',
+    }
+
+    await handleMeetingConfirmation(wantsBrochureMsg, 'msg-1', 'trace-1', mockSender, llmConBrochure)
+
+    const sentText = mockSender.enviarTexto.mock.calls.find((call) => call[0] === mockMsg.from)?.[1]
+    expect(sentText).toBeDefined()
+
+    const outboundCall = vi.mocked(queries.saveSDRInteraccion).mock.calls.find(
+      (call) => (call[0] as Record<string, unknown>)['tipo'] === 'outbound',
+    )
+    expect(outboundCall, 'no outbound row was persisted').toBeDefined()
+    const outboundInsert = outboundCall![0] as Record<string, unknown>
+    expect(outboundInsert['contenido']).toBe(sentText)
+    expect(outboundInsert['prospecto_id']).toBe(prospectoBase.id)
+    expect(outboundInsert['action_taken']).toBeNull()
+  })
 })
