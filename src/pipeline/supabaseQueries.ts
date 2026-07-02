@@ -799,38 +799,21 @@ export async function getConversacionesList(client: SupabaseClient = defaultClie
   return (data ?? []) as Array<Record<string, unknown>>
 }
 
-// Dedup window for the founder-crm thread merge (fix/founder-crm-thread-direction).
+// Founder-crm conversation thread assembly.
 //
 // Every inbound WhatsApp message on the SDR branch is logged to BOTH tables:
-// `mensajes_entrada` (webhook, `registrarMensaje`, unconditional — runs before
-// any routing decision) AND `sdr_interacciones` (tipo='inbound', written by
-// routeSDRNode/handleAudioInbound/HandoffGateHandler, but wrapped in
-// `safePersist`/`runPostPauseSideEffect` best-effort helpers that can silently
-// swallow a write failure). Because the sdr_interacciones write is NOT
-// guaranteed, sdr_interacciones cannot be trusted as the single source of
-// truth — an inbound could, in a rare failure case, land ONLY in
-// mensajes_entrada. We therefore keep the merge and dedup instead of dropping
-// mensajes_entrada outright.
-const THREAD_DEDUP_WINDOW_MS = 5000
-
-function isDuplicateInboundRow(
-  mensaje: Record<string, unknown>,
-  interaccion: Record<string, unknown>,
-): boolean {
-  const mensajeContent = String(mensaje['contenido_raw'] ?? '').trim()
-  const interaccionContent = String(interaccion['contenido'] ?? '').trim()
-  // mensajes_entrada.contenido_raw is null for SDR audio/image inbound (no STT
-  // in the SDR path — see sdrAgent.ts FIX-3 comment), while sdr_interacciones
-  // logs a '[audio]' placeholder for the same event. Treat an empty mensaje
-  // content as a content match too, so that pair still dedups on the time
-  // window alone rather than showing up twice.
-  const contentMatches = mensajeContent.length === 0 || mensajeContent === interaccionContent
-  if (!contentMatches) return false
-
-  const mensajeTime = new Date(mensaje['created_at'] as string).getTime()
-  const interaccionTime = new Date(interaccion['created_at'] as string).getTime()
-  return Math.abs(mensajeTime - interaccionTime) <= THREAD_DEDUP_WINDOW_MS
-}
+// `mensajes_entrada` (webhook, `registrarMensaje`, unconditional, written at
+// receipt) AND `sdr_interacciones` (tipo='inbound'/'meeting_confirmation',
+// best-effort, written seconds later after routing). Reading inbound from both
+// caused duplicates in the thread (the two copies land seconds apart, so a
+// content+time dedup was fragile). Since mensajes_entrada is the reliable
+// superset of inbound, the thread takes INBOUND from mensajes_entrada only and
+// OUTBOUND from sdr_interacciones only. No dedup needed.
+//
+// sdr_interacciones tipos that represent a WASAGRO-side (outbound) message.
+// Inbound prospect messages ('inbound', 'meeting_confirmation') are NOT read
+// from here — they are taken solely from mensajes_entrada (see below).
+const TIPOS_OUTBOUND_HILO = ['outbound', 'founder_override', 'draft_approval']
 
 export async function getConversacionThread(prospectoId: string, client: SupabaseClient = defaultClient): Promise<Array<Record<string, unknown>>> {
   const { data: prospecto, error: prospectoError } = await client
@@ -858,32 +841,32 @@ export async function getConversacionThread(prospectoId: string, client: Supabas
   if (interaccionesError) throw interaccionesError
 
   const interaccionesRows = (interacciones ?? []) as Array<Record<string, unknown>>
-  // Both 'inbound' and 'meeting_confirmation' rows hold the PROSPECT's own
-  // incoming message, so both must dedup against the mensajes_entrada copy of
-  // that same message (otherwise a meeting-waiting message shows up twice).
-  const inboundInteracciones = interaccionesRows.filter(
-    (row) => row['tipo'] === 'inbound' || row['tipo'] === 'meeting_confirmation',
-  )
 
-  // Drop a mensajes_entrada row when a matching sdr_interacciones inbound row
-  // already represents the same message — same phone (implied by the shared
-  // per-prospecto query scope), matching content within a small time window.
-  const dedupedMensajes = ((mensajes ?? []) as Array<Record<string, unknown>>).filter(
-    (mensaje) => !inboundInteracciones.some((interaccion) => isDuplicateInboundRow(mensaje, interaccion)),
-  )
+  // INBOUND (prospect) messages come SOLELY from mensajes_entrada. It is the
+  // reliable, unconditional log written at webhook receipt, and it is a superset
+  // of the sdr_interacciones inbound/meeting_confirmation rows (those writes are
+  // best-effort and can fail). Reading inbound from BOTH tables produced
+  // duplicates (the same message logged seconds apart in each table), so we no
+  // longer merge+dedup — we take inbound from mensajes_entrada only, and take
+  // OUTBOUND (Wasagro-side) rows only from sdr_interacciones.
+  const inbound = ((mensajes ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    ...row,
+    origen: 'mensajes_entrada',
+    direction: 'inbound' as const,
+    // contenido_raw is null for SDR audio/image inbound (no STT in the SDR path).
+    contenido: String(row['contenido_raw'] ?? '').trim() || '[audio o imagen]',
+  }))
 
-  const thread: Array<Record<string, unknown>> = [
-    ...dedupedMensajes.map((row) => ({ ...row, origen: 'mensajes_entrada', direction: 'inbound' as const })),
-    ...interaccionesRows.map((row) => ({
+  const outbound = interaccionesRows
+    .filter((row) => TIPOS_OUTBOUND_HILO.includes(row['tipo'] as string))
+    .map((row) => ({
       ...row,
       origen: 'sdr_interacciones',
-      direction:
-        row['tipo'] === 'inbound' || row['tipo'] === 'meeting_confirmation'
-          ? ('inbound' as const)
-          : ('outbound' as const),
+      direction: 'outbound' as const,
       isFounder: row['tipo'] === 'founder_override',
-    })),
-  ]
+    }))
+
+  const thread: Array<Record<string, unknown>> = [...inbound, ...outbound]
   thread.sort((a, b) => {
     const aTime = new Date(a['created_at'] as string).getTime()
     const bTime = new Date(b['created_at'] as string).getTime()
