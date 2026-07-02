@@ -870,7 +870,10 @@ export async function getConversacionThread(prospectoId: string, client: Supabas
     ...interaccionesRows.map((row) => ({
       ...row,
       origen: 'sdr_interacciones',
-      direction: row['tipo'] === 'inbound' ? ('inbound' as const) : ('outbound' as const),
+      direction:
+        row['tipo'] === 'inbound' || row['tipo'] === 'meeting_confirmation'
+          ? ('inbound' as const)
+          : ('outbound' as const),
       isFounder: row['tipo'] === 'founder_override',
     })),
   ]

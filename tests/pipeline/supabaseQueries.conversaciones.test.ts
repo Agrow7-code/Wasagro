@@ -127,6 +127,40 @@ describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
       expect(result.find((r) => r['id'] === 'i2')).toMatchObject({ direction: 'outbound', isFounder: true })
     })
 
+    it('tags tipo=meeting_confirmation as inbound — it is the prospect\'s own message during meeting-waiting state', async () => {
+      // Regression test for a real prod misattribution bug (phone
+      // 573108059563): sdrAgent.ts writes tipo='meeting_confirmation' with the
+      // PROSPECT's incoming text while the bot is in the meeting-waiting FSM
+      // sink state (D25). Any tipo !== 'inbound' previously fell through to
+      // 'outbound', rendering the prospect's own message as if Wasagro sent it.
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '573108059563' }, error: null })
+      const mensajesBuilder = queryBuilder({ data: [], error: null })
+      const interaccionesBuilder = queryBuilder({
+        data: [
+          { id: 'i1', prospecto_id: 'p1', tipo: 'meeting_confirmation', contenido: 'hola', created_at: '2026-07-01T10:00:00Z' },
+          {
+            id: 'i2',
+            prospecto_id: 'p1',
+            tipo: 'meeting_confirmation',
+            contenido: 'estamos esperando para la reunion',
+            created_at: '2026-07-01T10:01:00Z',
+          },
+        ],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const result = await getConversacionThread('p1', mock as any)
+
+      expect(result).toHaveLength(2)
+      expect(result.find((r) => r['id'] === 'i1')).toMatchObject({ direction: 'inbound', isFounder: false })
+      expect(result.find((r) => r['id'] === 'i2')).toMatchObject({ direction: 'inbound', isFounder: false })
+    })
+
     it('dedups an inbound message logged to BOTH mensajes_entrada and sdr_interacciones — appears ONCE', async () => {
       const mock = crearSupabaseMock()
       const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
