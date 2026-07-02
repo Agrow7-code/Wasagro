@@ -752,10 +752,12 @@ export async function saveSDRInteraccion(insert: Record<string, unknown>, client
 
 // founder-crm PR5 — outbound-ish interacciones for a prospecto within a recent
 // window, used to detect a `fromMe` Evolution echo of our OWN sends (bot
-// auto-response, panel send, chaser, booking confirmation) so it isn't
-// double-logged as a genuine founder manual reply. `tipo` values per the
+// auto-response, panel send, chaser) so it isn't double-logged as a genuine
+// founder manual reply. NOTE: `meeting_confirmation` is deliberately excluded —
+// those rows hold the PROSPECT's incoming message (inbound), not one of our
+// sends, so they never produce a fromMe echo. `tipo` values per the
 // sdr_interacciones CHECK constraint (migration 027).
-const TIPOS_ECO_SALIENTE = ['outbound', 'founder_override', 'draft_approval', 'meeting_confirmation']
+const TIPOS_ECO_SALIENTE = ['outbound', 'founder_override', 'draft_approval']
 
 export async function getRecentOutboundInteracciones(
   prospectoId: string,
