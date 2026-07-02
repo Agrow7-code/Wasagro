@@ -81,7 +81,7 @@ async function sendBookingReminder(prospecto: Record<string, unknown>, traceId: 
  phone: prospecto['phone'],
  turno: (prospecto['turns_total'] as number),
  tipo: 'outbound',
- contenido: `[Booking reminder 24h enviado]`,
+ contenido: mensaje,
  action_taken: 'booking_reminder_24h',
  langfuse_trace_id: traceId,
  })
@@ -99,7 +99,7 @@ async function sendGenericReengagement(prospecto: Record<string, unknown>, trace
  phone: prospecto['phone'],
  turno: (prospecto['turns_total'] as number),
  tipo: 'outbound',
- contenido: '[HSM sdr_reenganche_24h enviado]',
+ contenido: 'Mensaje de reenganche automático (24h)',
  action_taken: 'chaser_sequence_1',
  langfuse_trace_id: traceId,
  })
