@@ -797,7 +797,22 @@ export async function getConversacionesList(client: SupabaseClient = defaultClie
     .select('id, phone, nombre, empresa, status, handoff_status, handoff_reason, founder_notified_at, ultima_interaccion')
     .order('ultima_interaccion', { ascending: false })
   if (error) throw error
-  return (data ?? []) as Array<Record<string, unknown>>
+  const prospectos = (data ?? []) as Array<Record<string, unknown>>
+  if (prospectos.length === 0) return prospectos
+
+  // Exclude prospectos whose phone is already a `usuario` (a provisioned
+  // client). Those numbers are routed through the field pipeline, not SDR, so
+  // their inbox thread would be incomplete AND showing a client as an active
+  // prospect in the funnel is misleading. One extra query, filtered in code.
+  const phones = prospectos.map((p) => p['phone'] as string)
+  const { data: usuarios, error: usuariosError } = await client
+    .from('usuarios')
+    .select('phone')
+    .in('phone', phones)
+  if (usuariosError) throw usuariosError
+  const phonesCliente = new Set(((usuarios ?? []) as Array<Record<string, unknown>>).map((u) => u['phone'] as string))
+
+  return prospectos.filter((p) => !phonesCliente.has(p['phone'] as string))
 }
 
 // Founder-crm conversation thread assembly.

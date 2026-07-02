@@ -11,6 +11,7 @@ function queryBuilder(result: { data: unknown; error: unknown }) {
   const builder: Record<string, unknown> = {
     select: vi.fn(() => builder),
     eq: vi.fn(() => builder),
+    in: vi.fn(() => builder),
     order: vi.fn(() => builder),
     maybeSingle: vi.fn(() => Promise.resolve(result)),
     then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
@@ -25,26 +26,38 @@ function crearSupabaseMock() {
 
 describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
   describe('getConversacionesList', () => {
-    it('does ONE round-trip against sdr_prospectos, ordered by ultima_interaccion DESC', async () => {
+    it('queries sdr_prospectos ordered by ultima_interaccion DESC, then filters out phones that are already usuarios', async () => {
       const mock = crearSupabaseMock()
-      const builder = queryBuilder({
+      const prospectosBuilder = queryBuilder({
         data: [
           { id: 'p1', phone: '593987654321', nombre: 'Carlos', empresa: null, status: 'en_discovery', handoff_status: 'bot', handoff_reason: null, founder_notified_at: null, ultima_interaccion: '2026-07-01T10:00:00Z' },
+          { id: 'p2', phone: '593987310830', nombre: 'Cliente Ya', empresa: null, status: 'reunion_agendada', handoff_status: 'bot', handoff_reason: null, founder_notified_at: null, ultima_interaccion: '2026-07-01T09:00:00Z' },
         ],
         error: null,
       })
-      mock.from.mockReturnValue(builder)
+      // p2's phone is already a usuario (a provisioned client) → excluded.
+      const usuariosBuilder = queryBuilder({ data: [{ phone: '593987310830' }], error: null })
+      mock.from.mockReturnValueOnce(prospectosBuilder).mockReturnValueOnce(usuariosBuilder)
 
       const result = await getConversacionesList(mock as any)
 
-      expect(mock.from).toHaveBeenCalledTimes(1)
-      expect(mock.from).toHaveBeenCalledWith('sdr_prospectos')
-      expect(builder['select']).toHaveBeenCalledWith(
-        'id, phone, nombre, empresa, status, handoff_status, handoff_reason, founder_notified_at, ultima_interaccion',
-      )
-      expect(builder['order']).toHaveBeenCalledWith('ultima_interaccion', { ascending: false })
+      expect(mock.from).toHaveBeenNthCalledWith(1, 'sdr_prospectos')
+      expect(prospectosBuilder['order']).toHaveBeenCalledWith('ultima_interaccion', { ascending: false })
+      expect(mock.from).toHaveBeenNthCalledWith(2, 'usuarios')
+      expect(usuariosBuilder['in']).toHaveBeenCalledWith('phone', ['593987654321', '593987310830'])
+
       expect(result).toHaveLength(1)
       expect(result[0]).toMatchObject({ id: 'p1' })
+    })
+
+    it('does not query usuarios when there are no prospectos', async () => {
+      const mock = crearSupabaseMock()
+      mock.from.mockReturnValueOnce(queryBuilder({ data: [], error: null }))
+
+      const result = await getConversacionesList(mock as any)
+
+      expect(result).toEqual([])
+      expect(mock.from).toHaveBeenCalledTimes(1)
     })
 
     it('propagates a Supabase error instead of swallowing it', async () => {
