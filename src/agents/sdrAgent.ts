@@ -138,9 +138,18 @@ export async function handleSDRSession(
       llm,
       sender,
       mediaType: msg.tipo,
+      mensajeId,
     }
     if (client) routerCtx.client = client
     if (adapter) routerCtx.adapter = adapter
+    if (msg.tipo === 'audio') {
+      // SDR audio transcription: thread through what handleAudioInbound needs
+      // to resolve the audio bytes for STT (D4), mirroring EventHandler.ts's
+      // field-capture audio path.
+      routerCtx.audioUrl = msg.audioUrl
+      routerCtx.mediaId = msg.mediaId
+      routerCtx.rawPayload = msg.rawPayload
+    }
 
     await routeSDRNode(routerCtx)
 
