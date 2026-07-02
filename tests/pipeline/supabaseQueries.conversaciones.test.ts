@@ -161,6 +161,30 @@ describe('supabaseQueries — conversaciones (T-H2.1, T-H2.2)', () => {
       expect(result.find((r) => r['id'] === 'i2')).toMatchObject({ direction: 'inbound', isFounder: false })
     })
 
+    it('dedups a mensajes_entrada row against a matching meeting_confirmation (both are the same prospect message)', async () => {
+      const mock = crearSupabaseMock()
+      const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
+      const mensajesBuilder = queryBuilder({
+        data: [{ id: 'm1', phone: '593987654321', contenido_raw: 'hola', created_at: '2026-07-01T10:00:00Z' }],
+        error: null,
+      })
+      const interaccionesBuilder = queryBuilder({
+        data: [{ id: 'i1', prospecto_id: 'p1', tipo: 'meeting_confirmation', contenido: 'hola', created_at: '2026-07-01T10:00:02Z' }],
+        error: null,
+      })
+      mock.from
+        .mockReturnValueOnce(prospectoBuilder)
+        .mockReturnValueOnce(mensajesBuilder)
+        .mockReturnValueOnce(interaccionesBuilder)
+
+      const result = await getConversacionThread('p1', mock as any)
+
+      // Same 'hola' within the 5s window: shown ONCE (the mensajes_entrada copy
+      // dropped), kept as the inbound meeting_confirmation row.
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({ id: 'i1', direction: 'inbound' })
+    })
+
     it('dedups an inbound message logged to BOTH mensajes_entrada and sdr_interacciones — appears ONCE', async () => {
       const mock = crearSupabaseMock()
       const prospectoBuilder = queryBuilder({ data: { phone: '593987654321' }, error: null })
