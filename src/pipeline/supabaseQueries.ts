@@ -750,6 +750,35 @@ export async function saveSDRInteraccion(insert: Record<string, unknown>, client
   if (error) throw error
 }
 
+// founder-crm PR5 — outbound-ish interacciones for a prospecto within a recent
+// window, used to detect a `fromMe` Evolution echo of our OWN sends (bot
+// auto-response, panel send, chaser, booking confirmation) so it isn't
+// double-logged as a genuine founder manual reply. `tipo` values per the
+// sdr_interacciones CHECK constraint (migration 027).
+const TIPOS_ECO_SALIENTE = ['outbound', 'founder_override', 'draft_approval', 'meeting_confirmation']
+
+export async function getRecentOutboundInteracciones(
+  prospectoId: string,
+  sinceIso: string,
+  client: SupabaseClient = defaultClient,
+): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await client
+    .from('sdr_interacciones')
+    .select('contenido, tipo, created_at')
+    .eq('prospecto_id', prospectoId)
+    .in('tipo', TIPOS_ECO_SALIENTE)
+    // Exclude rows THIS handler itself wrote for a phone reply — those never
+    // produce a new echo, and matching against them would self-drop a
+    // genuine 2nd identical founder phone reply (R2/R3, founder-crm PR5 fix).
+    // Real API-send echoes (panel founder_override with action_taken=null,
+    // bot outbound, chaser, booking) stay in the dedup source.
+    .neq('action_taken', 'founder_phone_reply')
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as Array<Record<string, unknown>>
+}
+
 // ─── Conversaciones inbox (founder-crm PR2, T-H2.1/T-H2.2) ────────────────
 //
 // Both `founder_notified_at` and `ultima_interaccion` are real, actively

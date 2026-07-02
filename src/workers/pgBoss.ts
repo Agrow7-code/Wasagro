@@ -10,6 +10,7 @@ import { crearSenderWhatsApp } from '../integrations/whatsapp/index.js'
 import { buildFeedbackRecibo } from '../pipeline/feedbackBuilder.js'
 import { normalizarPlaga } from '../pipeline/plagaNormalizer.js'
 import { canonicalPestType } from '../pipeline/handlers/umbralesAlerta.js'
+import { handleFounderManualReply } from '../pipeline/handlers/FounderManualReplyHandler.js'
 
 /** Mask a phone number to last 4 digits for log safety (P5/D31). */
 function maskPhone(phone: string): string {
@@ -339,6 +340,7 @@ export async function initPgBoss(): Promise<PgBoss> {
   await boss.createQueue('enviar-otp-whatsapp')
   await boss.createQueue('procesar-intencion')
   await boss.createQueue('sdr-chaser')
+  await boss.createQueue('founder-manual-reply')
 
   await boss.work('procesar-mensaje', async (jobs) => {
     for (const job of jobs) {
@@ -354,6 +356,25 @@ export async function initPgBoss(): Promise<PgBoss> {
           level: 'ERROR',
           output: { error: String(err), jobId: job.id },
         })
+        throw err
+      }
+    }
+  })
+
+  // founder-crm PR5: fromMe events are enqueued (not handled inline on the
+  // webhook path) to keep the ack fast (CR2). handleFounderManualReply is
+  // best-effort by design and never throws, but the try/catch here is
+  // defense-in-depth so a future change to that contract doesn't silently
+  // kill this worker loop.
+  await boss.work('founder-manual-reply', async (jobs) => {
+    for (const job of jobs) {
+      const { msg, traceId } = job.data as any
+      console.log(`[pg-boss] founder-manual-reply job ${job.id} de ${msg?.from ?? '?'}`)
+      try {
+        await handleFounderManualReply(msg, traceId)
+        console.log(`[pg-boss] founder-manual-reply job ${job.id} completado OK`)
+      } catch (err) {
+        console.error(`[pg-boss] founder-manual-reply job ${job.id} falló: ${String(err)}`)
         throw err
       }
     }
