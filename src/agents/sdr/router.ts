@@ -617,6 +617,18 @@ ESTRICTO:
 // transcription fails or comes back empty, this degrades to the ORIGINAL
 // FIX-3 behavior (synthesized interest + audioAck template) so the flow never
 // breaks (P4).
+//
+// FIX 1 (R4): sends an interim ack BEFORE STT+LLM so the prospect gets a
+// <5s response (P3) instead of silence during transcription. Mirrors
+// EventHandler.ts's field-capture audio path. This is IN ADDITION to the
+// eventual real reply (transcript pipeline reply, or the audioAck fallback)
+// — never a replacement.
+//
+// FIX 2 (R3): sdr_audio_received now fires unconditionally on every audio
+// inbound turn (documented dashboard signal, docs/LANGFUSE-PLAYBOOK.md,
+// audio->close conversion) instead of only on the fallback branch, so
+// successful transcriptions aren't undercounted. sdr_audio_transcribed is an
+// ADDITIONAL signal on the success path only.
 async function handleAudioInbound(
   rctx: SDRRouterContext,
   ctxIn: ConvContext,
@@ -624,6 +636,26 @@ async function handleAudioInbound(
 ): Promise<void> {
   const { traceId, sender, client, mensajeId } = rctx
   const trace = langfuse.trace({ id: traceId })
+
+  // FIX 1 (R4): interim ack, best-effort — a send failure here must never
+  // block transcription.
+  try {
+    await sender.enviarTexto(ctxIn.phone, '✅ Recibí tu audio, dame un momento y te respondo.')
+  } catch (err) {
+    trace.event({
+      name:  'sdr_audio_interim_ack_failed',
+      level: 'WARNING',
+      input: { error: err instanceof Error ? err.message : String(err) },
+    })
+  }
+
+  // FIX 2 (R3): emit the documented signal on every audio turn, regardless
+  // of whether STT below succeeds.
+  trace.event({
+    name:  'sdr_audio_received',
+    level: 'DEFAULT',
+    input: { fsmStateBefore: ctxIn.fsmState, datosConocidos: ctxIn.datosConocidos },
+  })
 
   let transcripcion = ''
   try {
@@ -690,15 +722,8 @@ async function handleAudioInbound(
     source:      'router',
   })
 
-  trace.event({
-    name:  'sdr_audio_received',
-    level: 'DEFAULT',
-    input: {
-      fsmStateBefore: ctxIn.fsmState,
-      fsmStateAfter:  ctx.fsmState,
-      datosConocidos: ctxIn.datosConocidos,
-    },
-  })
+  // FIX 2: sdr_audio_received already fired unconditionally near the top of
+  // handleAudioInbound — no duplicate emission here.
 
   // SEND first, PERSIST after (with tolerance) — same contract as the text
   // path. A failed UPDATE/INSERT must NOT stop the prospect from getting the
@@ -733,13 +758,19 @@ async function handleAudioInbound(
   })
 }
 
-// Resolves the audio bytes/URL for STT — same pattern as EventHandler.ts's
-// field-capture audio path (D8): prefer downloading via Evolution's base64
-// endpoint (the CDN media URL requires Bearer auth Evolution already holds),
-// falling back to the raw audioUrl/mediaId when Evolution creds are missing
-// or the download itself fails. Never throws — a resolution failure just
-// means transcribirAudio gets an empty/best-effort input and the caller's
+// Resolves the audio bytes for STT — same pattern as EventHandler.ts's
+// field-capture audio path (D8): download via Evolution's base64 endpoint
+// (the CDN media URL requires Bearer auth Evolution already holds and is
+// never usable directly — D8: it always 401s). Never throws — a resolution
+// failure just means transcribirAudio gets an empty input and the caller's
 // try/catch degrades to the audioAck fallback (P4).
+//
+// FIX 3 (R3): does NOT fall back to the raw audioUrl/mediaId (the WhatsApp/
+// Evolution CDN URL). D8 established that URL always 401s, so attempting
+// STT on it is doomed. When the Evolution download path is unavailable
+// (missing env/payload) or the download itself fails, this resolves to ''
+// so handleAudioInbound cleanly degrades to the audioAck fallback instead of
+// wasting a guaranteed-to-fail fetch.
 async function resolveSDRAudioInput(rctx: SDRRouterContext): Promise<string | Buffer> {
   const evApiUrl = process.env['EVOLUTION_API_URL']
   const evApiKey = process.env['EVOLUTION_API_KEY']
@@ -758,5 +789,5 @@ async function resolveSDRAudioInput(rctx: SDRRouterContext): Promise<string | Bu
     }
   }
 
-  return rctx.audioUrl ?? rctx.mediaId ?? ''
+  return ''
 }

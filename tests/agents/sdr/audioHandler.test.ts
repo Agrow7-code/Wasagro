@@ -50,6 +50,17 @@ vi.mock('../../../src/integrations/langfuse.js', () => {
   return { langfuse: { trace: () => noopTrace } }
 })
 
+// FIX 4 (WARNING): this suite now indirectly exercises the STT path (SDR
+// audio transcription) via handleAudioInbound. Mock sttService.js so the
+// suite stays hermetic — no real network/DNS calls regardless of ambient
+// DEEPGRAM_API_KEY. Rejecting mirrors the "STT unavailable" case, which
+// degrades to the pre-existing audioAck fallback this suite asserts on.
+vi.mock('../../../src/pipeline/sttService.js', () => ({
+  transcribirAudio: vi.fn(async () => {
+    throw new Error('STT not available in this hermetic test suite')
+  }),
+}))
+
 // ─── SUT and helpers ─────────────────────────────────────────────────────────
 
 import { handleSDRSession } from '../../../src/agents/sdrAgent.js'
@@ -152,9 +163,10 @@ describe('handleSDRSession — audio inbound (FIX-3)', () => {
     expect(llm.extraerDatosSDR).not.toHaveBeenCalled()
     expect(llm.redactarMensajeSDR).not.toHaveBeenCalled()
 
-    // The audioAck template was sent — never the diplomatic apology.
-    expect(sender.enviarTexto).toHaveBeenCalledOnce()
-    const [, text] = sender.enviarTexto.mock.calls[0]!
+    // FIX 1 (R4): the interim ack is sent first, then the audioAck fallback
+    // reply — two sends now, not one.
+    expect(sender.enviarTexto).toHaveBeenCalledTimes(2)
+    const [, text] = sender.enviarTexto.mock.calls[1]!
     expect(text).toMatch(/audio/i)
     expect(text).not.toMatch(DIPLOMATIC_APOLOGY)
 
@@ -186,8 +198,9 @@ describe('handleSDRSession — audio inbound (FIX-3)', () => {
     expect(next.fsmState).toBe('closing')
 
     // Response was sent — content uses audio acknowledgment, never apologizes.
-    expect(sender.enviarTexto).toHaveBeenCalledOnce()
-    const [, text] = sender.enviarTexto.mock.calls[0]!
+    // FIX 1 (R4): interim ack + audioAck fallback reply — two sends.
+    expect(sender.enviarTexto).toHaveBeenCalledTimes(2)
+    const [, text] = sender.enviarTexto.mock.calls[1]!
     expect(text).not.toMatch(DIPLOMATIC_APOLOGY)
   })
 

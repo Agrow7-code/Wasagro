@@ -16,6 +16,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const fakeRedis = new Map<string, string>()
 
+// FIX 2 (R3): captures langfuse trace().event() calls so tests can assert
+// sdr_audio_received fires on every audio turn (success AND fallback).
+const capturedTraceEvents: Array<{ name: string; level?: string; input?: unknown }> = []
+
 vi.mock('../../../src/integrations/redis.js', () => ({
   getRedisClient: () => ({
     get: vi.fn(async (k: string) => fakeRedis.get(k) ?? null),
@@ -45,7 +49,11 @@ vi.mock('../../../src/workers/pgBoss.js', () => ({
 
 vi.mock('../../../src/integrations/langfuse.js', () => {
   const noopGen = { end: () => {} }
-  const noopTrace = { id: 'test-trace', event: () => {}, generation: () => noopGen }
+  const noopTrace = {
+    id: 'test-trace',
+    event: (e: { name: string; level?: string; input?: unknown }) => { capturedTraceEvents.push(e) },
+    generation: () => noopGen,
+  }
   return { langfuse: { trace: () => noopTrace } }
 })
 
@@ -189,11 +197,14 @@ async function seedPitchSentSession(): Promise<void> {
 
 const DIPLOMATIC_APOLOGY = /problemita procesando/i
 const AUDIO_ACK_COPY = /vi que mandaste un audio/i
+// FIX 1 (R4): interim ack copy sent immediately, before STT+LLM.
+const INTERIM_ACK_COPY = /dame un momento y te respondo/i
 
 beforeEach(() => {
   fakeRedis.clear()
   resetClassifierCache()
   vi.clearAllMocks()
+  capturedTraceEvents.length = 0
   process.env['DEMO_BOOKING_URL'] = 'https://cal.example/book'
 })
 
@@ -209,8 +220,14 @@ describe('SDR audio transcription — successful STT routes through the text pip
 
     await handleSDRSession(audioMessage(), 'mid-stt-1', 'trace-stt-1', sender as any, llm, undefined, adapter)
 
-    // transcribirAudio was called with the resolved audio input + traceId.
-    expect(transcribirAudio).toHaveBeenCalledWith('http://media.evolution/aud-stt-1.opus', 'trace-stt-1')
+    // FIX 3 (R3): resolveSDRAudioInput never falls back to the raw CDN
+    // audioUrl (D8 — that URL always 401s). No Evolution creds are set in
+    // this test env, so the download path is unavailable and the resolver
+    // yields '' instead of the doomed CDN URL.
+    expect(transcribirAudio).toHaveBeenCalledWith('', 'trace-stt-1')
+
+    // FIX 1 (R4): the interim ack was sent first, before the final reply.
+    expect(sent[0]).toMatch(INTERIM_ACK_COPY)
 
     // The classifier (real text pipeline) was invoked WITH the transcript —
     // proof the audio content actually reached the classify->extract->FSM path.
@@ -290,5 +307,94 @@ describe('SDR audio transcription — STT failure/empty degrades gracefully', ()
       c => 'contenido_raw' in (c[1] as Record<string, unknown>),
     )
     expect(contenidoRawCalls).toHaveLength(0)
+  })
+
+  // FIX 4 (WARNING): whitespace-only transcript must be treated as empty
+  // (the code already .trim()s before checking) and degrade the same way as
+  // a truly empty transcript.
+  it('transcribirAudio returns a whitespace-only string -> treated as empty, falls back to the canned audioAck', async () => {
+    seedRedisSession('discovery')
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoRow({ sdr_node: 'discovery', pais: null, sistema_actual: null }))
+    vi.mocked(transcribirAudio).mockResolvedValue('   ')
+
+    const llm = makeLlm()
+    const { sender, sent } = makeSender()
+
+    await handleSDRSession(audioMessage(), 'mid-stt-9', 'trace-stt-9', sender as any, llm)
+
+    expect(sent.join('\n')).toMatch(AUDIO_ACK_COPY)
+    const contenidoRawCalls = vi.mocked(queries.actualizarMensaje).mock.calls.filter(
+      c => 'contenido_raw' in (c[1] as Record<string, unknown>),
+    )
+    expect(contenidoRawCalls).toHaveLength(0)
+  })
+})
+
+describe('SDR audio transcription — interim ack sent before STT (FIX 1)', () => {
+  it('sends the interim ack before attempting transcription, in addition to the eventual reply', async () => {
+    await seedPitchSentSession()
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoRow())
+
+    const { adapter } = makeAdapter({ intent: 'advance', confidence: 0.85 })
+    const llm = makeLlm()
+    const { sender, sent } = makeSender()
+
+    vi.mocked(transcribirAudio).mockImplementation(async () => {
+      // By the time STT is invoked, the interim ack must already be in flight.
+      expect(sent).toHaveLength(1)
+      expect(sent[0]).toMatch(INTERIM_ACK_COPY)
+      return TRANSCRIPT
+    })
+
+    await handleSDRSession(audioMessage(), 'mid-stt-10', 'trace-stt-10', sender as any, llm, undefined, adapter)
+
+    // The interim ack augments the flow — the real reply still follows.
+    expect(sent[0]).toMatch(INTERIM_ACK_COPY)
+    expect(sent.length).toBeGreaterThan(1)
+  })
+
+  it('sends the interim ack even on the fallback (STT failure) path, in addition to audioAck', async () => {
+    seedRedisSession('discovery')
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoRow({ sdr_node: 'discovery', pais: null, sistema_actual: null }))
+    vi.mocked(transcribirAudio).mockRejectedValue(new Error('STT_NO_DISPONIBLE'))
+
+    const llm = makeLlm()
+    const { sender, sent } = makeSender()
+
+    await handleSDRSession(audioMessage(), 'mid-stt-11', 'trace-stt-11', sender as any, llm)
+
+    expect(sent[0]).toMatch(INTERIM_ACK_COPY)
+    expect(sent[1]).toMatch(AUDIO_ACK_COPY)
+  })
+})
+
+describe('SDR audio transcription — sdr_audio_received fires on every audio turn (FIX 2)', () => {
+  it('fires on a successful-transcription turn', async () => {
+    await seedPitchSentSession()
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoRow())
+    vi.mocked(transcribirAudio).mockResolvedValue(TRANSCRIPT)
+
+    const { adapter } = makeAdapter({ intent: 'advance', confidence: 0.85 })
+    const llm = makeLlm()
+    const { sender } = makeSender()
+
+    await handleSDRSession(audioMessage(), 'mid-stt-12', 'trace-stt-12', sender as any, llm, undefined, adapter)
+
+    expect(capturedTraceEvents.some(e => e.name === 'sdr_audio_received')).toBe(true)
+    // sdr_audio_transcribed is an ADDITIONAL signal on the success path.
+    expect(capturedTraceEvents.some(e => e.name === 'sdr_audio_transcribed')).toBe(true)
+  })
+
+  it('fires on a fallback (STT failure) turn', async () => {
+    seedRedisSession('discovery')
+    vi.mocked(queries.getSDRProspecto).mockResolvedValue(prospectoRow({ sdr_node: 'discovery', pais: null, sistema_actual: null }))
+    vi.mocked(transcribirAudio).mockRejectedValue(new Error('STT_NO_DISPONIBLE'))
+
+    const llm = makeLlm()
+    const { sender } = makeSender()
+
+    await handleSDRSession(audioMessage(), 'mid-stt-13', 'trace-stt-13', sender as any, llm)
+
+    expect(capturedTraceEvents.some(e => e.name === 'sdr_audio_received')).toBe(true)
   })
 })
