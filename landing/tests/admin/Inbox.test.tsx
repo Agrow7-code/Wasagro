@@ -93,6 +93,31 @@ describe('Inbox (T-H4.1)', () => {
     expect(within(flagged[0]).getByText('Henry Morales')).toBeInTheDocument()
   })
 
+  it('auto-opens the conversation from ?conv= (deep-link from the funnel)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString()
+        if (url.endsWith('/admin/conversaciones')) return jsonResponse(CONVERSACIONES)
+        if (url.includes('/admin/conversaciones/PROSP002/mensajes')) return jsonResponse(THREAD)
+        return jsonResponse([])
+      }),
+    )
+    render(
+      <MemoryRouter initialEntries={['/admin/inbox?conv=PROSP002']}>
+        <Routes>
+          <Route path="/admin/inbox" element={<Inbox />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    // No manual click — the thread for PROSP002 loads from the query param alone.
+    await waitFor(() => {
+      expect(screen.getAllByTestId('thread-item')).toHaveLength(THREAD.length)
+    })
+    expect(screen.getByText('Ya te comunico con el equipo.')).toBeInTheDocument()
+  })
+
   it('clicking a row fetches the thread and renders it chronologically', async () => {
     vi.stubGlobal(
       'fetch',
