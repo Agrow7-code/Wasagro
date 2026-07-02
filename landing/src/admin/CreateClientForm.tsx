@@ -80,7 +80,7 @@ export function CreateClientForm() {
       const created = data as CreateClientResponse
       if (created.ya_existia) {
         setSubmitting(false)
-        setNotice('Este teléfono ya está registrado — no se creó un cliente duplicado.')
+        setNotice('Este teléfono ya está registrado. No se creó un cliente duplicado.')
         return
       }
 

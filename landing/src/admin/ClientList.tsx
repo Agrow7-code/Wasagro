@@ -125,10 +125,10 @@ export function ClientList() {
               >
                 <td style={tdStyle}>{org.nombre}</td>
                 <td style={tdStyle}>{planLabel(org.plan)}</td>
-                <td style={tdStyle}>{org.subscription_status ?? '—'}</td>
+                <td style={tdStyle}>{org.subscription_status ?? 'N/D'}</td>
                 <td style={tdStyle}>{org.fincas_count}</td>
                 <td style={tdStyle}>{org.usuarios_count}</td>
-                <td style={tdStyle}>{org.precio_mensual != null ? `$${org.precio_mensual}` : '—'}</td>
+                <td style={tdStyle}>{org.precio_mensual != null ? `$${org.precio_mensual}` : 'N/D'}</td>
               </tr>
             ))}
           </tbody>

@@ -159,7 +159,7 @@ export function Funnel() {
                       )}
                     </div>
                     <div style={{ fontSize: 12, color: '#9C9080' }}>{row.phone}</div>
-                    <div style={{ fontSize: 11, color: '#9C9080' }}>{row.ultima_interaccion ?? '—'}</div>
+                    <div style={{ fontSize: 11, color: '#9C9080' }}>{row.ultima_interaccion ?? 'N/D'}</div>
                   </button>
                 ))}
                 {rows.length === 0 && (

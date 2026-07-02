@@ -10,7 +10,7 @@ describe('attentionLabel', () => {
 
   it('returns the manual-pause label for any other reason', () => {
     expect(attentionLabel({ handoff_status: 'human_paused', handoff_reason: 'manual' })).toBe(
-      'En pausa — la tomaste vos',
+      'En pausa (la tomaste tú)',
     )
   })
 

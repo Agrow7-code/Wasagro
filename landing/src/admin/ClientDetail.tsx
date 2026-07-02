@@ -155,7 +155,7 @@ export function ClientDetail() {
             <tbody>
               {org.usuarios.map((u) => (
                 <tr key={u.id} style={{ borderBottom: '1px solid #EAE6DC' }}>
-                  <td style={tdStyle}>{u.nombre ?? '—'}</td>
+                  <td style={tdStyle}>{u.nombre ?? 'N/D'}</td>
                   <td style={tdStyle}>{u.rol}</td>
                   <td style={tdStyle}>{u.phone}</td>
                 </tr>
