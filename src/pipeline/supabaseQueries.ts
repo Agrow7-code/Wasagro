@@ -858,7 +858,12 @@ export async function getConversacionThread(prospectoId: string, client: Supabas
   if (interaccionesError) throw interaccionesError
 
   const interaccionesRows = (interacciones ?? []) as Array<Record<string, unknown>>
-  const inboundInteracciones = interaccionesRows.filter((row) => row['tipo'] === 'inbound')
+  // Both 'inbound' and 'meeting_confirmation' rows hold the PROSPECT's own
+  // incoming message, so both must dedup against the mensajes_entrada copy of
+  // that same message (otherwise a meeting-waiting message shows up twice).
+  const inboundInteracciones = interaccionesRows.filter(
+    (row) => row['tipo'] === 'inbound' || row['tipo'] === 'meeting_confirmation',
+  )
 
   // Drop a mensajes_entrada row when a matching sdr_interacciones inbound row
   // already represents the same message — same phone (implied by the shared
