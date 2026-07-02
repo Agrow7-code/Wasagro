@@ -9,6 +9,8 @@ import {
   buildImagenPath,
   subirImagenEvento,
   getSignedUrlEvento,
+  buildMediaPathSDR,
+  subirMediaSDR,
 } from '../../src/integrations/supabaseStorage.js'
 
 describe('buildImagenPath', () => {
@@ -46,6 +48,49 @@ describe('subirImagenEvento', () => {
   it('devuelve null cuando el upload tira excepción (no propaga)', async () => {
     const client = { storage: { from: () => ({ upload: vi.fn().mockRejectedValue(new Error('net')) }) } } as any
     const path = await subirImagenEvento('aGVsbG8=', 'image/jpeg', 'F001', client)
+    expect(path).toBeNull()
+  })
+})
+
+describe('buildMediaPathSDR', () => {
+  it('scoped por sdr/<phone>/ con extensión derivada del mime', () => {
+    expect(buildMediaPathSDR('593987654321', 'image/jpeg', 'abc')).toBe('sdr/593987654321/abc.jpg')
+  })
+
+  it('soporta mimetypes de audio de WhatsApp', () => {
+    expect(buildMediaPathSDR('593987654321', 'audio/ogg', 'abc')).toBe('sdr/593987654321/abc.ogg')
+  })
+
+  it('mime desconocido → extensión .bin', () => {
+    expect(buildMediaPathSDR('593987654321', 'application/zip', 'x')).toBe('sdr/593987654321/x.bin')
+  })
+
+  it('sanea caracteres no seguros del telefono', () => {
+    expect(buildMediaPathSDR('59+3/98', 'image/png', 'x')).toBe('sdr/59_3_98/x.png')
+  })
+
+  it('usa sin-telefono cuando el telefono viene vacío', () => {
+    expect(buildMediaPathSDR('', 'image/png', 'x')).toBe('sdr/sin-telefono/x.png')
+  })
+})
+
+describe('subirMediaSDR', () => {
+  const fakeClient = (uploadResult: unknown) =>
+    ({ storage: { from: () => ({ upload: vi.fn().mockResolvedValue(uploadResult) }) } }) as any
+
+  it('devuelve la ruta del objeto (prefijo sdr/) cuando el upload es exitoso', async () => {
+    const path = await subirMediaSDR('aGVsbG8=', 'image/jpeg', '593987654321', fakeClient({ error: null }))
+    expect(path).toMatch(/^sdr\/593987654321\/.+\.jpg$/)
+  })
+
+  it('devuelve null cuando Storage responde error (no lanza)', async () => {
+    const path = await subirMediaSDR('aGVsbG8=', 'image/jpeg', '593987654321', fakeClient({ error: { message: 'boom' } }))
+    expect(path).toBeNull()
+  })
+
+  it('devuelve null cuando el upload tira excepción (no propaga)', async () => {
+    const client = { storage: { from: () => ({ upload: vi.fn().mockRejectedValue(new Error('net')) }) } } as any
+    const path = await subirMediaSDR('aGVsbG8=', 'image/jpeg', '593987654321', client)
     expect(path).toBeNull()
   })
 })

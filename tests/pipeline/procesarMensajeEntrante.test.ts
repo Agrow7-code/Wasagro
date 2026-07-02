@@ -55,6 +55,10 @@ vi.mock('../../src/pipeline/handlers/HandoffGateHandler.js', () => ({
   handleHandoffGate: vi.fn().mockResolvedValue(false),
 }))
 
+vi.mock('../../src/pipeline/handlers/SDRMediaIngest.js', () => ({
+  ingerirMediaSDR: vi.fn().mockResolvedValue(undefined),
+}))
+
 vi.mock('../../src/pipeline/handlers/EventHandler.js', () => ({
   handleEvento: vi.fn().mockResolvedValue(undefined),
 }))
@@ -76,6 +80,7 @@ import * as sttService from '../../src/pipeline/sttService.js'
 import * as gcal from '../../src/integrations/gcal.js'
 import * as sdrAgent from '../../src/agents/sdrAgent.js'
 import * as handoffGateHandler from '../../src/pipeline/handlers/HandoffGateHandler.js'
+import * as sdrMediaIngest from '../../src/pipeline/handlers/SDRMediaIngest.js'
 import { langfuse } from '../../src/integrations/langfuse.js'
 
 const usuarioActivo = {
@@ -890,5 +895,64 @@ describe('procesarMensajeEntrante — handoff gate wiring', () => {
     await procesarMensajeEntrante(msgFieldPath, 'trace-gate-c')
 
     expect(handoffGateHandler.handleHandoffGate).not.toHaveBeenCalled()
+  })
+})
+
+describe('procesarMensajeEntrante — SDR media ingest wiring', () => {
+  const usuarioActivoLocal = {
+    id: 'usr-1', phone: '593987654321', nombre: 'Carlos', rol: 'agricultor',
+    finca_id: 'F001', org_id: 'ORG001', onboarding_completo: true,
+    consentimiento_datos: true, status: 'activo', email: null,
+  }
+
+  const msgSDRImagen: NormalizedMessage = {
+    wamid: 'wamid.media.001', from: '593900000002', timestamp: new Date(),
+    tipo: 'imagen', rawPayload: { data: { key: {}, message: {} } },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env['FOUNDER_PHONE']
+    vi.mocked(queries.getMensajeByWamid).mockResolvedValue(null)
+    vi.mocked(queries.registrarMensaje).mockResolvedValue('msg-uuid')
+    vi.mocked(queries.actualizarMensaje).mockResolvedValue(undefined)
+    vi.mocked(sdrAgent.handleFounderApproval).mockResolvedValue(false)
+    vi.mocked(sdrAgent.handleMeetingConfirmation).mockResolvedValue(false)
+    vi.mocked(sdrAgent.handleSDRSession).mockResolvedValue(undefined)
+    vi.mocked(handoffGateHandler.handleHandoffGate).mockResolvedValue(false)
+  })
+
+  it('SDR branch (!usuario) con imagen/audio → dispara ingerirMediaSDR', async () => {
+    vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
+    const sender = crearSenderMock()
+    const llm = crearLlmMock()
+    inicializarPipeline(sender, llm)
+
+    await procesarMensajeEntrante(msgSDRImagen, 'trace-media-a')
+
+    expect(sdrMediaIngest.ingerirMediaSDR).toHaveBeenCalledWith(msgSDRImagen, 'msg-uuid', 'trace-media-a')
+  })
+
+  it('REGRESIÓN — teléfono con fila en usuarios (field-capture) NUNCA llama a ingerirMediaSDR', async () => {
+    vi.mocked(queries.getUserByPhone).mockResolvedValue(usuarioActivoLocal)
+    const sender = crearSenderMock()
+    const llm = crearLlmMock()
+    inicializarPipeline(sender, llm)
+
+    const msgFieldPath: NormalizedMessage = { ...msgSDRImagen, from: '593987654321' }
+    await procesarMensajeEntrante(msgFieldPath, 'trace-media-b')
+
+    expect(sdrMediaIngest.ingerirMediaSDR).not.toHaveBeenCalled()
+  })
+
+  it('un fallo dentro de ingerirMediaSDR (rejected promise) NO rompe el pipeline SDR', async () => {
+    vi.mocked(queries.getUserByPhone).mockResolvedValue(null)
+    vi.mocked(sdrMediaIngest.ingerirMediaSDR).mockRejectedValue(new Error('should never happen, but must not break the pipeline'))
+    const sender = crearSenderMock()
+    const llm = crearLlmMock()
+    inicializarPipeline(sender, llm)
+
+    await expect(procesarMensajeEntrante(msgSDRImagen, 'trace-media-c')).resolves.toBeUndefined()
+    expect(sdrAgent.handleSDRSession).toHaveBeenCalledOnce()
   })
 })

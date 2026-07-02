@@ -59,6 +59,18 @@ const THREAD = [
   { id: 'M2', created_at: '2026-07-01T10:00:00Z', origen: 'mensajes_entrada', direction: 'inbound', contenido_raw: 'Gracias' },
 ]
 
+const THREAD_CON_MEDIA = [
+  {
+    id: 'M1', created_at: '2026-07-01T09:58:00Z', origen: 'mensajes_entrada', direction: 'inbound',
+    contenido: '[audio o imagen]', media_url: 'https://signed.example/foto.jpg', media_tipo: 'image',
+  },
+  {
+    id: 'M2', created_at: '2026-07-01T09:59:00Z', origen: 'mensajes_entrada', direction: 'inbound',
+    contenido: '[audio o imagen]', media_url: 'https://signed.example/nota.ogg', media_tipo: 'audio',
+  },
+  { id: 'M3', created_at: '2026-07-01T10:00:00Z', origen: 'mensajes_entrada', direction: 'inbound', contenido_raw: 'Gracias' },
+]
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status })
 }
@@ -302,5 +314,43 @@ describe('Inbox (T-H4.1)', () => {
       expect(screen.getByText('Internal server error')).toBeInTheDocument()
     })
     expect(input.value).toBe('Hola, ya reviso tu caso')
+  })
+
+  it('thread items with media_url render the actual media instead of the text placeholder', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString()
+        if (url.endsWith('/admin/conversaciones')) return jsonResponse(CONVERSACIONES)
+        if (url.endsWith('/admin/conversaciones/PROSP001/mensajes')) return jsonResponse(THREAD_CON_MEDIA)
+        return jsonResponse([])
+      }),
+    )
+    renderInbox()
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('conv-row')).toHaveLength(4)
+    })
+    fireEvent.click(screen.getByText('Henry Morales'))
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('thread-item')).toHaveLength(3)
+    })
+    const items = screen.getAllByTestId('thread-item')
+
+    // M1: image → <img>
+    const img = within(items[0]).getByRole('img')
+    expect(img).toHaveAttribute('src', 'https://signed.example/foto.jpg')
+
+    // M2: audio → <audio controls>
+    const audio = items[1].querySelector('audio')
+    expect(audio).not.toBeNull()
+    expect(audio).toHaveAttribute('src', 'https://signed.example/nota.ogg')
+    expect(audio).toHaveAttribute('controls')
+
+    // M3: plain text, unchanged
+    expect(within(items[2]).getByText('Gracias')).toBeInTheDocument()
+    expect(items[2].querySelector('img')).toBeNull()
+    expect(items[2].querySelector('audio')).toBeNull()
   })
 })

@@ -26,6 +26,8 @@ interface ThreadItem {
   isFounder?: boolean
   contenido?: string
   contenido_raw?: string
+  media_url?: string
+  media_tipo?: 'audio' | 'image'
 }
 
 // Both source tables land in the same thread. `sdr_interacciones` uses
@@ -243,7 +245,13 @@ export function Inbox() {
                         <div data-testid="thread-sender" style={{ fontSize: 11, fontWeight: 700, color: isInbound ? '#9C9080' : '#1B3D24' }}>
                           {senderLabel(item)}
                         </div>
-                        <div style={{ fontSize: 13, color: '#1B3D24' }}>{threadText(item)}</div>
+                        {item.media_url && item.media_tipo === 'image' && (
+                          <img src={item.media_url} alt="Imagen enviada por el prospecto" style={{ maxWidth: 220, maxHeight: 220, borderRadius: 6, display: 'block', marginTop: 4 }} />
+                        )}
+                        {item.media_url && item.media_tipo === 'audio' && (
+                          <audio controls src={item.media_url} style={{ marginTop: 4, maxWidth: 220 }} />
+                        )}
+                        {!item.media_url && <div style={{ fontSize: 13, color: '#1B3D24' }}>{threadText(item)}</div>}
                         <div style={{ fontSize: 11, color: '#9C9080' }}>{item.created_at}</div>
                       </div>
                     )
